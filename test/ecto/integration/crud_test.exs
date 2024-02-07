@@ -6,6 +6,7 @@ defmodule Ecto.Integration.CrudTest do
   alias EctoFoundationDB.Schemas.Account
   alias EctoFoundationDB.Schemas.Product
   alias Ecto.Adapters.FoundationDB
+  alias Ecto.Adapters.FoundationDB.Transaction
 
   import Ecto.Query
 
@@ -77,9 +78,26 @@ defmodule Ecto.Integration.CrudTest do
       }
 
       {2, nil} = TestRepo.insert_all(Account, [account2, account1], prefix: tenant)
-      [%{name: "Jane"<>_},%{name: "John"<>_}] =
-        (from Account, order_by: :name)
+
+      [%{name: "Jane" <> _}, %{name: "John" <> _}] =
+        from(Account, order_by: :name)
         |> TestRepo.all(prefix: tenant)
+    end
+
+    test "tx_insert", context do
+      tenant = context[:tenant]
+      user = Transaction.commit(tenant,
+            fn ->
+              {:ok, jesse} = %User{name: "Jesse"}
+              |> TestRepo.insert()
+
+              {:ok, _} = %User{name: "Sarah"}
+              |> TestRepo.insert()
+
+              TestRepo.get(User, jesse.id)
+            end
+      )
+      assert user.name == "Jesse"
     end
   end
 end

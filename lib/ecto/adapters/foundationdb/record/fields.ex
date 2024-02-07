@@ -10,7 +10,7 @@ defmodule Ecto.Adapters.FoundationDB.Record.Fields do
   end
 
   def strip_field_names_for_ecto(entries) do
-      Enum.map(entries, fn fields -> Enum.map(fields, fn {_, v} -> v end) end)
+    Enum.map(entries, fn fields -> Enum.map(fields, fn {_, v} -> v end) end)
   end
 
   def get_pk_field!(schema) do

@@ -2,7 +2,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   @behaviour Ecto.Adapter.Schema
 
   alias Ecto.Adapters.FoundationDB.Record.Fields
-  alias Ecto.Adapters.FoundationDB.Record.Transaction
+  alias Ecto.Adapters.FoundationDB.Record.Tx
   alias Ecto.Adapters.FoundationDB.Schema
 
   @impl Ecto.Adapter.Schema
@@ -24,38 +24,40 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       ) do
     context = Schema.get_context!(schema)
 
-    if is_nil(context[:usetenant]) and not is_nil(tenant) do
-      raise """
-      FoundatioDB Adapter is expecting the struct for schema \
-      #{inspect(schema)} to specify no tentant in the prefix metadata, \
-      but a non-nil prefix was provided.
+    case Tx.is_safe?(:struct, tenant, context[:usetenant]) do
+      {false, :unused_tenent} ->
+        raise """
+        FoundatioDB Adapter is expecting the struct for schema \
+        #{inspect(schema)} to specify no tentant in the prefix metadata, \
+        but a non-nil prefix was provided.
 
-      Add `usetenant: true` to your schema's `@schema_context`.
+        Add `usetenant: true` to your schema's `@schema_context`.
 
-      Also be sure to remove the option `prefix: tenant` on the call to your Repo.
+        Also be sure to remove the option `prefix: tenant` on the call to your Repo.
 
-      Alternatively, remove the call to \
-      `Ecto.Adapters.FoundationDB.usetenant(struct, tenant)` before inserting.
-      """
-    end
+        Alternatively, remove the call to \
+        `Ecto.Adapters.FoundationDB.usetenant(struct, tenant)` before inserting.
+        """
 
-    if context[:usetenant] and is_nil(tenant) do
-      raise """
-      FoundationDB Adapter is expecting the struct for schema \
-      #{inspect(schema)} to include a tenant in the prefix metadata, \
-      but a nil prefix was provided.
+      {false, :missing_tenant} ->
+        raise """
+        FoundationDB Adapter is expecting the struct for schema \
+        #{inspect(schema)} to include a tenant in the prefix metadata, \
+        but a nil prefix was provided.
 
-      Call `Ecto.Adapters.FoundationDB.usetenant(struxt, tenant)` before inserting.
+        Call `Ecto.Adapters.FoundationDB.usetenant(struxt, tenant)` before inserting.
 
-      Or use the option `prefix: tenant` on the call to your Repo.
+        Or use the option `prefix: tenant` on the call to your Repo.
 
-      Alternatively, remove `usetenant: true` from your schema's \
-      `@schema_context` if you do not want to use a tenant for this schema.
-      """
-    end
+        Alternatively, remove `usetenant: true` from your schema's \
+        `@schema_context` if you do not want to use a tenant for this schema.
+        """
 
-    if is_nil(tenant) do
-      raise "Non-tenant transactions are not yet implemented."
+        {false, :tenant_only}
+        raise "Non-tenant transactions are not yet implemented."
+
+      _ ->
+        :ok
     end
 
     # %{pid: #PID<0.283.0>, opts: [repo: Ecto.Integration.TestRepo, telemetry_prefix: [:ecto, :integration, :test_repo], otp_app: :ecto_foundationdb, timeout: 15000, pool_size: 10], cache: #Reference<0.1764422960.586285060.230287>, stacktrace: nil, repo: Ecto.Integration.TestRepo, telemetry: {Ecto.Integration.TestRepo, :debug, [:ecto, :integration, :test_repo, :query]}, adapter: Ecto.Adapters.FoundationDB}
@@ -72,7 +74,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         {pk, fields}
       end)
 
-    :ok = Transaction.insert_all(tenant, adapter_opts, source, entries)
+    :ok = Tx.insert_all(tenant, adapter_opts, source, entries)
     {length(entries), nil}
   end
 

@@ -2,8 +2,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   @behaviour Ecto.Adapter.Queryable
 
   alias Ecto.Adapters.FoundationDB.Record.Ordering
-  alias Ecto.Adapters.FoundationDB.Record.Transaction
   alias Ecto.Adapters.FoundationDB.Record.Fields
+  alias Ecto.Adapters.FoundationDB.Record.Tx
   alias Ecto.Adapters.FoundationDB.Schema
 
   @impl Ecto.Adapter.Queryable
@@ -18,33 +18,35 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       ) do
     context = Schema.get_context!(schema)
 
-    if context[:usetenant] and is_nil(tenant) do
-      raise """
-      FoundationDB Adapter is expecting the query for schema \
-      #{inspect(schema)} to include a tenant in the prefix metadata, \
-      but a nil prefix was provided.
+    case Tx.is_safe?(:query, tenant, context[:usetenant]) do
+      {false, :unused_tenent} ->
+        raise """
+        FoundatioDB Adapter is expecting the query for schema \
+        #{inspect(schema)} to specify no tentant in the prefix metadata, \
+        but a non-nil prefix was provided.
 
-      Use `prefix: tenant` in your query.
+        Add `usetenant: true` to your schema's `@schema_context`.
 
-      Alternatively, remove `usetenant: true` from your schema's \
-      `@schema_context` if you do not want to use a tenant for this schema.
-      """
-    end
+        Alternatively, remove the `prefix: tenant` from your query.
+        """
 
-    if is_nil(context[:usetenant] and not is_nil(tenant)) do
-      raise """
-      FoundatioDB Adapter is expecting the query for schema \
-      #{inspect(schema)} to specify no tentant in the prefix metadata, \
-      but a non-nil prefix was provided.
+      {false, :missing_tenant} ->
+        raise """
+        FoundationDB Adapter is expecting the query for schema \
+        #{inspect(schema)} to include a tenant in the prefix metadata, \
+        but a nil prefix was provided.
 
-      Add `usetenant: true` to your schema's `@schema_context`.
+        Use `prefix: tenant` in your query.
 
-      Alternatively, remove the `prefix: tenant` from your query.
-      """
-    end
+        Alternatively, remove `usetenant: true` from your schema's \
+        `@schema_context` if you do not want to use a tenant for this schema.
+        """
 
-    if is_nil(tenant) do
-      raise "Non-tenant query transactions are not yet implemented."
+        {false, :tenant_only}
+        raise "Non-tenant transactions are not yet implemented."
+
+      _ ->
+        :ok
     end
 
     ordering_fn = Ordering.get_ordering_fn(order_bys)
@@ -65,7 +67,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       ) do
     result =
       tenant
-      |> Transaction.all(adapter_opts, query, params)
+      |> Tx.all(adapter_opts, query, params)
       |> ordering_fn.()
       |> limit_fn.()
       |> Fields.strip_field_names_for_ecto()
