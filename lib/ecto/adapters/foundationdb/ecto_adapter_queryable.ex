@@ -3,6 +3,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   alias Ecto.Adapters.FoundationDB.Record.Ordering
   alias Ecto.Adapters.FoundationDB.Record.Transaction
+  alias Ecto.Adapters.FoundationDB.Record.Fields
+  alias Ecto.Adapters.FoundationDB.Schema
 
   @impl Ecto.Adapter.Queryable
   def prepare(
@@ -14,7 +16,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
           limit: limit
         } = query
       ) do
-    context = get_context!(schema)
+    context = Schema.get_context!(schema)
 
     if context[:usetenant] and is_nil(tenant) do
       raise """
@@ -63,9 +65,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       ) do
     result =
       tenant
-      |> :erlfdb.transactional(Transaction.all(adapter_opts, query, params))
+      |> Transaction.all(adapter_opts, query, params)
       |> ordering_fn.()
       |> limit_fn.()
+      |> Fields.strip_field_names_for_ecto()
 
     {length(result), result}
   end
@@ -78,9 +81,4 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   # Extract limit from an `Ecto.Query`
   defp get_limit(nil), do: nil
   defp get_limit(%Ecto.Query.QueryExpr{expr: limit}), do: limit
-
-  defp get_context!(schema) do
-    %{__meta__: %{context: context}} = Kernel.struct!(schema)
-    context
-  end
 end

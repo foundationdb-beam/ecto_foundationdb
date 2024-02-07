@@ -3,6 +3,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   alias Ecto.Adapters.FoundationDB.Record.Fields
   alias Ecto.Adapters.FoundationDB.Record.Transaction
+  alias Ecto.Adapters.FoundationDB.Schema
 
   @impl Ecto.Adapter.Schema
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
@@ -12,27 +13,32 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   @impl Ecto.Adapter.Schema
   def insert_all(
-        _adapter_meta,
-        _schema_meta,
+        _adapter_meta = %{opts: adapter_opts},
+        _schema_meta = %{prefix: tenant, source: source, schema: schema},
         _header,
-        _unsure,
+        entries,
         _on_conflict,
         _returning,
         _placeholders,
         _options
       ) do
-    raise "FoundationmDB Adapter insert_all not implemented"
-  end
+    context = Schema.get_context!(schema)
 
-  @impl Ecto.Adapter.Schema
-  def insert(
-        _adapter_meta = %{opts: adapter_opts},
-        _schema_meta = %{context: context, prefix: tenant, source: source, schema: schema},
-        fields,
-        _on_conflict,
-        _returning,
-        _options
-      ) do
+    if is_nil(context[:usetenant]) and not is_nil(tenant) do
+      raise """
+      FoundatioDB Adapter is expecting the struct for schema \
+      #{inspect(schema)} to specify no tentant in the prefix metadata, \
+      but a non-nil prefix was provided.
+
+      Add `usetenant: true` to your schema's `@schema_context`.
+
+      Also be sure to remove the option `prefix: tenant` on the call to your Repo.
+
+      Alternatively, remove the call to \
+      `Ecto.Adapters.FoundationDB.usetenant(struct, tenant)` before inserting.
+      """
+    end
+
     if context[:usetenant] and is_nil(tenant) do
       raise """
       FoundationDB Adapter is expecting the struct for schema \
@@ -41,21 +47,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
       Call `Ecto.Adapters.FoundationDB.usetenant(struxt, tenant)` before inserting.
 
+      Or use the option `prefix: tenant` on the call to your Repo.
+
       Alternatively, remove `usetenant: true` from your schema's \
       `@schema_context` if you do not want to use a tenant for this schema.
-      """
-    end
-
-    if is_nil(context[:usetenant] and not is_nil(tenant)) do
-      raise """
-      FoundatioDB Adapter is expecting the struct for schema \
-      #{inspect(schema)} to specify no tentant in the prefix metadata, \
-      but a non-nil prefix was provided.
-
-      Add `usetenant: true` to your schema's `@schema_context`.
-
-      Alternatively, remove the call to \
-      `Ecto.Adapters.FoundationDB.usetenant(struct, tenant)` before inserting.
       """
     end
 
@@ -70,10 +65,29 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     # []
     # [cast_params: ["John", ~N[2024-02-05 23:48:10], ~N[2024-02-05 23:48:10], "96aaa43b-370f-4ae4-bb18-0120a46d9dab"]]
 
-    pk_field = Fields.get_pk_field!(schema)
-    pk = fields[pk_field]
+    entries =
+      Enum.map(entries, fn fields ->
+        pk_field = Fields.get_pk_field!(schema)
+        pk = fields[pk_field]
+        {pk, fields}
+      end)
 
-    :ok = :erlfdb.transactional(tenant, Transaction.insert(adapter_opts, source, pk_field, pk, fields))
+    :ok = Transaction.insert_all(tenant, adapter_opts, source, entries)
+    {length(entries), nil}
+  end
+
+  @impl Ecto.Adapter.Schema
+  def insert(
+        adapter_meta,
+        schema_meta,
+        fields,
+        on_conflict,
+        returning,
+        options
+      ) do
+    {1, nil} =
+      insert_all(adapter_meta, schema_meta, nil, [fields], on_conflict, returning, [], options)
+
     {:ok, []}
   end
 
