@@ -60,8 +60,24 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   end
 
   @impl Ecto.Adapter.Schema
-  def update(adapter_meta, schema_meta, fields, filters, returning, options) do
-    raise "FoundationDB Adapter update #{inspect(adapter_meta)} #{inspect(schema_meta)} #{inspect(fields)} #{inspect(filters)} #{inspect(returning)} #{inspect(options)}"
+  def update(
+        _adapter_meta = %{opts: adapter_opts},
+        _schema_meta = %{prefix: tenant, source: source, schema: schema},
+        fields,
+        filters,
+        _returning,
+        _options
+      ) do
+    # %{pid: #PID<0.265.0>, opts: [repo: Ecto.Integration.TestRepo, telemetry_prefix: [:ecto, :integration, :test_repo], otp_app: :ecto_foundationdb, timeout: 15000, pool_size: 10, key_delimiter: "/"], cache: #Reference<0.3881531936.1902772227.59515>, stacktrace: nil, repo: Ecto.Integration.TestRepo, telemetry: {Ecto.Integration.TestRepo, :debug, [:ecto, :integration, :test_repo, :query]}, adapter: Ecto.Adapters.FoundationDB}
+    # %{context: [usetenant: true], prefix: {:erlfdb_tenant, #Reference<0.3881531936.1902772226.61348>}, source: "users", schema: EctoFoundationDB.Schemas.User, autogenerate_id: {:id, :id, :binary_id}}
+    # [name: "Bob", updated_at: ~N[2024-02-10 16:31:38]]
+    # [id: "b349bd38-2261-4570-8001-768b2eb381b2"]
+    # []
+    # [cast_params: ["Bob", ~N[2024-02-10 16:31:38], "b349bd38-2261-4570-8001-768b2eb381b2"]]
+    assert_tenancy!(schema, tenant)
+    pk_field = Fields.get_pk_field!(schema)
+    pk = filters[pk_field]
+    :ok = Tx.update(tenant, adapter_opts, source, pk, fields)
   end
 
   @impl Ecto.Adapter.Schema
@@ -80,9 +96,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     assert_tenancy!(schema, tenant)
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
-    :ok = Tx.delete(tenant, adapter_opts, source, pk)
-    # {:ok, fields} | {:invalid, constraints} | {:error, :stale}
-    {:ok, []}
+
+    case Tx.delete_pks(tenant, adapter_opts, source, [pk]) do
+      1 ->
+        {:ok, []}
+
+      0 ->
+        {:error, :stale}
+    end
   end
 
   defp assert_tenancy!(schema, tenant) do

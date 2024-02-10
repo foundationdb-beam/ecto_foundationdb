@@ -90,57 +90,33 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
         {key, value}
       end)
 
-    db_or_tenant
-    |> transactional(fn tx ->
-      futures =
-        entries
-        |> Enum.map(fn {key, value} ->
-          fut = :erlfdb.get(tx, key)
-          {fut, {key, value}}
-        end)
-
-      futures_map = Enum.into(futures, %{})
-      futures = Map.keys(futures_map)
-
-      num_ins =
-        fold_futures(futures, futures_map, 0, fn
-          :not_found, {key, value}, acc ->
+    get_stage = fn tx, {key, _value} -> :erlfdb.get(tx, key) end
+    set_stage = fn
+          tx, :not_found, {key, value}, acc ->
             :erlfdb.set(tx, key, value)
             acc + 1
 
-          _, {key, _}, _acc ->
+          _tx, _result, {key, _}, _acc ->
             raise Unsupported, "Key exists: #{key}"
-        end)
+        end
 
-      num_ins
-    end)
+    transactional(db_or_tenant, fn tx -> pipeline(tx, entries, get_stage, 0, set_stage) end)
   end
 
-  defp fold_futures([], _futures_map, acc, _fun) do
-    acc
-  end
-  defp fold_futures(futures, futures_map, acc, fun) do
-    fut = :erlfdb.wait_for_any(futures)
+  def delete_pks(db_or_tenant, adapter_opts, source, pks) do
+    keys = for pk <- pks, do: Pack.to_fdb_key(adapter_opts, source, pk)
 
-    case Map.get(futures_map, fut, nil) do
-      nil ->
-        :erlang.error(:badarg)
+    get_stage = fn tx, key -> :erlfdb.get(tx, key) end
+    clear_stage = fn
+          _tx, :not_found, _key, acc ->
+            acc
 
-      map_entry ->
-        futures = futures -- [fut]
-        acc = fun.(:erlfdb.get(fut), map_entry, acc)
-        fold_futures(futures, futures_map, acc, fun)
-    end
-  end
+          tx, _fut_value, key, acc ->
+            :erlfdb.clear(tx, key)
+            acc + 1
+        end
 
-  def delete(db_or_tenant, adapter_opts, source, pk) do
-    key = Pack.to_fdb_key(adapter_opts, source, pk)
-
-    db_or_tenant
-    |> transactional(fn tx ->
-      :erlfdb.clear(tx, key)
-      :ok
-    end)
+    transactional(db_or_tenant, fn tx -> pipeline(tx, keys, get_stage, 0, clear_stage) end)
   end
 
   # Single where clause expression matching on the primary key
@@ -251,5 +227,57 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
         |> Pack.from_fdb_value()
         |> Fields.arrange(field_names)
     end)
+  end
+
+  @doc """
+  A multi-stage pipeline to be executed within a transaction where
+  the first stage induces a list of futures, and the second stage
+  handles those futures as they arrive (using :erlfdb.wait_for_any/1).
+
+  tx: The erlfdb tx
+  input_list: a list of items to be handled by your stages
+  fun_stage_1: a 2-arity function accepting as args (tx, x) where
+  tx is the same erlfdb tx and x is an entry from input_list. This function
+  must return an erlfdb future.
+  acc: Starting accumulator for fun_stage_2
+  fun_stage_2: a 4-arity function acceptiong as aargs (tx, result, x, acc)
+  where tx is the same erlfdb tx, result, is the result of the future from
+  stage_1, x is the corresponding entry in your input_list, and acc is
+  the accumulator. This function returns the updated acc.
+  """
+  defp pipeline(tx, input_list, fun_stage_1, acc, fun_stage_2) do
+      futures_map =
+        input_list
+        |> Enum.map(fn x ->
+          fut = fun_stage_1.(tx, x)
+          {fut, x}
+        end)
+        |> Enum.into(%{})
+
+      result = fold_futures(tx, futures_map, acc, fun_stage_2)
+
+      result
+  end
+
+  defp fold_futures(tx, futures_map, acc, fun) do
+    fold_futures(tx, Map.keys(futures_map), futures_map, acc, fun)
+  end
+
+  defp fold_futures(_tx, [], _futures_map, acc, _fun) do
+    acc
+  end
+
+  defp fold_futures(tx, futures, futures_map, acc, fun) do
+    fut = :erlfdb.wait_for_any(futures)
+
+    case Map.get(futures_map, fut, nil) do
+      nil ->
+        :erlang.error(:badarg)
+
+      map_entry ->
+        futures = futures -- [fut]
+        acc = fun.(tx, :erlfdb.get(fut), map_entry, acc)
+        fold_futures(tx, futures, futures_map, acc, fun)
+    end
   end
 end

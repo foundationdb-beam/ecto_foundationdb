@@ -92,12 +92,12 @@ defmodule Ecto.Integration.CrudTest do
                  other_tenant,
                  fn ->
                    # Specify the equivalent tenant
-                   %User{ user | id: nil }
+                   %User{user | id: nil}
                    |> FoundationDB.usetenant(other_tenant)
                    |> TestRepo.insert()
 
                    # Remove the tenant from the struct, allow the tranction context to take over
-                   %User{ user | id: nil }
+                   %User{user | id: nil}
                    |> FoundationDB.usetenant(nil)
                    |> TestRepo.insert()
 
@@ -229,14 +229,14 @@ defmodule Ecto.Integration.CrudTest do
     end
   end
 
-  #describe "update" do
-  #  test "updates user", context do
-  #    tenant = context[:tenant]
-  #    {:ok, user} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
-  #    changeset = User.changeset(user, %{name: "Bob"})
-  #    {:ok, changed} = TestRepo.update(changeset)
-
-  #    assert changed.name == "Bob"
-  #  end
-  #end
+#  describe "update" do
+#    test "updates user", context do
+#      tenant = context[:tenant]
+#      {:ok, user} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
+#      changeset = User.changeset(user, %{name: "Bob"})
+#      {:ok, changed} = TestRepo.update(changeset)
+#
+#      assert changed.name == "Bob"
+#    end
+#  end
 end
