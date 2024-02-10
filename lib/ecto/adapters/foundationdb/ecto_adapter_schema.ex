@@ -77,7 +77,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     assert_tenancy!(schema, tenant)
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
-    :ok = Tx.update(tenant, adapter_opts, source, pk, fields)
+
+    case Tx.update_pks(tenant, adapter_opts, source, [pk], fields) do
+      1 ->
+        {:ok, []}
+
+      0 ->
+        {:error, :stale}
+    end
   end
 
   @impl Ecto.Adapter.Schema

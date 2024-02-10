@@ -214,6 +214,14 @@ defmodule Ecto.Integration.CrudTest do
       assert TestRepo.get(User, user.id, prefix: tenant) == nil
     end
 
+    test "delete something that doesn't exist", context do
+      tenant = context[:tenant]
+
+      assert_raise(Ecto.StaleEntryError, fn ->
+        TestRepo.delete(%User{id: "doesnotexist"}, prefix: tenant)
+      end)
+    end
+
     test "delete_all users", context do
       tenant = context[:tenant]
       {:ok, _user1} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
@@ -227,16 +235,69 @@ defmodule Ecto.Integration.CrudTest do
         TestRepo.delete_all(User)
       end)
     end
+
+    test "delete fail, missing tenancy" do
+      assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
+        TestRepo.delete(%User{id: "something", name: "George"})
+      end)
+    end
+
+    test "delete fail, unused tenancy", context do
+      assert_raise(IncorrectTenancy, ~r/non-nil prefix was provided/, fn ->
+        TestRepo.delete(%Global{id: "something", name: "failure"}, prefix: context[:tenant])
+      end)
+    end
+
+    test "delete fail, tenancy only" do
+      assert_raise(Unsupported, ~r/Non-tenant transactions/, fn ->
+        TestRepo.delete(%Global{id: "something", name: "failure"})
+      end)
+    end
   end
 
-#  describe "update" do
-#    test "updates user", context do
-#      tenant = context[:tenant]
-#      {:ok, user} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
-#      changeset = User.changeset(user, %{name: "Bob"})
-#      {:ok, changed} = TestRepo.update(changeset)
-#
-#      assert changed.name == "Bob"
-#    end
-#  end
+  describe "update" do
+    test "updates user", context do
+      tenant = context[:tenant]
+      {:ok, user} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
+      changeset = User.changeset(user, %{name: "Bob"})
+      {:ok, changed} = TestRepo.update(changeset)
+
+      assert changed.name == "Bob"
+    end
+
+    test "update fail, dne", context do
+      tenant = context[:tenant]
+
+      assert_raise(Ecto.StaleEntryError, fn ->
+        %User{id: "doesnotexist", name: "George"}
+        |> FoundationDB.usetenant(tenant)
+        |> User.changeset(%{name: "Bob"})
+        |> TestRepo.update()
+      end)
+    end
+
+    test "update fail, missing tenancy" do
+      assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
+        %User{id: "something", name: "George"}
+        |> User.changeset(%{name: "Bob"})
+        |> TestRepo.update()
+      end)
+    end
+
+    test "update fail, unused tenancy", context do
+      assert_raise(IncorrectTenancy, ~r/non-nil prefix was provided/, fn ->
+        %Global{id: "something", name: "failure"}
+        |> Global.changeset(%{name: "update failure"})
+        |> TestRepo.update(prefix: context[:tenant])
+      end)
+    end
+
+    test "update fail, tenancy only" do
+      assert_raise(Unsupported, ~r/Non-tenant transactions/, fn ->
+        %Global{id: "something", name: "failure"}
+        |> Global.changeset(%{name: "update failure"})
+        |> TestRepo.update()
+      end)
+    end
+  end
 end

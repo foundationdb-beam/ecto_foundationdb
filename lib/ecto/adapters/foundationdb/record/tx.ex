@@ -91,30 +91,54 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
       end)
 
     get_stage = fn tx, {key, _value} -> :erlfdb.get(tx, key) end
-    set_stage = fn
-          tx, :not_found, {key, value}, acc ->
-            :erlfdb.set(tx, key, value)
-            acc + 1
 
-          _tx, _result, {key, _}, _acc ->
-            raise Unsupported, "Key exists: #{key}"
-        end
+    set_stage = fn
+      tx, :not_found, {key, value}, acc ->
+        :erlfdb.set(tx, key, value)
+        acc + 1
+
+      _tx, _result, {key, _}, _acc ->
+        raise Unsupported, "Key exists: #{key}"
+    end
 
     transactional(db_or_tenant, fn tx -> pipeline(tx, entries, get_stage, 0, set_stage) end)
+  end
+
+  def update_pks(db_or_tenant, adapter_opts, source, pks, fields) do
+    keys = for pk <- pks, do: Pack.to_fdb_key(adapter_opts, source, pk)
+
+    get_stage = fn tx, key -> :erlfdb.get(tx, key) end
+
+    update_stage = fn
+      _tx, :not_found, _key, acc ->
+        acc
+
+      tx, fdb_value, key, acc ->
+        value =
+          fdb_value
+          |> Pack.from_fdb_value()
+          |> Keyword.merge(fields, fn _k, _v1, v2 -> v2 end)
+
+        :erlfdb.set(tx, key, Pack.to_fdb_value(value))
+        acc + 1
+    end
+
+    transactional(db_or_tenant, fn tx -> pipeline(tx, keys, get_stage, 0, update_stage) end)
   end
 
   def delete_pks(db_or_tenant, adapter_opts, source, pks) do
     keys = for pk <- pks, do: Pack.to_fdb_key(adapter_opts, source, pk)
 
     get_stage = fn tx, key -> :erlfdb.get(tx, key) end
-    clear_stage = fn
-          _tx, :not_found, _key, acc ->
-            acc
 
-          tx, _fut_value, key, acc ->
-            :erlfdb.clear(tx, key)
-            acc + 1
-        end
+    clear_stage = fn
+      _tx, :not_found, _key, acc ->
+        acc
+
+      tx, _fut_value, key, acc ->
+        :erlfdb.clear(tx, key)
+        acc + 1
+    end
 
     transactional(db_or_tenant, fn tx -> pipeline(tx, keys, get_stage, 0, clear_stage) end)
   end
@@ -229,34 +253,33 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
     end)
   end
 
-  @doc """
-  A multi-stage pipeline to be executed within a transaction where
-  the first stage induces a list of futures, and the second stage
-  handles those futures as they arrive (using :erlfdb.wait_for_any/1).
+  @doc false
+  # A multi-stage pipeline to be executed within a transaction where
+  # the first stage induces a list of futures, and the second stage
+  # handles those futures as they arrive (using :erlfdb.wait_for_any/1).
 
-  tx: The erlfdb tx
-  input_list: a list of items to be handled by your stages
-  fun_stage_1: a 2-arity function accepting as args (tx, x) where
-  tx is the same erlfdb tx and x is an entry from input_list. This function
-  must return an erlfdb future.
-  acc: Starting accumulator for fun_stage_2
-  fun_stage_2: a 4-arity function acceptiong as aargs (tx, result, x, acc)
-  where tx is the same erlfdb tx, result, is the result of the future from
-  stage_1, x is the corresponding entry in your input_list, and acc is
-  the accumulator. This function returns the updated acc.
-  """
+  # tx: The erlfdb tx
+  # input_list: a list of items to be handled by your stages
+  # fun_stage_1: a 2-arity function accepting as args (tx, x) where
+  # tx is the same erlfdb tx and x is an entry from input_list. This function
+  # must return an erlfdb future.
+  # acc: Starting accumulator for fun_stage_2
+  # fun_stage_2: a 4-arity function acceptiong as aargs (tx, result, x, acc)
+  # where tx is the same erlfdb tx, result, is the result of the future from
+  # stage_1, x is the corresponding entry in your input_list, and acc is
+  # the accumulator. This function returns the updated acc.
   defp pipeline(tx, input_list, fun_stage_1, acc, fun_stage_2) do
-      futures_map =
-        input_list
-        |> Enum.map(fn x ->
-          fut = fun_stage_1.(tx, x)
-          {fut, x}
-        end)
-        |> Enum.into(%{})
+    futures_map =
+      input_list
+      |> Enum.map(fn x ->
+        fut = fun_stage_1.(tx, x)
+        {fut, x}
+      end)
+      |> Enum.into(%{})
 
-      result = fold_futures(tx, futures_map, acc, fun_stage_2)
+    result = fold_futures(tx, futures_map, acc, fun_stage_2)
 
-      result
+    result
   end
 
   defp fold_futures(tx, futures_map, acc, fun) do
