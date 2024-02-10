@@ -1,8 +1,12 @@
 defmodule Ecto.Adapters.FoundationDB.Sandbox do
+  def open_db() do
+    get_or_create_test_db()
+  end
+
   def checkout(repo) do
     case :persistent_term.get({__MODULE__, repo, :tenant}, nil) do
       nil ->
-        db = get_or_create_test_db(repo)
+        db = get_or_create_test_db()
         tenant_name = "#{repo}"
         other_tenant_name = "#{repo}.Other"
         tenant = :erlfdb_util.create_and_open_tenant(db, [:empty], tenant_name)
@@ -16,17 +20,17 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
   end
 
   def checkin(repo) do
-    db = :persistent_term.get({__MODULE__, repo, :database})
+    db = :persistent_term.get({__MODULE__, :database})
     :erlfdb_util.clear_and_delete_tenant(db, "#{repo}")
     :erlfdb_util.clear_and_delete_tenant(db, "#{repo}.Other")
     :persistent_term.erase({__MODULE__, repo, :tenant})
   end
 
-  defp get_or_create_test_db(repo) do
-    case :persistent_term.get({__MODULE__, repo, :database}, nil) do
+  defp get_or_create_test_db() do
+    case :persistent_term.get({__MODULE__, :database}, nil) do
       nil ->
         new_db = :erlfdb_util.get_test_db([])
-        :persistent_term.put({__MODULE__, repo, :database}, new_db)
+        :persistent_term.put({__MODULE__, :database}, new_db)
         new_db
 
       already_initted_db ->

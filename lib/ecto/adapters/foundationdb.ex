@@ -4,12 +4,16 @@ defmodule Ecto.Adapters.FoundationDB do
   """
 
   @behaviour Ecto.Adapter
+  @behaviour Ecto.Adapter.Storage
   @behaviour Ecto.Adapter.Schema
   @behaviour Ecto.Adapter.Queryable
+  @behaviour Ecto.Adapter.Migration
 
   alias Ecto.Adapters.FoundationDB.EctoAdapter
+  alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
   alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
+  alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
 
   def usetenant(struct, tenant) do
     Ecto.put_meta(struct, prefix: tenant)
@@ -35,6 +39,15 @@ defmodule Ecto.Adapters.FoundationDB do
 
   @impl Ecto.Adapter
   defdelegate dumpers(primitive_type, ecto_type), to: EctoAdapter
+
+  @impl Ecto.Adapter.Storage
+  defdelegate storage_up(options), to: EctoAdapterStorage
+
+  @impl Ecto.Adapter.Storage
+  defdelegate storage_down(options), to: EctoAdapterStorage
+
+  @impl Ecto.Adapter.Storage
+  defdelegate storage_status(options), to: EctoAdapterStorage
 
   @impl Ecto.Adapter.Schema
   defdelegate autogenerate(type), to: EctoAdapterSchema
@@ -74,4 +87,13 @@ defmodule Ecto.Adapters.FoundationDB do
   @impl Ecto.Adapter.Queryable
   defdelegate stream(adapter_meta, query_meta, query_cache, params, options),
     to: EctoAdapterQueryable
+
+  @impl Ecto.Adapter.Migration
+  defdelegate supports_ddl_transaction?(), to: EctoAdapterMigration
+
+  @impl Ecto.Adapter.Migration
+  defdelegate execute_ddl(adapter_meta, command, option), to: EctoAdapterMigration
+
+  @impl Ecto.Adapter.Migration
+  defdelegate lock_for_migrations(adapter_meta, options, fun), to: EctoAdapterMigration
 end
