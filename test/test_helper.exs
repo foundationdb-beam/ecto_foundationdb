@@ -16,9 +16,16 @@ defmodule Ecto.Integration.Case do
   alias Ecto.Adapters.FoundationDB.Sandbox
 
   setup do
-    {tenant_name, tenant} = Sandbox.checkout(TestRepo)
+    tenants = Sandbox.checkout(TestRepo)
+    {tenant_name, tenant} = tenants[:tenant]
+    {other_tenant_name, other_tenant} = tenants[:other_tenant]
     on_exit(fn -> Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo) end)
-    {:ok, tenant: tenant, tenant_name: tenant_name}
+
+    {:ok,
+     tenant: tenant,
+     tenant_name: tenant_name,
+     other_tenant: other_tenant,
+     other_tenant_name: other_tenant_name}
   end
 end
 

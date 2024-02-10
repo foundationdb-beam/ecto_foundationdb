@@ -33,8 +33,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapter do
   end
 
   @impl Ecto.Adapter
-  def loaders(_primitive_type, ecto_type), do: [ecto_type]
+  def loaders(_primitive_type, ecto_type) do
+    [ecto_type]
+  end
 
   @impl Ecto.Adapter
-  def dumpers(_primitive_type, ecto_type), do: [ecto_type]
+  def dumpers(_primitive_type, ecto_type) do
+    [ecto_type]
+  end
 end
