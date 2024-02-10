@@ -40,8 +40,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         {pk, fields}
       end)
 
-    :ok = Tx.insert_all(tenant, adapter_opts, source, entries)
-    {length(entries), nil}
+    num_ins = Tx.insert_all(tenant, adapter_opts, source, entries)
+    {num_ins, nil}
   end
 
   @impl Ecto.Adapter.Schema

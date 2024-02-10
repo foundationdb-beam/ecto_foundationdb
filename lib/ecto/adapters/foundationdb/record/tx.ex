@@ -92,9 +92,45 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
 
     db_or_tenant
     |> transactional(fn tx ->
-      Enum.map(entries, fn {key, value} -> :erlfdb.set(tx, key, value) end)
-      :ok
+      futures =
+        entries
+        |> Enum.map(fn {key, value} ->
+          fut = :erlfdb.get(tx, key)
+          {fut, {key, value}}
+        end)
+
+      futures_map = Enum.into(futures, %{})
+      futures = Map.keys(futures_map)
+
+      num_ins =
+        fold_futures(futures, futures_map, 0, fn
+          :not_found, {key, value}, acc ->
+            :erlfdb.set(tx, key, value)
+            acc + 1
+
+          _, {key, _}, _acc ->
+            raise Unsupported, "Key exists: #{key}"
+        end)
+
+      num_ins
     end)
+  end
+
+  defp fold_futures([], _futures_map, acc, _fun) do
+    acc
+  end
+  defp fold_futures(futures, futures_map, acc, fun) do
+    fut = :erlfdb.wait_for_any(futures)
+
+    case Map.get(futures_map, fut, nil) do
+      nil ->
+        :erlang.error(:badarg)
+
+      map_entry ->
+        futures = futures -- [fut]
+        acc = fun.(:erlfdb.get(fut), map_entry, acc)
+        fold_futures(futures, futures_map, acc, fun)
+    end
   end
 
   def delete(db_or_tenant, adapter_opts, source, pk) do

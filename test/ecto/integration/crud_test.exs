@@ -39,6 +39,17 @@ defmodule Ecto.Integration.CrudTest do
       assert user.name == "John"
     end
 
+    test "double insert", context do
+      tenant = context[:tenant]
+
+      {:ok, user} =
+        %User{name: "John"}
+        |> FoundationDB.usetenant(tenant)
+        |> TestRepo.insert()
+
+      assert_raise(Unsupported, ~r/Key exists/, fn -> TestRepo.insert(user) end)
+    end
+
     test "insert fail, missing tenancy" do
       assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
         TestRepo.insert(%User{name: "George"})
@@ -80,14 +91,13 @@ defmodule Ecto.Integration.CrudTest do
                Transaction.commit(
                  other_tenant,
                  fn ->
-
-                  # Specify the equivalent tenant
-                   user
+                   # Specify the equivalent tenant
+                   %User{ user | id: nil }
                    |> FoundationDB.usetenant(other_tenant)
                    |> TestRepo.insert()
 
                    # Remove the tenant from the struct, allow the tranction context to take over
-                   user
+                   %User{ user | id: nil }
                    |> FoundationDB.usetenant(nil)
                    |> TestRepo.insert()
 
@@ -140,6 +150,7 @@ defmodule Ecto.Integration.CrudTest do
 
     test "get fail, 'where name ==' clause", context do
       tenant = context[:tenant]
+
       assert_raise(Unsupported, fn ->
         query = from(u in User, where: u.name == "John")
         TestRepo.all(query, prefix: tenant)
@@ -217,4 +228,15 @@ defmodule Ecto.Integration.CrudTest do
       end)
     end
   end
+
+  #describe "update" do
+  #  test "updates user", context do
+  #    tenant = context[:tenant]
+  #    {:ok, user} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
+  #    changeset = User.changeset(user, %{name: "Bob"})
+  #    {:ok, changed} = TestRepo.update(changeset)
+
+  #    assert changed.name == "Bob"
+  #  end
+  #end
 end
