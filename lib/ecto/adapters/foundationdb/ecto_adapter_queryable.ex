@@ -51,8 +51,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         _adapter_meta = %{opts: adapter_opts},
         _query_meta,
         _query_cache =
-          {:nocache,
-           {:delete_all, query, {nil, _limit_fn}, %{}, _ordering_fn}},
+          {:nocache, {:delete_all, query, {nil, _limit_fn}, %{}, _ordering_fn}},
         params,
         _options
       ) do
@@ -70,11 +69,28 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   defp get_limit(nil), do: nil
   defp get_limit(%Ecto.Query.QueryExpr{expr: limit}), do: limit
 
-  defp assert_tenancy!(query=%Ecto.Query{
-          prefix: tenant,
-          from: %Ecto.Query.FromExpr{source: {source, schema}}
-  }, adapter_opts) do
-    context = Schema.get_context!(source, schema)
+  defp assert_tenancy!(
+         query = %Ecto.Query{
+           prefix: tenant,
+           from: from = %Ecto.Query.FromExpr{source: {source, schema}}
+         },
+         adapter_opts
+       ) do
+    {context, query = %Ecto.Query{prefix: tenant}} =
+      case EctoAdapterMigration.prepare_source(source) do
+        {:ok, {source, context}} ->
+          tenant =
+            if is_binary(tenant),
+              do: Tenant.open!(FDB.db(adapter_opts), tenant, adapter_opts),
+              else: tenant
+
+          from = %Ecto.Query.FromExpr{from | source: {source, schema}}
+          {context, %Ecto.Query{query | prefix: tenant, from: from}}
+
+        {:error, :unknown_source} ->
+          context = Schema.get_context!(source, schema)
+          {context, query}
+      end
 
     case Tx.is_safe?(tenant, context[:usetenant]) do
       {false, :unused_tenant} ->
@@ -104,16 +120,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         raise Unsupported, "Non-tenant transactions are not yet implemented."
 
       {false, :tenant_id} ->
-        if not EctoAdapterMigration.is_migration_source?(source) do
-          raise Unsupported, "You must provide an open tenant, not a tenant ID"
-        end
-
-       tenant = Tenant.open!(FDB.db(adapter_opts), tenant, adapter_opts)
-       %Ecto.Query{query | prefix: tenant}
+        raise Unsupported, "You must provide an open tenant, not a tenant ID"
 
       true ->
         query
-      end
-
+    end
   end
 end

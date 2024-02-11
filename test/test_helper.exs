@@ -21,6 +21,7 @@ defmodule Ecto.Integration.Case do
   setup do
     tenant = Sandbox.checkout(TestRepo, "MyTenant")
     other_tenant = Sandbox.checkout(TestRepo, "OtherTenant")
+
     on_exit(fn ->
       Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, "MyTenant")
       Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, "OtherTenant")
@@ -39,6 +40,10 @@ _ = Ecto.Adapters.FoundationDB.storage_down(TestRepo.config())
 
 {:ok, _} = TestRepo.start_link()
 
-#:ok = Ecto.Migrator.up(TestRepo, 0, EctoFoundationDB.Integration.Migration, prefix: "MyTenant", log: false)
+:ok =
+  Ecto.Migrator.up(TestRepo, 0, EctoFoundationDB.Integration.Migration,
+    prefix: "MyTenant",
+    log: false
+  )
 
 ExUnit.start()

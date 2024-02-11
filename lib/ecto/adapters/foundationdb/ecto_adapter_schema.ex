@@ -20,7 +20,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   @impl Ecto.Adapter.Schema
   def insert_all(
         _adapter_meta = %{opts: adapter_opts},
-        _schema_meta = %{prefix: tenant, source: source, schema: schema},
+        schema_meta,
         _header,
         entries,
         _on_conflict,
@@ -28,14 +28,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _placeholders,
         _options
       ) do
-    # %{pid: #PID<0.283.0>, opts: [repo: Ecto.Integration.TestRepo, telemetry_prefix: [:ecto, :integration, :test_repo], otp_app: :ecto_foundationdb, timeout: 15000, pool_size: 10], cache: #Reference<0.1764422960.586285060.230287>, stacktrace: nil, repo: Ecto.Integration.TestRepo, telemetry: {Ecto.Integration.TestRepo, :debug, [:ecto, :integration, :test_repo, :query]}, adapter: Ecto.Adapters.FoundationDB}
-    # %{context: nil, prefix: nil, source: "users", schema: EctoFoundationDB.Schemas.User, autogenerate_id: {:id, :id, :binary_id}}
-    # [name: "John", inserted_at: ~N[2024-02-05 23:48:10], updated_at: ~N[2024-02-05 23:48:10], id: "96aaa43b-370f-4ae4-bb18-0120a46d9dab"]
-    # {:raise, [], []}
-    # []
-    # [cast_params: ["John", ~N[2024-02-05 23:48:10], ~N[2024-02-05 23:48:10], "96aaa43b-370f-4ae4-bb18-0120a46d9dab"]]
-
-    tenant = assert_tenancy!(adapter_opts, source, schema, tenant)
+    %{source: source, schema: schema, prefix: tenant} = assert_tenancy!(adapter_opts, schema_meta)
 
     entries =
       Enum.map(entries, fn fields ->
@@ -66,19 +59,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   @impl Ecto.Adapter.Schema
   def update(
         _adapter_meta = %{opts: adapter_opts},
-        _schema_meta = %{prefix: tenant, source: source, schema: schema},
+        schema_meta,
         fields,
         filters,
         _returning,
         _options
       ) do
-    # %{pid: #PID<0.265.0>, opts: [repo: Ecto.Integration.TestRepo, telemetry_prefix: [:ecto, :integration, :test_repo], otp_app: :ecto_foundationdb, timeout: 15000, pool_size: 10, key_delimiter: "/"], cache: #Reference<0.3881531936.1902772227.59515>, stacktrace: nil, repo: Ecto.Integration.TestRepo, telemetry: {Ecto.Integration.TestRepo, :debug, [:ecto, :integration, :test_repo, :query]}, adapter: Ecto.Adapters.FoundationDB}
-    # %{context: [usetenant: true], prefix: {:erlfdb_tenant, #Reference<0.3881531936.1902772226.61348>}, source: "users", schema: EctoFoundationDB.Schemas.User, autogenerate_id: {:id, :id, :binary_id}}
-    # [name: "Bob", updated_at: ~N[2024-02-10 16:31:38]]
-    # [id: "b349bd38-2261-4570-8001-768b2eb381b2"]
-    # []
-    # [cast_params: ["Bob", ~N[2024-02-10 16:31:38], "b349bd38-2261-4570-8001-768b2eb381b2"]]
-    tenant = assert_tenancy!(adapter_opts, source, schema, tenant)
+    %{source: source, schema: schema, prefix: tenant} = assert_tenancy!(adapter_opts, schema_meta)
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
@@ -94,17 +81,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   @impl Ecto.Adapter.Schema
   def delete(
         _adapter_meta = %{opts: adapter_opts},
-        _schema_meta = %{prefix: tenant, source: source, schema: schema},
+        schema_meta,
         filters,
         _returning,
         _options
       ) do
-    # %{pid: #PID<0.292.0>, opts: [repo: Ecto.Integration.TestRepo, telemetry_prefix: [:ecto, :integration, :test_repo], otp_app: :ecto_foundationdb, timeout: 15000, pool_size: 10, key_delimiter: "/"], cache: #Reference<0.656434356.2939551747.188470>, stacktrace: nil, repo: Ecto.Integration.TestRepo, telemetry: {Ecto.Integration.TestRepo, :debug, [:ecto, :integration, :test_repo, :query]}, adapter: Ecto.Adapters.FoundationDB}
-    # %{context: [usetenant: true], prefix: {:erlfdb_tenant, #Reference<0.656434356.2939551746.189187>}, source: "users", schema: EctoFoundationDB.Schemas.User, autogenerate_id: {:id, :id, :binary_id}}
-    # [id: "46866b69-c11b-45a3-a35d-5985067c3f8f"]
-    # []
-    # [cast_params: ["46866b69-c11b-45a3-a35d-5985067c3f8f"]]
-    tenant = assert_tenancy!(adapter_opts, source, schema, tenant)
+    %{source: source, schema: schema, prefix: tenant} = assert_tenancy!(adapter_opts, schema_meta)
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
@@ -117,8 +99,24 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     end
   end
 
-  defp assert_tenancy!(adapter_opts, source, schema, tenant) do
-    context = Schema.get_context!(source, schema)
+  defp assert_tenancy!(
+         adapter_opts,
+         schema_meta = %{source: source, schema: schema, prefix: tenant}
+       ) do
+    {context, schema_meta = %{schema: schema, prefix: tenant}} =
+      case EctoAdapterMigration.prepare_source(source) do
+        {:ok, {source, context}} ->
+          tenant =
+            if is_binary(tenant),
+              do: Tenant.open!(FDB.db(adapter_opts), tenant, adapter_opts),
+              else: tenant
+
+          {context, %{schema_meta | source: source, schema: schema, prefix: tenant}}
+
+        {:error, :unknown_source} ->
+          context = Schema.get_context!(source, schema)
+          {context, schema_meta}
+      end
 
     case Tx.is_safe?(tenant, context[:usetenant]) do
       {false, :unused_tenant} ->
@@ -153,14 +151,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         raise Unsupported, "Non-tenant transactions are not yet implemented."
 
       {false, :tenant_id} ->
-        if not EctoAdapterMigration.is_migration_source?(source) do
-          raise Unsupported, "You must provide an open tenant, not a tenant ID"
-        end
-
-        Tenant.open!(FDB.db(adapter_opts), tenant, adapter_opts)
+        raise Unsupported, "You must provide an open tenant, not a tenant ID"
 
       true ->
-        tenant
+        schema_meta
     end
   end
 end

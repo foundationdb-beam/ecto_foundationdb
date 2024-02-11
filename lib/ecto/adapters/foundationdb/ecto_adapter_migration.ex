@@ -8,11 +8,16 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
 
   alias Ecto.Adapters.FoundationDB, as: FDB
   alias Ecto.Adapters.FoundationDB.Tenant
+  alias Ecto.Adapters.FoundationDB.Record.Tx
 
-  def is_migration_source?("schema_migrations"), do: true
-  def is_migration_source?(_), do: false
+  @migration_keyspace_prefix <<0xFE>>
 
-  def get_context(_), do: [usetenant: true]
+  def prepare_source(k = "schema_migrations"),
+    do: {:ok, {prepare_migration_key(k), [usetenant: true]}}
+
+  def prepare_source(_k), do: {:error, :unknown_source}
+
+  def prepare_migration_key(key), do: "#{@migration_keyspace_prefix <> key}"
 
   @impl true
   def supports_ddl_transaction?() do
@@ -38,28 +43,36 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
   end
 
   def execute_ddl(
-        _adapter_meta = %{opts: _adapter_opts},
+        _adapter_meta = %{opts: adapter_opts},
         {:create,
          %Ecto.Migration.Index{
+           prefix: tenant_id,
            table: source,
            name: index_name,
            columns: index_fields
          }},
         _options
-      ) do
+      )
+      when is_binary(tenant_id) do
+    db = FDB.db(adapter_opts)
+    tenant = Tenant.open!(db, tenant_id, adapter_opts)
+    Tx.create_index(tenant, source, index_name, index_fields)
+
     raise """
     Create Index
 
-    #{inspect(source)}
+    prefix: #{inspect(tenant_id)}
 
-    #{inspect(index_name)}
+    source: #{inspect(source)}
 
-    #{inspect(index_fields)}
+    index_name: #{inspect(index_name)}
+
+    index_fields: #{inspect(index_fields)}
     """
   end
 
   @impl true
-  def lock_for_migrations(_adapter_meta=%{opts: adapter_opts}, _options, fun) do
+  def lock_for_migrations(_adapter_meta = %{opts: adapter_opts}, _options, fun) do
     # Ecto locks the `schema_migrations` table when running
     # migrations, guaranteeing two different servers cannot run the same
     # migration at the same time.

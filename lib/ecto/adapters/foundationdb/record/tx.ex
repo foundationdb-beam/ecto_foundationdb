@@ -220,6 +220,9 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
     end)
   end
 
+  def create_index(tenant, source, index_name, index_fields) do
+  end
+
   defp count_range_startswith(tx, startswith) do
     start_key = startswith
     end_key = :erlfdb_key.strinc(startswith)
