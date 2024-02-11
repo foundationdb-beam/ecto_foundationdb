@@ -9,8 +9,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
   alias Ecto.Adapters.FoundationDB, as: FDB
   alias Ecto.Adapters.FoundationDB.Tenant
 
-  def is_source_in_storage_tenant?("schema_migrations"), do: true
-  def is_source_in_storage_tenant?(_), do: false
+  def is_migration_source?("schema_migrations"), do: true
+  def is_migration_source?(_), do: false
+
+  def get_context(_), do: [usetenant: true]
 
   @impl true
   def supports_ddl_transaction?() do
@@ -40,7 +42,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
         {:create,
          %Ecto.Migration.Index{
            table: source,
-           prefix: nil,
            name: index_name,
            columns: index_fields
          }},

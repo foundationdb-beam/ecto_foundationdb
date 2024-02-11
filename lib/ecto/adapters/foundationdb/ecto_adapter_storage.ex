@@ -100,7 +100,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
 
       {:ok, _} ->
         tenant = open_named_tenant(db, tenant_name)
-        :erlfdb.transactional(tenant, fn tx -> :erlfdb.clear_range(tx, "", <<0xFF>>) end)
+        :erlfdb.transactional(tenant, fn tx -> :erlfdb.clear_range(tx, @all_data_start_key, @all_data_end_key) end)
         :ok = :erlfdb_tenant_management.delete_tenant(db, tenant_name)
         :ok
     end

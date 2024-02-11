@@ -10,23 +10,15 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
   def in_tenant_tx?(), do: in_tx?() and elem(Process.get(@db_or_tenant), 0) == :erlfdb_tenant
   def in_tx?(), do: not is_nil(Process.get(@tx))
 
-  def is_safe?(type, tenant, nil), do: is_safe?(type, tenant, false)
+  def is_safe?(tenant, nil), do: is_safe?(tenant, false)
 
-  # Structs can be passed from one tenant to another transaction, so if the tenant is missing, raise an error to prevent cross contamination
-  def is_safe?(:struct, nil, true),
+  def is_safe?(nil, true),
     do: if(in_tenant_tx?(), do: true, else: {false, :missing_tenant})
 
-  def is_safe?(:struct, _tenant, true), do: true
-  def is_safe?(:struct, nil, false), do: {false, :tenant_only}
-  def is_safe?(:struct, _tenant, false), do: {false, :unused_tenant}
-
-  # If a Query is missing a tenant and we're in a tx, allow. If queries are passed between tenants, there is no risk of cross contamination, like there is with structs
-  def is_safe?(:query, nil, true),
-    do: if(in_tenant_tx?(), do: true, else: {false, :missing_tenant})
-
-  def is_safe?(:query, _tenant, true), do: true
-  def is_safe?(:query, nil, false), do: {false, :tenant_only}
-  def is_safe?(:query, _tenant, false), do: {false, :unused_tenant}
+  def is_safe?(tenant, true) when is_binary(tenant), do: {false, :tenant_id}
+  def is_safe?(_tenant, true), do: true
+  def is_safe?(nil, false), do: {false, :tenant_only}
+  def is_safe?(_tenant, false), do: {false, :unused_tenant}
 
   def commit_proc(db_or_tenant, fun) do
     nil = Process.get(@db_or_tenant)
@@ -201,8 +193,12 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
     handle_fdb_kvs(kvs, field_names)
   end
 
-  def all(_db_or_tenant, _, _query, _) do
-    raise Unsupported, "FoundationDB Adapater has not implemented support for your query"
+  def all(_db_or_tenant, _, query, _) do
+    raise Unsupported, """
+    FoundationDB Adapater has not implemented support for your query
+
+    #{inspect(Map.drop(query, [:__struct__]))}
+    """
   end
 
   # No where clause, all records

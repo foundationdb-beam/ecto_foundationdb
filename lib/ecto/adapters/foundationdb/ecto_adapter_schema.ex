@@ -6,10 +6,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   alias Ecto.Adapters.FoundationDB.Record.Fields
   alias Ecto.Adapters.FoundationDB.Record.Tx
   alias Ecto.Adapters.FoundationDB.Schema
+  alias Ecto.Adapters.FoundationDB.Tenant
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
-  alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
 
   @impl Ecto.Adapter.Schema
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
@@ -118,9 +118,9 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   end
 
   defp assert_tenancy!(adapter_opts, source, schema, tenant) do
-    context = Schema.get_context!(schema)
+    context = Schema.get_context!(source, schema)
 
-    case Tx.is_safe?(:struct, tenant, context[:usetenant]) do
+    case Tx.is_safe?(tenant, context[:usetenant]) do
       {false, :unused_tenant} ->
         raise IncorrectTenancy, """
         FoundatioDB Adapter is expecting the struct for schema \
@@ -150,11 +150,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         """
 
       {false, :tenant_only} ->
-        if not EctoAdapterMigration.is_source_in_storage_tenant?(source) do
-          raise Unsupported, "Non-tenant transactions are not yet implemented."
+        raise Unsupported, "Non-tenant transactions are not yet implemented."
+
+      {false, :tenant_id} ->
+        if not EctoAdapterMigration.is_migration_source?(source) do
+          raise Unsupported, "You must provide an open tenant, not a tenant ID"
         end
 
-        EctoAdapterStorage.open_storage_tenant(FDB.db(adapter_opts), adapter_opts)
+        Tenant.open!(FDB.db(adapter_opts), tenant, adapter_opts)
 
       true ->
         tenant
