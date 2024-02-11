@@ -1,4 +1,6 @@
 defmodule Ecto.Adapters.FoundationDB.Sandbox do
+  alias Ecto.Adapters.FoundationDB.Tenant
+
   def open_db() do
     get_or_create_test_db()
   end
@@ -7,12 +9,12 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
     case :persistent_term.get({__MODULE__, repo, :tenant}, nil) do
       nil ->
         db = get_or_create_test_db()
-        tenant_name = "#{repo}"
-        other_tenant_name = "#{repo}.Other"
-        tenant = :erlfdb_util.create_and_open_tenant(db, [:empty], tenant_name)
-        other_tenant = :erlfdb_util.create_and_open_tenant(db, [:empty], other_tenant_name)
+        tenant_id = "#{repo}"
+        other_tenant_id = "#{repo}.Other"
+        tenant = Tenant.clear_open!(db, tenant_id, repo.config())
+        other_tenant = Tenant.clear_open!(db, other_tenant_id, repo.config())
         :persistent_term.put({__MODULE__, repo, :tenant}, tenant)
-        [tenant: {tenant_name, tenant}, other_tenant: {other_tenant_name, other_tenant}]
+        [tenant: {tenant_id, tenant}, other_tenant: {other_tenant_id, other_tenant}]
 
       _ ->
         raise "FoundationDB Sandbox Tenant named #{repo} is already checked out"
@@ -21,8 +23,8 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
 
   def checkin(repo) do
     db = :persistent_term.get({__MODULE__, :database})
-    :erlfdb_util.clear_and_delete_tenant(db, "#{repo}")
-    :erlfdb_util.clear_and_delete_tenant(db, "#{repo}.Other")
+    Tenant.clear_delete!(db, "#{repo}", repo.config())
+    Tenant.clear_delete!(db, "#{repo}.Other", repo.config())
     :persistent_term.erase({__MODULE__, repo, :tenant})
   end
 
