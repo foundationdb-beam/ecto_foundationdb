@@ -1,5 +1,15 @@
 defmodule Ecto.Adapters.FoundationDB.Tenant do
+  alias Ecto.Adapters.FoundationDB, as: FDB
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
+
+  def open!(repo, id), do: open!(FDB.db(repo), id, repo.config())
+
+  def exists?(repo, id), do: exists?(FDB.db(repo), id, repo.config())
+  def open(repo, id), do: open(FDB.db(repo), id, repo.config())
+  def list(repo), do: list(FDB.db(repo), repo.config())
+  def create(repo, id), do: create(FDB.db(repo), id, repo.config())
+  def clear(repo, id), do: clear(FDB.db(repo), id, repo.config())
+  def delete(repo, id), do: delete(FDB.db(repo), id, repo.config())
 
   def open!(db, id, options) do
     :ok = ensure_created(db, id, options)

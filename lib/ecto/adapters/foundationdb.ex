@@ -9,25 +9,16 @@ defmodule Ecto.Adapters.FoundationDB do
   @behaviour Ecto.Adapter.Queryable
   @behaviour Ecto.Adapter.Migration
 
+  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
+
   alias Ecto.Adapters.FoundationDB.EctoAdapter
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
   alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
 
-  def db!(repo) do
-    {:ok, db} = db(repo)
-    db
-  end
-
   def db(repo) do
-    options = repo.config()
-    case EctoAdapterStorage.storage_status_db(options) do
-      {:up, db} ->
-        {:ok, db}
-      {:down, nil} ->
-        {:error, :down}
-    end
+    open_cached_db(repo.config())
   end
 
   def usetenant(struct, tenant) do
@@ -111,4 +102,25 @@ defmodule Ecto.Adapters.FoundationDB do
 
   @impl Ecto.Adapter.Migration
   defdelegate lock_for_migrations(adapter_meta, options, fun), to: EctoAdapterMigration
+
+  defp open_cached_db(options) do
+    case :persistent_term.get({__MODULE__, :database}, nil) do
+      nil ->
+        db = EctoAdapterStorage.open_db(options)
+        :persistent_term.put({__MODULE__, :database}, {db, options})
+        db
+      {db, ^options} ->
+        db
+      {_db, up_options} ->
+        raise Unsupported, """
+        FoundationDB Adapater was started with options
+
+        #{inspect(up_options)}
+
+        But since then, options have change to
+
+        #{inspect(options)}
+        """
+    end
+  end
 end
