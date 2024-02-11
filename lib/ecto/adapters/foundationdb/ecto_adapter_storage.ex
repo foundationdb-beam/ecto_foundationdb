@@ -3,6 +3,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
 
   alias Ecto.Adapters.FoundationDB.Options
   alias Ecto.Adapters.FoundationDB.Record.Pack
+  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
 
   def list_tenants(dbtx, options) do
     start_key = get_tenant_name("", options)
@@ -57,6 +58,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
   @impl true
   def storage_up(options) do
     db = open_db(options)
+    :persistent_term.put({__MODULE__, :database}, {db, options})
     tenant_name = get_storage_tenant_name(options)
     case get_named_tenant(db, tenant_name) do
       {:error, :tenant_does_not_exist} ->
@@ -69,6 +71,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
 
   @impl true
   def storage_down(options) do
+    :persistent_term.erase({__MODULE__, :database})
     db = open_db(options)
     tenant_name = get_storage_tenant_name(options)
     case get_named_tenant(db, tenant_name) do
@@ -82,13 +85,37 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
 
   @impl true
   def storage_status(options) do
-    db = open_db(options)
-    tenant_name = get_storage_tenant_name(options)
-    case get_named_tenant(db, tenant_name) do
-      {:error, :tenant_does_not_exist} ->
-        :down
+    db = case storage_status_db(options) do
+      {:up, db} ->
+        db
+      {:down, nil} ->
+        open_db(options)
+    end
+    storage_tenant_name = get_storage_tenant_name(options)
+    case get_named_tenant(db, storage_tenant_name) do
       {:ok, _} ->
         :up
+      _ ->
+        :down
+    end
+  end
+
+  def storage_status_db(options) do
+    case :persistent_term.get({__MODULE__, :database}, nil) do
+      nil ->
+        {:down, nil}
+      {db, ^options} ->
+        {:up, db}
+      {_db, up_options} ->
+        raise Unsupported, """
+        FoundationDB Adapater was started with options
+
+        #{inspect(up_options)}
+
+        But since then, options have change to
+
+        #{inspect(options)}
+        """
     end
   end
 
@@ -98,13 +125,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
   end
 
   defp get_storage_tenant_name(options) do
-    storage_tenant = Options.get(options, :storage_tenant)
-    "#{storage_tenant}"
+    storage_id = Options.get(options, :storage_id)
+    "#{storage_id}"
   end
 
   defp get_tenant_name(tenant_id, options) do
-    storage_tenant = Options.get(options, :storage_tenant)
-    Pack.to_fdb_key(options, "#{storage_tenant}", tenant_id)
+    storage_id = Options.get(options, :storage_id)
+    Pack.to_fdb_key(options, "#{storage_id}", tenant_id)
   end
 
   defp get_tenant(dbtx, tenant_id, options) do

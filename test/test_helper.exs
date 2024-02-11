@@ -9,9 +9,8 @@ Code.require_file("#{ecto}/integration_test/support/schemas.exs", __DIR__)
 alias Ecto.Integration.TestRepo
 
 Application.put_env(:ecto_foundationdb, TestRepo,
-  key_delimiter: "/",
   open_db: &Ecto.Adapters.FoundationDB.Sandbox.open_db/0,
-  storage_tenant: Ecto.Adapters.FoundationDB.Sandbox
+  storage_id: Ecto.Adapters.FoundationDB.Sandbox
 )
 
 defmodule Ecto.Integration.Case do

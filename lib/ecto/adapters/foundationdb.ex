@@ -15,6 +15,21 @@ defmodule Ecto.Adapters.FoundationDB do
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
 
+  def db!(repo) do
+    {:ok, db} = db(repo)
+    db
+  end
+
+  def db(repo) do
+    options = repo.config()
+    case EctoAdapterStorage.storage_status_db(options) do
+      {:up, db} ->
+        {:ok, db}
+      {:down, nil} ->
+        {:error, :down}
+    end
+  end
+
   def usetenant(struct, tenant) do
     Ecto.put_meta(struct, prefix: tenant)
   end
