@@ -16,9 +16,9 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
     open(db, id, options)
   end
 
-  def clear_open!(db, id, options) do
+  def open_empty!(db, id, options) do
     :ok = ensure_created(db, id, options)
-    :ok = clear(db, id, options)
+    :ok = empty(db, id, options)
     open(db, id, options)
   end
 
@@ -27,6 +27,7 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
       :ok = clear(db, id, options)
       :ok = delete(db, id, options)
     end
+
     :ok
   end
 
@@ -39,8 +40,14 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
 
   def exists?(db, id, options), do: EctoAdapterStorage.tenant_exists?(db, id, options)
   def open(db, id, options), do: EctoAdapterStorage.open_tenant(db, id, options)
-  def list(db, options), do: EctoAdapterStorage.list_tenants(db, options)
+  def list(db, options) do
+    for {_k, json} <- EctoAdapterStorage.list_tenants(db, options) do
+      %{"name" => %{"printable" => name}} = Jason.decode!(json)
+      EctoAdapterStorage.tenant_name_to_id!(name, options)
+    end
+  end
   def create(db, id, options), do: EctoAdapterStorage.create_tenant(db, id, options)
   def clear(db, id, options), do: EctoAdapterStorage.clear_tenant(db, id, options)
+  def empty(db, id, options), do: EctoAdapterStorage.empty_tenant(db, id, options)
   def delete(db, id, options), do: EctoAdapterStorage.delete_tenant(db, id, options)
 end

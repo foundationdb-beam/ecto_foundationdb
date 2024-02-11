@@ -29,7 +29,8 @@ defmodule EctoFoundationdb.MixProject do
       {:erlfdb,
        git: "https://github.com/JesseStimpson/couchdb-erlfdb.git", branch: "feature/tenants"},
       {:ecto, "~> 3.10"},
-      {:ecto_sql, "~> 3.11"}
+      {:ecto_sql, "~> 3.11"},
+      {:jason, "~> 1.4"}
     ]
   end
 end

@@ -5,27 +5,23 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
     get_or_create_test_db()
   end
 
-  def checkout(repo) do
-    case :persistent_term.get({__MODULE__, repo, :tenant}, nil) do
+  def checkout(repo, id) when is_binary(id) do
+    case :persistent_term.get({__MODULE__, id, :tenant}, nil) do
       nil ->
         db = get_or_create_test_db()
-        tenant_id = "#{repo}"
-        other_tenant_id = "#{repo}.Other"
-        tenant = Tenant.clear_open!(db, tenant_id, repo.config())
-        other_tenant = Tenant.clear_open!(db, other_tenant_id, repo.config())
-        :persistent_term.put({__MODULE__, repo, :tenant}, tenant)
-        [tenant: {tenant_id, tenant}, other_tenant: {other_tenant_id, other_tenant}]
+        tenant = Tenant.open_empty!(db, id, repo.config())
+        :persistent_term.put({__MODULE__, id, :tenant}, tenant)
+        tenant
 
       _ ->
         raise "FoundationDB Sandbox Tenant named #{repo} is already checked out"
     end
   end
 
-  def checkin(repo) do
+  def checkin(repo, id) when is_binary(id) do
     db = :persistent_term.get({__MODULE__, :database})
-    Tenant.clear_delete!(db, "#{repo}", repo.config())
-    Tenant.clear_delete!(db, "#{repo}.Other", repo.config())
-    :persistent_term.erase({__MODULE__, repo, :tenant})
+    Tenant.clear_delete!(db, id, repo.config())
+    :persistent_term.erase({__MODULE__, id, :tenant})
   end
 
   defp get_or_create_test_db() do

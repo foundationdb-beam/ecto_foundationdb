@@ -1,6 +1,10 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   @behaviour Ecto.Adapter.Queryable
 
+  alias Ecto.Adapters.FoundationDB, as: FDB
+
+  alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
+  alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
   alias Ecto.Adapters.FoundationDB.Record.Ordering
   alias Ecto.Adapters.FoundationDB.Record.Fields
   alias Ecto.Adapters.FoundationDB.Record.Tx
@@ -13,7 +17,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         operation,
         %Ecto.Query{
           prefix: tenant,
-          from: %Ecto.Query.FromExpr{source: {_source, schema}},
+          from: %Ecto.Query.FromExpr{source: {source, schema}},
           order_bys: order_bys,
           limit: limit
         } = query
@@ -45,7 +49,9 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         """
 
       {false, :tenant_only} ->
-        raise Unsupported, "Non-tenant transactions are not yet implemented."
+        if not EctoAdapterMigration.is_source_in_storage_tenant?(source) do
+          raise Unsupported, "Non-tenant transactions are not yet implemented."
+        end
 
       true ->
         :ok
@@ -62,11 +68,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         _adapter_meta = %{opts: adapter_opts},
         _query_meta,
         _query_cache =
-          {:nocache,
-           {:all, %Ecto.Query{prefix: tenant} = query, {_limit, limit_fn}, %{}, ordering_fn}},
+          {:nocache, {:all, query, {_limit, limit_fn}, %{}, ordering_fn}},
         params,
         _options
       ) do
+    tenant = get_tenant(adapter_opts, query)
+
     result =
       tenant
       |> Tx.all(adapter_opts, query, params)
@@ -98,4 +105,17 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   # Extract limit from an `Ecto.Query`
   defp get_limit(nil), do: nil
   defp get_limit(%Ecto.Query.QueryExpr{expr: limit}), do: limit
+
+  defp get_tenant(adapter_opts, %Ecto.Query{
+         prefix: nil,
+         from: %Ecto.Query.FromExpr{source: {source, _schema}}
+       }) do
+    if EctoAdapterMigration.is_source_in_storage_tenant?(source) do
+      EctoAdapterStorage.open_storage_tenant(FDB.db(adapter_opts), adapter_opts)
+    else
+      nil
+    end
+  end
+
+  defp get_tenant(_adapter_opts, %Ecto.Query{prefix: tenant}), do: tenant
 end

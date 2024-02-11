@@ -1,11 +1,15 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   @behaviour Ecto.Adapter.Schema
 
+  alias Ecto.Adapters.FoundationDB, as: FDB
+
   alias Ecto.Adapters.FoundationDB.Record.Fields
   alias Ecto.Adapters.FoundationDB.Record.Tx
   alias Ecto.Adapters.FoundationDB.Schema
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
+  alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
+  alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
 
   @impl Ecto.Adapter.Schema
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
@@ -31,7 +35,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     # []
     # [cast_params: ["John", ~N[2024-02-05 23:48:10], ~N[2024-02-05 23:48:10], "96aaa43b-370f-4ae4-bb18-0120a46d9dab"]]
 
-    assert_tenancy!(schema, tenant)
+    tenant = assert_tenancy!(adapter_opts, source, schema, tenant)
 
     entries =
       Enum.map(entries, fn fields ->
@@ -74,7 +78,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     # [id: "b349bd38-2261-4570-8001-768b2eb381b2"]
     # []
     # [cast_params: ["Bob", ~N[2024-02-10 16:31:38], "b349bd38-2261-4570-8001-768b2eb381b2"]]
-    assert_tenancy!(schema, tenant)
+    tenant = assert_tenancy!(adapter_opts, source, schema, tenant)
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
@@ -100,7 +104,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     # [id: "46866b69-c11b-45a3-a35d-5985067c3f8f"]
     # []
     # [cast_params: ["46866b69-c11b-45a3-a35d-5985067c3f8f"]]
-    assert_tenancy!(schema, tenant)
+    tenant = assert_tenancy!(adapter_opts, source, schema, tenant)
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
@@ -113,7 +117,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     end
   end
 
-  defp assert_tenancy!(schema, tenant) do
+  defp assert_tenancy!(adapter_opts, source, schema, tenant) do
     context = Schema.get_context!(schema)
 
     case Tx.is_safe?(:struct, tenant, context[:usetenant]) do
@@ -146,10 +150,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         """
 
       {false, :tenant_only} ->
-        raise Unsupported, "Non-tenant transactions are not yet implemented."
+        if not EctoAdapterMigration.is_source_in_storage_tenant?(source) do
+          raise Unsupported, "Non-tenant transactions are not yet implemented."
+        end
+
+        EctoAdapterStorage.open_storage_tenant(FDB.db(adapter_opts), adapter_opts)
 
       true ->
-        :ok
+        tenant
     end
   end
 end

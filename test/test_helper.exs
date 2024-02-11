@@ -19,16 +19,18 @@ defmodule Ecto.Integration.Case do
   alias Ecto.Adapters.FoundationDB.Sandbox
 
   setup do
-    tenants = Sandbox.checkout(TestRepo)
-    {tenant_id, tenant} = tenants[:tenant]
-    {other_tenant_id, other_tenant} = tenants[:other_tenant]
-    on_exit(fn -> Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo) end)
+    tenant = Sandbox.checkout(TestRepo, "MyTenant")
+    other_tenant = Sandbox.checkout(TestRepo, "OtherTenant")
+    on_exit(fn ->
+      Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, "MyTenant")
+      Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, "OtherTenant")
+    end)
 
     {:ok,
      tenant: tenant,
-     tenant_id: tenant_id,
+     tenant_id: "MyTenant",
      other_tenant: other_tenant,
-     other_tenant_id: other_tenant_id}
+     other_tenant_id: "OtherTenant"}
   end
 end
 
@@ -37,6 +39,6 @@ _ = Ecto.Adapters.FoundationDB.storage_down(TestRepo.config())
 
 {:ok, _} = TestRepo.start_link()
 
-#:ok = Ecto.Migrator.up(TestRepo, 0, EctoFoundationDB.Integration.Migration, log: false)
+#:ok = Ecto.Migrator.up(TestRepo, 0, EctoFoundationDB.Integration.Migration, prefix: "MyTenant", log: false)
 
 ExUnit.start()

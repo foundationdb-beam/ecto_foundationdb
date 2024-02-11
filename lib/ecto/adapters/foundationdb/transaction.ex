@@ -7,7 +7,7 @@ defmodule Ecto.Adapters.FoundationDB.Transaction do
         Tx.commit_proc(db_or_tenant, fun)
       rescue
         e ->
-          {:exception, __MODULE__, e}
+          {:exception, __MODULE__, e, __STACKTRACE__}
       end
     end
 
@@ -17,8 +17,8 @@ defmodule Ecto.Adapters.FoundationDB.Transaction do
       |> Task.await()
 
     case res do
-      {:exception, __MODULE__, e} ->
-        raise e
+      {:exception, __MODULE__, e, st} ->
+        reraise e, st
 
       _ ->
         res
