@@ -19,7 +19,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   @impl Ecto.Adapter.Schema
   def insert_all(
-        _adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: adapter_opts},
         schema_meta,
         _header,
         entries,
@@ -34,10 +34,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       Enum.map(entries, fn fields ->
         pk_field = Fields.get_pk_field!(schema)
         pk = fields[pk_field]
-        {pk, fields}
+        {{pk_field, pk}, fields}
       end)
 
-    num_ins = Tx.insert_all(tenant, adapter_opts, source, entries)
+    num_ins = Tx.insert_all(tenant, adapter_meta, source, entries)
     {num_ins, nil}
   end
 
@@ -58,7 +58,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   @impl Ecto.Adapter.Schema
   def update(
-        _adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: adapter_opts},
         schema_meta,
         fields,
         filters,
@@ -69,7 +69,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
-    case Tx.update_pks(tenant, adapter_opts, source, [pk], fields) do
+    case Tx.update_pks(tenant, adapter_meta, source, pk_field, [pk], fields) do
       1 ->
         {:ok, []}
 
@@ -80,7 +80,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   @impl Ecto.Adapter.Schema
   def delete(
-        _adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: adapter_opts},
         schema_meta,
         filters,
         _returning,
@@ -90,7 +90,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
-    case Tx.delete_pks(tenant, adapter_opts, source, [pk]) do
+    case Tx.delete_pks(tenant, adapter_meta, source, [pk]) do
       1 ->
         {:ok, []}
 

@@ -149,7 +149,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
 
   defp get_tenant_name(tenant_id, options) do
     storage_id = Options.get(options, :storage_id)
-    Pack.to_fdb_key(options, "#{storage_id}", tenant_id)
+    Pack.to_raw_fdb_key(options, ["#{storage_id}", tenant_id])
   end
 
   defp get_tenant(dbtx, tenant_id, options) do

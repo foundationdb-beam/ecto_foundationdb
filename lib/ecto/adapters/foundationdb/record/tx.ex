@@ -1,4 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.Record.Tx do
+  alias Ecto.Adapters.FoundationDB.IndexInventory
   alias Ecto.Adapters.FoundationDB.Record.Fields
   alias Ecto.Adapters.FoundationDB.Record.Pack
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
@@ -73,72 +74,101 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
     end
   end
 
-  def insert_all(db_or_tenant, adapter_opts, source, entries) do
+  def insert_all(db_or_tenant, adapter_meta = %{opts: adapter_opts}, source, entries) do
+    idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, source)
+
     entries =
       entries
-      |> Enum.map(fn {pk, fields} ->
-        key = Pack.to_fdb_key(adapter_opts, source, pk)
-        value = Pack.to_fdb_value(fields)
-        {key, value}
+      |> Enum.map(fn {{pk_field, pk}, fields} ->
+        key = Pack.to_fdb_datakey(adapter_opts, source, pk)
+        fields = Fields.to_front(fields, pk_field)
+        {key, fields}
       end)
 
     get_stage = fn tx, {key, _value} -> :erlfdb.get(tx, key) end
 
     set_stage = fn
-      tx, :not_found, {key, value}, acc ->
-        :erlfdb.set(tx, key, value)
-        acc + 1
+      tx, {fdb_key, fields}, :not_found, count ->
+        fdb_value = Pack.to_fdb_value(fields)
+        :erlfdb.set(tx, fdb_key, fdb_value)
+        set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, fields, source)
+        count + 1
 
-      _tx, _result, {key, _}, _acc ->
+      _tx, {key, _}, _result, _acc ->
         raise Unsupported, "Key exists: #{key}"
     end
 
     transactional(db_or_tenant, fn tx -> pipeline(tx, entries, get_stage, 0, set_stage) end)
   end
 
-  def update_pks(db_or_tenant, adapter_opts, source, pks, fields) do
-    keys = for pk <- pks, do: Pack.to_fdb_key(adapter_opts, source, pk)
+  def update_pks(
+        db_or_tenant,
+        adapter_meta = %{opts: adapter_opts},
+        source,
+        pk_field,
+        pks,
+        fields
+      ) do
+    idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, source)
+
+    keys = for pk <- pks, do: Pack.to_fdb_datakey(adapter_opts, source, pk)
 
     get_stage = fn tx, key -> :erlfdb.get(tx, key) end
 
     update_stage = fn
-      _tx, :not_found, _key, acc ->
+      _tx, _key, :not_found, acc ->
         acc
 
-      tx, fdb_value, key, acc ->
+      tx, fdb_key, fdb_value, acc ->
         value =
           fdb_value
           |> Pack.from_fdb_value()
           |> Keyword.merge(fields, fn _k, _v1, v2 -> v2 end)
+          |> Fields.to_front(pk_field)
 
-        :erlfdb.set(tx, key, Pack.to_fdb_value(value))
+        :erlfdb.set(tx, fdb_key, Pack.to_fdb_value(value))
+        clear_indexes_for_one(tx, idxs, adapter_opts, fdb_key, value, source)
+        set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, value, source)
+
         acc + 1
     end
 
     transactional(db_or_tenant, fn tx -> pipeline(tx, keys, get_stage, 0, update_stage) end)
   end
 
-  def delete_pks(db_or_tenant, adapter_opts, source, pks) do
-    keys = for pk <- pks, do: Pack.to_fdb_key(adapter_opts, source, pk)
+  def delete_pks(db_or_tenant, adapter_meta = %{opts: adapter_opts}, source, pks) do
+    idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, source)
+
+    keys = for pk <- pks, do: Pack.to_fdb_datakey(adapter_opts, source, pk)
 
     get_stage = fn tx, key -> :erlfdb.get(tx, key) end
 
     clear_stage = fn
-      _tx, :not_found, _key, acc ->
+      _tx, _key, :not_found, acc ->
         acc
 
-      tx, _fut_value, key, acc ->
-        :erlfdb.clear(tx, key)
+      tx, fdb_key, fdb_value, acc ->
+        :erlfdb.clear(tx, fdb_key)
+
+        clear_indexes_for_one(
+          tx,
+          idxs,
+          adapter_opts,
+          fdb_key,
+          Pack.from_fdb_value(fdb_value),
+          source
+        )
+
         acc + 1
     end
 
     transactional(db_or_tenant, fn tx -> pipeline(tx, keys, get_stage, 0, clear_stage) end)
   end
 
-  # Single where clause expression matching on the primary key
+  # Single where clause expression matching on the primary key or index
   def all(
         db_or_tenant,
-        adapter_opts,
+        adapter_meta = %{opts: adapter_opts},
         %Ecto.Query{
           select: %Ecto.Query.SelectExpr{
             fields: select_fields
@@ -150,12 +180,14 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
             }
           ]
         },
-        [pk]
+        [where_value]
       ) do
+    idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, source)
+    field_names = Fields.parse_select_fields(select_fields)
+
     case Fields.get_pk_field!(schema) do
       ^where_field ->
-        field_names = Fields.parse_select_fields(select_fields)
-        key = Pack.to_fdb_key(adapter_opts, source, pk)
+        key = Pack.to_fdb_datakey(adapter_opts, source, where_value)
 
         db_or_tenant
         |> transactional(fn tx ->
@@ -164,16 +196,40 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
         end)
         |> handle_fdb_kvs(field_names)
 
-      _ ->
-        raise Unsupported,
-              "FoundationDB Adapter does not support a where clause constraining on a field other than the primary key"
+      _pk_field ->
+        case IndexInventory.select_index(idxs, [where_field]) do
+          {:ok, idx} ->
+            index_name = idx[:id]
+
+            indexkey_startswith =
+              Pack.to_fdb_indexkey(adapter_opts, source, index_name, [where_value])
+              |> Pack.add_delimiter(adapter_opts)
+
+            db_or_tenant
+            |> transactional(fn tx ->
+              tx
+              |> :erlfdb.get_range_startswith(indexkey_startswith)
+              |> :erlfdb.wait()
+              |> Enum.map(fn {_index_fdb_key, index_fdb_value} ->
+                index_object = Pack.from_fdb_value(index_fdb_value)
+                index_object[:value]
+              end)
+            end)
+            |> Enum.map(fn value -> Fields.arrange(value, field_names) end)
+
+          {:error, _} ->
+            raise Unsupported,
+                  """
+                  FoundationDB Adapter does not support a where clause constraining on a field other than the primary key or an index.
+                  """
+        end
     end
   end
 
   # No where clause, all records
   def all(
         db_or_tenant,
-        adapter_opts,
+        %{opts: adapter_opts},
         %Ecto.Query{
           select: %Ecto.Query.SelectExpr{fields: select_fields},
           from: %Ecto.Query.FromExpr{source: {source, _schema}},
@@ -182,11 +238,12 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
         []
       ) do
     field_names = Fields.parse_select_fields(select_fields)
-    key_startswith = Pack.to_fdb_key_startswith(adapter_opts, source)
+    key_startswith = Pack.to_fdb_datakey_startswith(adapter_opts, source)
 
     kvs =
       transactional(db_or_tenant, fn tx ->
-        :erlfdb.get_range_startswith(tx, key_startswith)
+        tx
+        |> :erlfdb.get_range_startswith(key_startswith)
         |> :erlfdb.wait()
       end)
 
@@ -204,14 +261,15 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
   # No where clause, all records
   def delete_all(
         db_or_tenant,
-        adapter_opts,
+        %{opts: adapter_opts},
         %Ecto.Query{
           from: %Ecto.Query.FromExpr{source: {source, _schema}},
           wheres: []
         },
         []
       ) do
-    key_startswith = Pack.to_fdb_key_startswith(adapter_opts, source)
+    # this key prefix will clear datakeys and indexkeys
+    key_startswith = Pack.to_raw_fdb_key(adapter_opts, [source, ""])
 
     transactional(db_or_tenant, fn tx ->
       num = count_range_startswith(tx, key_startswith)
@@ -220,7 +278,46 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
     end)
   end
 
-  def create_index(tenant, source, index_name, index_fields) do
+  def create_index(
+        db_or_tenant,
+        %{opts: adapter_opts},
+        source,
+        index_name,
+        index_fields,
+        {inventory_key, inventory_value}
+      ) do
+    key_startswith = Pack.to_fdb_datakey_startswith(adapter_opts, source)
+    key_start = key_startswith
+    key_end = :erlfdb_key.strinc(key_startswith)
+
+    transactional(db_or_tenant, fn tx ->
+      # Prevent updates on the keys so that we write the correct index values
+      :erlfdb.add_write_conflict_range(tx, key_start, key_end)
+
+      # Write a key that indicates the index exists. All other operations will
+      # use this info to maintain the index
+      :erlfdb.set(tx, inventory_key, inventory_value)
+
+      # Write the actual index for any existing data in this tenant
+      tx
+      |> :erlfdb.get_range(key_start, key_end)
+      |> :erlfdb.wait()
+      |> Enum.map(fn {fdb_key, fdb_value} ->
+        {index_key, index_object} =
+          get_index_entry(
+            adapter_opts,
+            fdb_key,
+            Pack.from_fdb_value(fdb_value),
+            index_fields,
+            index_name,
+            source
+          )
+
+        :erlfdb.set(tx, index_key, index_object)
+      end)
+    end)
+
+    :ok
   end
 
   defp count_range_startswith(tx, startswith) do
@@ -263,9 +360,9 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
   # tx is the same erlfdb tx and x is an entry from input_list. This function
   # must return an erlfdb future.
   # acc: Starting accumulator for fun_stage_2
-  # fun_stage_2: a 4-arity function acceptiong as aargs (tx, result, x, acc)
-  # where tx is the same erlfdb tx, result, is the result of the future from
-  # stage_1, x is the corresponding entry in your input_list, and acc is
+  # fun_stage_2: a 4-arity function acceptiong as aargs (tx, x, result, acc)
+  # where tx is the same erlfdb tx, x is the corresponding entry in your
+  # input_list, result is the result of the future from stage_1, and acc is
   # the accumulator. This function returns the updated acc.
   defp pipeline(tx, input_list, fun_stage_1, acc, fun_stage_2) do
     futures_map =
@@ -298,8 +395,69 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
 
       map_entry ->
         futures = futures -- [fut]
-        acc = fun.(tx, :erlfdb.get(fut), map_entry, acc)
+        acc = fun.(tx, map_entry, :erlfdb.get(fut), acc)
         fold_futures(tx, futures, futures_map, acc, fun)
+    end
+  end
+
+  # Note: pk is always first. See insert and update paths
+  defp get_index_entry(
+         adapter_opts,
+         fdb_key,
+         value = [{pk_field, pk_value} | _],
+         index_fields,
+         index_name,
+         source
+       ) do
+    index_fields = index_fields -- [pk_field]
+    index_entries = for idx_field <- index_fields, do: {idx_field, Keyword.get(value, idx_field)}
+    path_entries = index_entries ++ [{pk_field, pk_value}]
+    {_, path_vals} = Enum.unzip(path_entries)
+
+    index_key = Pack.to_fdb_indexkey(adapter_opts, source, "#{index_name}", path_vals)
+
+    index_object =
+      Pack.new_index_object(source, fdb_key, pk_field, pk_value, index_entries, value)
+      |> Pack.to_fdb_value()
+
+    {index_key, index_object}
+  end
+
+  defp clear_indexes_for_one(tx, idxs, adapter_opts, fdb_key, value, source) do
+    for idx <- idxs do
+      index_name = idx[:id]
+      index_fields = idx[:fields]
+
+      {index_key, _index_object} =
+        get_index_entry(
+          adapter_opts,
+          fdb_key,
+          value,
+          index_fields,
+          index_name,
+          source
+        )
+
+      :erlfdb.clear(tx, index_key)
+    end
+  end
+
+  defp set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, value, source) do
+    for idx <- idxs do
+      index_name = idx[:id]
+      index_fields = idx[:fields]
+
+      {index_key, index_object} =
+        get_index_entry(
+          adapter_opts,
+          fdb_key,
+          value,
+          index_fields,
+          index_name,
+          source
+        )
+
+      :erlfdb.set(tx, index_key, index_object)
     end
   end
 end

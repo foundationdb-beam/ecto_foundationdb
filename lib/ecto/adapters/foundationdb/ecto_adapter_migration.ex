@@ -8,7 +8,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
 
   alias Ecto.Adapters.FoundationDB, as: FDB
   alias Ecto.Adapters.FoundationDB.Tenant
-  alias Ecto.Adapters.FoundationDB.Record.Tx
+  alias Ecto.Adapters.FoundationDB.IndexInventory
+  #alias Ecto.Adapters.FoundationDB.Record.Tx
 
   @migration_keyspace_prefix <<0xFE>>
 
@@ -43,7 +44,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
   end
 
   def execute_ddl(
-        _adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: adapter_opts},
         {:create,
          %Ecto.Migration.Index{
            prefix: tenant_id,
@@ -56,23 +57,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
       when is_binary(tenant_id) do
     db = FDB.db(adapter_opts)
     tenant = Tenant.open!(db, tenant_id, adapter_opts)
-    Tx.create_index(tenant, source, index_name, index_fields)
-
-    raise """
-    Create Index
-
-    prefix: #{inspect(tenant_id)}
-
-    source: #{inspect(source)}
-
-    index_name: #{inspect(index_name)}
-
-    index_fields: #{inspect(index_fields)}
-    """
+    :ok = IndexInventory.create_index(tenant, adapter_meta, source, index_name, index_fields)
+    {:ok, []}
   end
 
   @impl true
-  def lock_for_migrations(_adapter_meta = %{opts: adapter_opts}, _options, fun) do
+  def lock_for_migrations(_adapter_meta = %{opts: _adapter_opts}, _options, fun) do
     # Ecto locks the `schema_migrations` table when running
     # migrations, guaranteeing two different servers cannot run the same
     # migration at the same time.
@@ -83,8 +73,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
     # for the tenant, which enters a receive state before the clear. The other
     # is the transaction for the actual migration work being done. When the work
     # is finished, it signals the sleeping transaction to complete.
-    db = FDB.db(adapter_opts)
-    ids = Tenant.list(db, adapter_opts)
+    #db = FDB.db(adapter_opts)
+    #ids = Tenant.list(db, adapter_opts)
 
     fun.()
   end

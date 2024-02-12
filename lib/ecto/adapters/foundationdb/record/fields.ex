@@ -19,8 +19,12 @@ defmodule Ecto.Adapters.FoundationDB.Record.Fields do
     pk_field
   end
 
-  def pk_front(fields, pk_field) do
-    pk = fields[pk_field]
-    [{pk_field, pk} | Keyword.drop(fields, [pk_field])]
+  def to_front(kw = [{first_key, _} | _], key) do
+    if first_key == key do
+      kw
+    else
+      val = kw[key]
+      [{key, val} | Keyword.delete(kw, key)]
+    end
   end
 end

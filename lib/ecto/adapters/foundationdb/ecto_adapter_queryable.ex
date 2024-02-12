@@ -28,7 +28,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   @impl Ecto.Adapter.Queryable
   def execute(
-        _adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: adapter_opts},
         _query_meta,
         _query_cache =
           {:nocache, {:all, query, {_limit, limit_fn}, %{}, ordering_fn}},
@@ -39,7 +39,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
     result =
       tenant
-      |> Tx.all(adapter_opts, query, params)
+      |> Tx.all(adapter_meta, query, params)
       |> ordering_fn.()
       |> limit_fn.()
       |> Fields.strip_field_names_for_ecto()
@@ -48,7 +48,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   end
 
   def execute(
-        _adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: adapter_opts},
         _query_meta,
         _query_cache =
           {:nocache, {:delete_all, query, {nil, _limit_fn}, %{}, _ordering_fn}},
@@ -56,7 +56,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         _options
       ) do
     query = %Ecto.Query{prefix: tenant} = assert_tenancy!(query, adapter_opts)
-    num = Tx.delete_all(tenant, adapter_opts, query, params)
+    num = Tx.delete_all(tenant, adapter_meta, query, params)
     {num, []}
   end
 

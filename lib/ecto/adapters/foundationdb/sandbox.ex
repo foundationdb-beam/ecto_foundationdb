@@ -5,11 +5,14 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
     get_or_create_test_db()
   end
 
-  def checkout(repo, id) when is_binary(id) do
+  def checkout(repo, id, migration) when is_binary(id) do
     case :persistent_term.get({__MODULE__, id, :tenant}, nil) do
       nil ->
         db = get_or_create_test_db()
         tenant = Tenant.open_empty!(db, id, repo.config())
+
+        :ok = Ecto.Migrator.up(repo, 0, migration, prefix: id, log: false)
+
         :persistent_term.put({__MODULE__, id, :tenant}, tenant)
         tenant
 

@@ -19,12 +19,26 @@ defmodule Ecto.Integration.Case do
   alias Ecto.Adapters.FoundationDB.Sandbox
 
   setup do
-    tenant = Sandbox.checkout(TestRepo, "MyTenant")
-    other_tenant = Sandbox.checkout(TestRepo, "OtherTenant")
+    tenant_task =
+      Task.async(fn ->
+        Sandbox.checkout(TestRepo, "MyTenant", EctoFoundationDB.Integration.Migration)
+      end)
+
+    other_tenant_task =
+      Task.async(fn ->
+        Sandbox.checkout(TestRepo, "OtherTenant", EctoFoundationDB.Integration.Migration)
+      end)
+
+    tenant = Task.await(tenant_task)
+    other_tenant = Task.await(other_tenant_task)
 
     on_exit(fn ->
-      Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, "MyTenant")
-      Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, "OtherTenant")
+      t1 = Task.async(fn -> Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, "MyTenant") end)
+
+      t2 =
+        Task.async(fn -> Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, "OtherTenant") end)
+
+      Task.await_many([t1, t2])
     end)
 
     {:ok,
@@ -39,11 +53,5 @@ _ = Ecto.Adapters.FoundationDB.storage_down(TestRepo.config())
 :ok = Ecto.Adapters.FoundationDB.storage_up(TestRepo.config())
 
 {:ok, _} = TestRepo.start_link()
-
-:ok =
-  Ecto.Migrator.up(TestRepo, 0, EctoFoundationDB.Integration.Migration,
-    prefix: "MyTenant",
-    log: false
-  )
 
 ExUnit.start()
