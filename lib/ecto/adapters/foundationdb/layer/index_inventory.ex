@@ -1,7 +1,7 @@
-defmodule Ecto.Adapters.FoundationDB.IndexInventory do
+defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
-  alias Ecto.Adapters.FoundationDB.Record.Pack
-  alias Ecto.Adapters.FoundationDB.Record.Tx
+  alias Ecto.Adapters.FoundationDB.Layer.Pack
+  alias Ecto.Adapters.FoundationDB.Layer.Tx
 
   @index_inventory_source "indexes"
 

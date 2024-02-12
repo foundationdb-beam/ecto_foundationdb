@@ -1,4 +1,4 @@
-defmodule Ecto.Adapters.FoundationDB.Record.Ordering do
+defmodule Ecto.Adapters.FoundationDB.Layer.Ordering do
   @moduledoc """
   This module emulates `query.order_bys` behavior, because FoundationDB doesn't have native support for result ordering.
   """

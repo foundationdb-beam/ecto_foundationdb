@@ -1,7 +1,7 @@
-defmodule Ecto.Adapters.FoundationDB.Record.Tx do
-  alias Ecto.Adapters.FoundationDB.IndexInventory
-  alias Ecto.Adapters.FoundationDB.Record.Fields
-  alias Ecto.Adapters.FoundationDB.Record.Pack
+defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
+  alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
+  alias Ecto.Adapters.FoundationDB.Layer.Fields
+  alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
 
@@ -79,19 +79,19 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
 
     entries =
       entries
-      |> Enum.map(fn {{pk_field, pk}, fields} ->
+      |> Enum.map(fn {{pk_field, pk}, data_object} ->
         key = Pack.to_fdb_datakey(adapter_opts, source, pk)
-        fields = Fields.to_front(fields, pk_field)
-        {key, fields}
+        data_object = Fields.to_front(data_object, pk_field)
+        {key, data_object}
       end)
 
-    get_stage = fn tx, {key, _value} -> :erlfdb.get(tx, key) end
+    get_stage = fn tx, {key, _data_object} -> :erlfdb.get(tx, key) end
 
     set_stage = fn
-      tx, {fdb_key, fields}, :not_found, count ->
-        fdb_value = Pack.to_fdb_value(fields)
+      tx, {fdb_key, data_object}, :not_found, count ->
+        fdb_value = Pack.to_fdb_value(data_object)
         :erlfdb.set(tx, fdb_key, fdb_value)
-        set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, fields, source)
+        set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source)
         count + 1
 
       _tx, {key, _}, _result, _acc ->
@@ -107,7 +107,7 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
         source,
         pk_field,
         pks,
-        fields
+        update_data
       ) do
     idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, source)
 
@@ -120,15 +120,15 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
         acc
 
       tx, fdb_key, fdb_value, acc ->
-        value =
+        data_object =
           fdb_value
           |> Pack.from_fdb_value()
-          |> Keyword.merge(fields, fn _k, _v1, v2 -> v2 end)
+          |> Keyword.merge(update_data, fn _k, _v1, v2 -> v2 end)
           |> Fields.to_front(pk_field)
 
-        :erlfdb.set(tx, fdb_key, Pack.to_fdb_value(value))
-        clear_indexes_for_one(tx, idxs, adapter_opts, fdb_key, value, source)
-        set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, value, source)
+        :erlfdb.set(tx, fdb_key, Pack.to_fdb_value(data_object))
+        clear_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source)
+        set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source)
 
         acc + 1
     end
@@ -187,12 +187,12 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
 
     case Fields.get_pk_field!(schema) do
       ^where_field ->
-        key = Pack.to_fdb_datakey(adapter_opts, source, where_value)
+        fdb_key = Pack.to_fdb_datakey(adapter_opts, source, where_value)
 
         db_or_tenant
         |> transactional(fn tx ->
-          value = :erlfdb.wait(:erlfdb.get(tx, key))
-          [{key, value}]
+          fdb_value = :erlfdb.wait(:erlfdb.get(tx, fdb_key))
+          [{fdb_key, fdb_value}]
         end)
         |> handle_fdb_kvs(field_names)
 
@@ -215,7 +215,7 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
                 index_object[:value]
               end)
             end)
-            |> Enum.map(fn value -> Fields.arrange(value, field_names) end)
+            |> Enum.map(fn data_object -> Fields.arrange(data_object, field_names) end)
 
           {:error, _} ->
             raise Unsupported,
@@ -342,8 +342,8 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
       {_k, _v} -> true
     end)
     |> Enum.map(fn
-      {_k, value} ->
-        value
+      {_k, fdb_value} ->
+        fdb_value
         |> Pack.from_fdb_value()
         |> Fields.arrange(field_names)
     end)
@@ -404,26 +404,26 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
   defp get_index_entry(
          adapter_opts,
          fdb_key,
-         value = [{pk_field, pk_value} | _],
+         data_object = [{pk_field, pk_value} | _],
          index_fields,
          index_name,
          source
        ) do
     index_fields = index_fields -- [pk_field]
-    index_entries = for idx_field <- index_fields, do: {idx_field, Keyword.get(value, idx_field)}
+    index_entries = for idx_field <- index_fields, do: {idx_field, Keyword.get(data_object, idx_field)}
     path_entries = index_entries ++ [{pk_field, pk_value}]
     {_, path_vals} = Enum.unzip(path_entries)
 
     index_key = Pack.to_fdb_indexkey(adapter_opts, source, "#{index_name}", path_vals)
 
     index_object =
-      Pack.new_index_object(source, fdb_key, pk_field, pk_value, index_entries, value)
+      Pack.new_index_object(source, fdb_key, pk_field, pk_value, index_entries, data_object)
       |> Pack.to_fdb_value()
 
     {index_key, index_object}
   end
 
-  defp clear_indexes_for_one(tx, idxs, adapter_opts, fdb_key, value, source) do
+  defp clear_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source) do
     for idx <- idxs do
       index_name = idx[:id]
       index_fields = idx[:fields]
@@ -432,7 +432,7 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
         get_index_entry(
           adapter_opts,
           fdb_key,
-          value,
+          data_object,
           index_fields,
           index_name,
           source
@@ -442,7 +442,7 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
     end
   end
 
-  defp set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, value, source) do
+  defp set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source) do
     for idx <- idxs do
       index_name = idx[:id]
       index_fields = idx[:fields]
@@ -451,7 +451,7 @@ defmodule Ecto.Adapters.FoundationDB.Record.Tx do
         get_index_entry(
           adapter_opts,
           fdb_key,
-          value,
+          data_object,
           index_fields,
           index_name,
           source

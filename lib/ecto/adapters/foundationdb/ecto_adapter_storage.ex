@@ -2,7 +2,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
   @behaviour Ecto.Adapter.Storage
 
   alias Ecto.Adapters.FoundationDB.Options
-  alias Ecto.Adapters.FoundationDB.Record.Pack
+  alias Ecto.Adapters.FoundationDB.Layer.Pack
 
   @all_data_start_key ""
   @all_data_end_key <<0xFF>>

@@ -4,9 +4,9 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   alias Ecto.Adapters.FoundationDB, as: FDB
 
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
-  alias Ecto.Adapters.FoundationDB.Record.Ordering
-  alias Ecto.Adapters.FoundationDB.Record.Fields
-  alias Ecto.Adapters.FoundationDB.Record.Tx
+  alias Ecto.Adapters.FoundationDB.Layer.Ordering
+  alias Ecto.Adapters.FoundationDB.Layer.Fields
+  alias Ecto.Adapters.FoundationDB.Layer.Tx
   alias Ecto.Adapters.FoundationDB.Schema
   alias Ecto.Adapters.FoundationDB.Tenant
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy

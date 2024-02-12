@@ -1,4 +1,4 @@
-defmodule Ecto.Adapters.FoundationDB.Record.Fields do
+defmodule Ecto.Adapters.FoundationDB.Layer.Fields do
   def parse_select_fields(select_fields) do
     select_fields
     |> Enum.map(fn {{:., _, [{:&, [], [0]}, field]}, [], []} -> field end)

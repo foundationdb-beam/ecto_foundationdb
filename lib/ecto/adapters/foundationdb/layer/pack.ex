@@ -1,4 +1,4 @@
-defmodule Ecto.Adapters.FoundationDB.Record.Pack do
+defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
   alias Ecto.Adapters.FoundationDB.Options
 
   @data_namespace "d"

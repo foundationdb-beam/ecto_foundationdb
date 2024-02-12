@@ -1,5 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.Transaction do
-  alias Ecto.Adapters.FoundationDB.Record.Tx
+  alias Ecto.Adapters.FoundationDB.Layer.Tx
 
   def commit(db_or_tenant, fun) do
     fun = fn ->

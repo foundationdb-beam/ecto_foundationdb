@@ -8,8 +8,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
 
   alias Ecto.Adapters.FoundationDB, as: FDB
   alias Ecto.Adapters.FoundationDB.Tenant
-  alias Ecto.Adapters.FoundationDB.IndexInventory
-  #alias Ecto.Adapters.FoundationDB.Record.Tx
+  alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
+  #alias Ecto.Adapters.FoundationDB.Layer.Tx
 
   @migration_keyspace_prefix <<0xFE>>
 

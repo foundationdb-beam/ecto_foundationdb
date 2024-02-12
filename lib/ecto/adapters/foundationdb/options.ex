@@ -1,6 +1,6 @@
 defmodule Ecto.Adapters.FoundationDB.Options do
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
-  alias Ecto.Adapters.FoundationDB.Record.Pack
+  alias Ecto.Adapters.FoundationDB.Layer.Pack
 
   def get(options, :open_db), do: Keyword.get(options, :open_db, &:erlfdb.open/0)
   def get(options, :storage_id), do: Keyword.get(options, :storage_id, Ecto.Adapters.FoundationDB)

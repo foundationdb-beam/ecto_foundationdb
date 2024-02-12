@@ -3,8 +3,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   alias Ecto.Adapters.FoundationDB, as: FDB
 
-  alias Ecto.Adapters.FoundationDB.Record.Fields
-  alias Ecto.Adapters.FoundationDB.Record.Tx
+  alias Ecto.Adapters.FoundationDB.Layer.Fields
+  alias Ecto.Adapters.FoundationDB.Layer.Tx
   alias Ecto.Adapters.FoundationDB.Schema
   alias Ecto.Adapters.FoundationDB.Tenant
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
@@ -31,10 +31,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     %{source: source, schema: schema, prefix: tenant} = assert_tenancy!(adapter_opts, schema_meta)
 
     entries =
-      Enum.map(entries, fn fields ->
+      Enum.map(entries, fn data_object ->
         pk_field = Fields.get_pk_field!(schema)
-        pk = fields[pk_field]
-        {{pk_field, pk}, fields}
+        pk = data_object[pk_field]
+        {{pk_field, pk}, data_object}
       end)
 
     num_ins = Tx.insert_all(tenant, adapter_meta, source, entries)
@@ -45,13 +45,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   def insert(
         adapter_meta,
         schema_meta,
-        fields,
+        data_object,
         on_conflict,
         returning,
         options
       ) do
     {1, nil} =
-      insert_all(adapter_meta, schema_meta, nil, [fields], on_conflict, returning, [], options)
+      insert_all(adapter_meta, schema_meta, nil, [data_object], on_conflict, returning, [], options)
 
     {:ok, []}
   end
@@ -60,7 +60,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   def update(
         adapter_meta = %{opts: adapter_opts},
         schema_meta,
-        fields,
+        update_data,
         filters,
         _returning,
         _options
@@ -69,7 +69,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
-    case Tx.update_pks(tenant, adapter_meta, source, pk_field, [pk], fields) do
+    case Tx.update_pks(tenant, adapter_meta, source, pk_field, [pk], update_data) do
       1 ->
         {:ok, []}
 
