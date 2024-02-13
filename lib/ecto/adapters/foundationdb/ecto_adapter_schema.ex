@@ -51,7 +51,16 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         options
       ) do
     {1, nil} =
-      insert_all(adapter_meta, schema_meta, nil, [data_object], on_conflict, returning, [], options)
+      insert_all(
+        adapter_meta,
+        schema_meta,
+        nil,
+        [data_object],
+        on_conflict,
+        returning,
+        [],
+        options
+      )
 
     {:ok, []}
   end

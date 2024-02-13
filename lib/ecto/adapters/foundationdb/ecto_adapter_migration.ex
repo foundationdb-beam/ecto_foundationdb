@@ -9,7 +9,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
   alias Ecto.Adapters.FoundationDB, as: FDB
   alias Ecto.Adapters.FoundationDB.Tenant
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
-  #alias Ecto.Adapters.FoundationDB.Layer.Tx
+  # alias Ecto.Adapters.FoundationDB.Layer.Tx
 
   @migration_keyspace_prefix <<0xFE>>
 
@@ -73,8 +73,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
     # for the tenant, which enters a receive state before the clear. The other
     # is the transaction for the actual migration work being done. When the work
     # is finished, it signals the sleeping transaction to complete.
-    #db = FDB.db(adapter_opts)
-    #ids = Tenant.list(db, adapter_opts)
+    # db = FDB.db(adapter_opts)
+    # ids = Tenant.list(db, adapter_opts)
 
     fun.()
   end

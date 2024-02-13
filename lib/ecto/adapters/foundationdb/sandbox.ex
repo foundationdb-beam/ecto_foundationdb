@@ -1,4 +1,11 @@
 defmodule Ecto.Adapters.FoundationDB.Sandbox do
+  @moduledoc """
+  A module for managing a sandbox FoundationDB cluster. This allows a developer to create
+  a space under which it should be safe to write tests.
+
+  When using this module, it creates a directory in the project root called `.erlfdb`. It
+  is safe to delete this directory when you no longer need it (e.g. after test execution)
+  """
   alias Ecto.Adapters.FoundationDB.Tenant
 
   def open_db() do

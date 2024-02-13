@@ -210,10 +210,14 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
               tx
               |> :erlfdb.get_range_startswith(indexkey_startswith)
               |> :erlfdb.wait()
-              |> Enum.map(fn {_index_fdb_key, index_fdb_value} ->
-                index_object = Pack.from_fdb_value(index_fdb_value)
-                index_object[:value]
-              end)
+            end)
+            |> Enum.map(fn {_index_fdb_key, index_fdb_value} ->
+              index_object = Pack.from_fdb_value(index_fdb_value)
+              index_object[:value]
+            end)
+            |> Enum.filter(fn data_object ->
+              # Filter by the where_values because our indexes can have key conflicts
+              where_value == data_object[where_field]
             end)
             |> Enum.map(fn data_object -> Fields.arrange(data_object, field_names) end)
 
@@ -410,7 +414,10 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
          source
        ) do
     index_fields = index_fields -- [pk_field]
-    index_entries = for idx_field <- index_fields, do: {idx_field, Keyword.get(data_object, idx_field)}
+
+    index_entries =
+      for idx_field <- index_fields, do: {idx_field, Keyword.get(data_object, idx_field)}
+
     path_entries = index_entries ++ [{pk_field, pk_value}]
     {_, path_vals} = Enum.unzip(path_entries)
 

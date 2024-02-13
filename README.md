@@ -1,38 +1,105 @@
-# EctoFoundationDB
+# Ecto FoundationDB Adapter
 
-**Work in progress. Almost nothing works. Please see unit tests to see what's currently supported.**
+**Work in progress. Please see integration tests to see what's currently supported.**
 
 ## Driver
 
-An Ecto Adapter for FoundationDB, written using [apache/couchdb-erlfdb](https://github.com/apache/couchdb-erlfdb).
-`ecto_foundationdb` is currently configured to use a temporary fork of `erlfdb` at
+An Ecto Adapter for FoundationDB, written using [apache/couchdb-erlfdb](https://github.com/apache/couchdb-erlfdb)
+as the driver for communicating with FoundationDB.
+
+Note: `ecto_foundationdb` is currently configured to use a temporary fork of `erlfdb` at
 [JesseStimpson/erlfdb](https://github.com/JesseStimpson/erlfdb). The fork includes support for
 FDB's [Tenants](https://apple.github.io/foundationdb/tenants.html).
 
-## Goals
-
-Our goal is to create a simple and straight-forward adapter that's able to take advantage of FDB's
-strengths, including:
-
-* Tenants
-* getrange and clearrange
-* Transactions
-
-It's unlikely that this project will be able to support the full Ecto featureset due to the nature
-of FoundationDB as a key-value store. While it's possible to layer full SQL semantics on a FoundationDB
-cluster, this project doesn't attempt to do so. This means that certain Ecto features will stay unimplemented.
-We'll call these things out explicitly as they become clear.
-
-## Contributing
-
-Contributions are welcome. I've found the following resources helpful during development:
-
-* [ecto_mnesia](https://github.com/Nebo15/ecto_mnesia)
-* [ecto_qlc](https://github.com/Schultzer/ecto_qlc)
-* [ecto_sql](https://github.com/elixir-ecto/ecto_sql)
-* [ecto_sqlite3](https://github.com/elixir-sqlite/ecto_sqlite3)
-* [Source of the ecto Adapter behaviours](https://github.com/elixir-ecto/ecto/tree/master/lib/ecto/adapter)
-
 ## Installation
 
-Do not install this as a depedency for your application. It's not ready for that.
+`ecto_foundationdb` is still under development; it's not ready for any production workloads.
+
+```elixir
+defp deps do
+  [
+    {:ecto_foundationdb, git: "https://github.com/JesseStimpson/ecto_foundationdb.git", branch: "main"}
+  ]
+end
+```
+
+## Usage
+
+Define your repo similar to this.
+
+```elixir
+defmodule MyApp.Repo do
+  use Ecto.Repo, otp_app: :my_app, adapter: Ecto.Adapters.FoundationDB
+end
+```
+
+Configure your repo similar to the following.
+
+```elixir
+config :my_app,
+  ecto_repos: [MyApp.Repo]
+
+config :my_app, MyApp.Repo,
+  cluster_file: "/etc/foundationdb/fdb.cluster"
+```
+
+### Tenants
+
+`ecto_foundationdb` requires the use of FoundationDB Tenants, which can be enabled on your cluster
+with the following configuration in an `fdbcli` prompt.
+
+```
+fdb> configure tenant_mode=optional_experimental
+```
+
+Creating a schema to be used in a tenant.
+
+```elixir
+defmodule User do
+  use Ecto.Schema
+  @schema_context usetenant: true
+  # ...
+end
+```
+
+Setting up a tenant.
+
+```elixir
+alias Ecto.Adapters.FoundationDB
+alias Ecto.Adapters.FoundationDB.Tenant
+
+tenant = Tenant.open!(MyApp.Repo, "some-org")
+```
+
+Each call on your `Repo` must specify a tenant via the Ecto `prefix` option.
+
+Inserting a new struct.
+
+```elixir
+user = %User{name: "John", organization_id: "some-org"}
+       |> FoundationDB.usetenant(tenant)
+
+MyApp.Repo.insert!(user)
+```
+
+Querying for a struct using the primary key.
+
+```elixir
+MyApp.Repo.get!(User, user.id, prefix: tenant)
+```
+
+Failure to specify a tenant will result in a raised exception at runtime.
+
+## Running tests
+
+To run all unit tests, use the following.
+
+```sh
+mix test
+```
+
+To run only the integration tests, use the following.
+
+```sh
+mix test --include integration
+```

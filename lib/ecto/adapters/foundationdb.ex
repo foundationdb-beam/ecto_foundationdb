@@ -1,6 +1,120 @@
 defmodule Ecto.Adapters.FoundationDB do
   @moduledoc """
-  Documentation for `Ecto.Adapters.FoundationDB`.
+  Adapter module for FoundationDB.
+
+  It uses `:erlfdb` for communicating to the database.
+
+  ## Options
+
+    * `:cluster_file` - The path to the fdb.cluster file. The default is
+      `"/etc/foundationdb/fdb.cluster"`.
+    * `:key_delimiter` - Keys in the database are constructed using this
+      delimiter in between segments. Defaults to "/".
+    * `:storage_id` - All tenants created by this adapter are prefix with
+      this string. This allows multiple configurations to operate on the
+      same FoundationDB cluster indepedently. Defaults to
+      `"Ecto.Adapters.FoundationDB"`.
+    * `:open_db` - 0-arity function used for opening a reference to the
+       FoundationDB cluster. Defaults to `:erlfdb.open(cluster_file)`. WHen
+       using `Ecto.Adapters.FoundationDB.Sandbox`, you should consider setting
+       this option to `Sandbox.open_db/0`.
+    * `:indexkey_encoder` - 1-arity function that accepts a term as input
+       and provides a binary as output. Defaults to `Pack.indexkey_encoder/1`.
+       This option provides some configurability to `ecto_foundationdb`'s
+       management of indexes, and should rarely be used.
+
+  ## Limitations and caveats
+
+  There are some limitations when using Ecto with FoundationDB.
+
+  ### Tenants
+
+  As discussed in the README, we require the use of tenants. When a struct is retrieved
+  from a tenant (using `:prefix`), that's struct's metadata holds onto the tenant
+  reference. This helps to protect your application from a struct accidentally
+  crossing tenant boundaries due to some unforeseen bug.
+
+  ### Data Types
+
+  `ecto_foundationdb` stores your struct's data using `:erlang.term_to_binary/1`, and
+  retrives it with `:erlang.binary_to_term/1`. As such, there is no data type
+  conversion between Elixir types and Database Types. Any term you put in your
+  struct will be stored and later retrieved.
+
+  ### Key and Value Size
+
+  FoundationDB imposes strict limits on the size of keys and the size of values. Please
+  be aware of these limitations as you develop. `ecto_foundationdb` doesn't make
+  any explicit attempt to protect you from these errors.
+
+  ### Layer
+
+  `ecto_foundationdb` implements a specific Layer on the FoundationDB
+  key-value store. This Layer is intended to be generally useful, but you
+  may not find it suitable for your workloads. The Layer is documented in
+  detail at `Ecto.Adapters.FoundationDB.Layer` (TODO). This project does not support
+  plugging in other Layers.
+
+  For example, the `ecto_foundationdb` layer will not support time-series data
+  very well.
+
+  ### Queries
+
+  The Layer implemenation affords us a limited set of query types. Any queries
+  beyond these will raise an exception. If you require more complex queries,
+  we suggest that you first extract all the data that you need using a supported
+  query and then constrain, aggregate, and group as needed with Elixir functions.
+
+    * `Repo.get` using primary key
+    * `Repo.all` using no constraint. This will return all such structs for
+      the tenant.
+    * `Repo.all` using an index. This will return matching structs for the
+      tenant. More on indexes below.
+
+  ### Indexes
+
+  Simple indexes are supported. They are similar to Ecto SQL indexes in some ways,
+  but critically different in others.
+
+    1. An index is created via a migration file, as it is with Ecto SQL. However,
+       this is the only supported purpose of migration files so far.
+
+    2. Each index roughly doubles the size of data in your database for the
+       schema on which it's created.
+
+    3. An index created on more than one field is hierarchical. Similar to Unix file
+       paths, each index value can be considered the parent of the next index value.
+       Because of the hierarchical nature, you can query for all records of a certain
+       set of index values only if you start at the top-most index and proceed without
+       skipping indexed fields. (Note: this still needs to be implemented)
+
+    4. Indexes are managed within transactions, so that they should always be
+       consistent.
+
+    5. Upon index creation, each tenant's data will be indexed in a transaction,
+       and because of FoundationDB's 5-second transaction limit, this means that
+       it may be impossible to create an index on a very large dataset using
+       purely `ecto_foundationdb`.
+
+    6. Migrations must be executed on a per tenant basis, and they can be
+       run in parallel.
+
+  ### Transactions
+
+  `ecto_foundationdb` implements its own transaction API. This was decided early on
+  to make sure we can support tenants. It's possible that we can switch to Ecto's
+  Transactions with more investigation. In the meantime, it's important to point out
+  that a transaction always executes on a single tenant, and so individual Repo calls
+  inside your transaction do not need to specify a `:prefix`.
+
+  ### Other Ecto Features
+
+  Many of Ecto's features probably do not work with `ecto_foundationdb`. Please
+  see the integration tests for a collection of use cases that is known to work.
+
+  It's important to note that even though `ecto_foundationdb` relies on `ecto_sql`,
+  it's only for the `Ecto.Adapter.Migration` behaviour and `create index` function.
+  The rest of `ecto_sql` is unused.
   """
 
   @behaviour Ecto.Adapter

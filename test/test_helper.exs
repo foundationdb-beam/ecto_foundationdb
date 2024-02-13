@@ -10,7 +10,13 @@ alias Ecto.Integration.TestRepo
 
 Application.put_env(:ecto_foundationdb, TestRepo,
   open_db: &Ecto.Adapters.FoundationDB.Sandbox.open_db/0,
-  storage_id: Ecto.Adapters.FoundationDB.Sandbox
+  storage_id: Ecto.Adapters.FoundationDB.Sandbox,
+
+  # Increases number of index collisions
+  indexkey_encoder: fn x ->
+    i = :erlang.phash2(x, 0xFF)
+    <<i::unsigned-big-integer-size(8)>>
+  end
 )
 
 defmodule Ecto.Integration.Case do
