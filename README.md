@@ -102,19 +102,19 @@ mix test
 
 Roughly in order of priority.
 
-[x] Sandbox
-[x] Basic crud operations
-[x] Single index
-[x] Initial documentation
-[ ] Migration tooling (handling many tenants)
-[ ] Migration locking
-[ ] Layer documentation
-[ ] Hierarchical multi index
-[ ] Code cleanliness/readability (esp Tx module)
-[ ] FDB Watches
-[ ] Benchmarking
-[ ] Ecto Transactions
-[ ] `TestRepo.stream`
-[ ] Migration logging
-[ ] Composite primary key
-[ ] Pluggable Layers
+ - [x] Sandbox
+ - [x] Basic crud operations
+ - [x] Single index
+ - [x] Initial documentation
+ - [ ] Migration tooling (handling many tenants)
+ - [ ] Migration locking
+ - [ ] Layer documentation
+ - [ ] Hierarchical multi index
+ - [ ] Code cleanliness/readability (esp Tx module)
+ - [ ] FDB Watches
+ - [ ] Benchmarking
+ - [ ] Ecto Transactions
+ - [ ] `TestRepo.stream`
+ - [ ] Migration logging
+ - [ ] Composite primary key
+ - [ ] Pluggable Layers
