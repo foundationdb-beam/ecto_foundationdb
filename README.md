@@ -92,14 +92,29 @@ Failure to specify a tenant will result in a raised exception at runtime.
 
 ## Running tests
 
-To run all unit tests, use the following.
+To run the integration tests, use the following.
 
 ```sh
 mix test
 ```
 
-To run only the integration tests, use the following.
+## Features
 
-```sh
-mix test --include integration
-```
+Roughly in order of priority.
+
+[x] Sandbox
+[x] Basic crud operations
+[x] Single index
+[x] Initial documentation
+[ ] Migration tooling (handling many tenants)
+[ ] Migration locking
+[ ] Layer documentation
+[ ] Hierarchical multi index
+[ ] Code cleanliness/readability (esp Tx module)
+[ ] FDB Watches
+[ ] Benchmarking
+[ ] Ecto Transactions
+[ ] `TestRepo.stream`
+[ ] Migration logging
+[ ] Composite primary key
+[ ] Pluggable Layers
