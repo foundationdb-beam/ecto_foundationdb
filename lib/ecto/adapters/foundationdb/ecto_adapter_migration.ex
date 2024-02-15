@@ -63,18 +63,20 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
 
   @impl true
   def lock_for_migrations(_adapter_meta = %{opts: _adapter_opts}, _options, fun) do
-    # Ecto locks the `schema_migrations` table when running
+    # Ecto wants to lock the `schema_migrations` table when running
     # migrations, guaranteeing two different servers cannot run the same
     # migration at the same time.
     #
-    # For FoundationDB, we can write a key in schema_migrations_lock for each
-    # tenant. Then, while migrations run, for each tenant being migrated, there
-    # are 2 simulatanous transaction. One is a "get" and "clear" on the schema_migration_lock
-    # for the tenant, which enters a receive state before the clear. The other
-    # is the transaction for the actual migration work being done. When the work
-    # is finished, it signals the sleeping transaction to complete.
-    # db = FDB.db(adapter_opts)
-    # ids = Tenant.list(db, adapter_opts)
+    # Unfortunately, the mechanism it uses isn't compatible with the design of :erlfdb.
+    # We've attempted to start a transaction on the tenant and add a write conflict on
+    # all the keys in the tenant. Then, the migration would run fully within that transaction.
+    #
+    # However, Ecto.Migrator.async_migrate_maybe_in_transaction/7 uses a Task to
+    # perform the ddl steps. The use of the Task breaks our transaction because the Task
+    # has its own process dictionary, and we cannot telegraph the transaction handle
+    # to the ddl. I'm unsure how we can resolve this without a change to ecto_sql. For
+    # now, we just don't lock. It will be up to the application to ensure there are no
+    # conflicts when running migrations on tenants.
 
     fun.()
   end
