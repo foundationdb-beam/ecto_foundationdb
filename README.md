@@ -76,11 +76,15 @@ Each call on your `Repo` must specify a tenant via the Ecto `prefix` option.
 Inserting a new struct.
 
 ```elixir
-user = %User{name: "John", organization_id: "some-org"}
+user = %User{name: "John"}
        |> FoundationDB.usetenant(tenant)
 
 MyApp.Repo.insert!(user)
 ```
+
+**Note**: Because we are using the "some-org" tenant, John is 
+considered a member of "some-org" without having to specify the relationship
+in the User schema itself.
 
 Querying for a struct using the primary key.
 
