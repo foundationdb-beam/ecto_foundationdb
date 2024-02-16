@@ -50,14 +50,18 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
            prefix: tenant_id,
            table: source,
            name: index_name,
-           columns: index_fields
+           columns: index_fields,
+           options: options
          }},
         _options
       )
       when is_binary(tenant_id) do
     db = FDB.db(adapter_opts)
     tenant = Tenant.open!(db, tenant_id, adapter_opts)
-    :ok = IndexInventory.create_index(tenant, adapter_meta, source, index_name, index_fields)
+
+    :ok =
+      IndexInventory.create_index(tenant, adapter_meta, source, index_name, index_fields, options)
+
     {:ok, []}
   end
 

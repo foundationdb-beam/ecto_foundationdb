@@ -7,15 +7,34 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
 
   def source(), do: EctoAdapterMigration.prepare_migration_key(@index_inventory_source)
 
-  def create_index(db_or_tenant, adapter_meta = %{cache: cache}, source, index_name, index_fields) do
+  def create_index(
+        db_or_tenant,
+        adapter_meta = %{cache: cache},
+        source,
+        index_name,
+        index_fields,
+        options
+      ) do
     :ets.delete_all_objects(cache)
-    inventory_kv = new_index(adapter_meta, source, index_name, index_fields)
-    Tx.create_index(db_or_tenant, adapter_meta, source, index_name, index_fields, inventory_kv)
+    inventory_kv = new_index(adapter_meta, source, index_name, index_fields, options)
+
+    Tx.create_index(
+      db_or_tenant,
+      adapter_meta,
+      source,
+      index_name,
+      index_fields,
+      options,
+      inventory_kv
+    )
   end
 
-  def new_index(%{opts: adapter_opts}, source, index_name, index_fields) do
+  def new_index(%{opts: adapter_opts}, source, index_name, index_fields, options) do
     inventory_key = Pack.to_raw_fdb_key(adapter_opts, [source(), source, index_name])
-    inventory_value = Pack.to_fdb_value(id: index_name, source: source, fields: index_fields)
+
+    inventory_value =
+      Pack.to_fdb_value(id: index_name, source: source, fields: index_fields, options: options)
+
     {inventory_key, inventory_value}
   end
 

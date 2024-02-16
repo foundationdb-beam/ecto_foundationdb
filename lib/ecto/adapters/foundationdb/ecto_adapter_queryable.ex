@@ -92,7 +92,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
           {context, query}
       end
 
-    case Tx.is_safe?(tenant, context[:usetenant]) do
+    case Tx.is_safe?(tenant, Schema.get_option(context, :usetenant)) do
       {false, :unused_tenant} ->
         raise IncorrectTenancy, """
         FoundatioDB Adapter is expecting the query for schema \

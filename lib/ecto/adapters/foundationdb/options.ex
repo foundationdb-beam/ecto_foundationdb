@@ -12,7 +12,7 @@ defmodule Ecto.Adapters.FoundationDB.Options do
   def get(options, :key_delimiter), do: Keyword.get(options, :key_delimiter, "/")
 
   def get(options, :indexkey_encoder),
-    do: Keyword.get(options, :indexkey_encoder, &Pack.indexkey_encoder/1)
+    do: Keyword.get(options, :indexkey_encoder, &Pack.indexkey_encoder/2)
 
   def get(options, :cluster_file), do: Keyword.get(options, :cluster_file, "")
 

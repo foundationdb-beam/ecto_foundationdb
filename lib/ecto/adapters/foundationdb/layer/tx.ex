@@ -1,7 +1,10 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
+  alias Ecto.Adapters.FoundationDB.QueryPlan
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
   alias Ecto.Adapters.FoundationDB.Layer.Fields
   alias Ecto.Adapters.FoundationDB.Layer.Pack
+  alias Ecto.Adapters.FoundationDB.Layer.Query
+  alias Ecto.Adapters.FoundationDB.Schema
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
 
@@ -74,7 +77,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     end
   end
 
-  def insert_all(db_or_tenant, adapter_meta = %{opts: adapter_opts}, source, entries) do
+  def insert_all(db_or_tenant, adapter_meta = %{opts: adapter_opts}, source, context, entries) do
     idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, source)
 
     entries =
@@ -85,12 +88,18 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         {key, data_object}
       end)
 
+    write_primary = Schema.get_option(context, :write_primary)
+
     get_stage = fn tx, {key, _data_object} -> :erlfdb.get(tx, key) end
 
     set_stage = fn
       tx, {fdb_key, data_object}, :not_found, count ->
         fdb_value = Pack.to_fdb_value(data_object)
-        :erlfdb.set(tx, fdb_key, fdb_value)
+
+        if write_primary do
+          :erlfdb.set(tx, fdb_key, fdb_value)
+        end
+
         set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source)
         count + 1
 
@@ -165,101 +174,33 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     transactional(db_or_tenant, fn tx -> pipeline(tx, keys, get_stage, 0, clear_stage) end)
   end
 
-  # Single where clause expression matching on the primary key or index
   def all(
         db_or_tenant,
-        adapter_meta = %{opts: adapter_opts},
+        adapter_meta,
         %Ecto.Query{
           select: %Ecto.Query.SelectExpr{
             fields: select_fields
           },
           from: %Ecto.Query.FromExpr{source: {source, schema}},
-          wheres: [
-            %Ecto.Query.BooleanExpr{
-              expr: {:==, [], [{{:., [], [{:&, [], [0]}, where_field]}, [], []}, {:^, [], [0]}]}
-            }
-          ]
+          wheres: wheres
         },
-        [where_value]
+        params
       ) do
-    idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, source)
+    # Steps:
+    #   0. Validate wheres for supported query types
+    #     i. Equal -> where_field == param[0]
+    #     ii. Between -> where_field > param[0] and where_field < param[1]
+    #     iii. None -> empty where clause
+    #   1. pk or index?
+    #   2. construct start key and end key from the first where expression
+    #   3. Use :erlfdb.get, :erlfdb.get_range
+    #   4. Post-get filtering (Remove :not_found, remove index conflicts, )
+    #   5. Arrange fields based on the select input
+    plan = QueryPlan.get(source, schema, wheres, params)
+    kvs = Query.exec(db_or_tenant, adapter_meta, plan)
+
     field_names = Fields.parse_select_fields(select_fields)
-
-    case Fields.get_pk_field!(schema) do
-      ^where_field ->
-        fdb_key = Pack.to_fdb_datakey(adapter_opts, source, where_value)
-
-        db_or_tenant
-        |> transactional(fn tx ->
-          fdb_value = :erlfdb.wait(:erlfdb.get(tx, fdb_key))
-          [{fdb_key, fdb_value}]
-        end)
-        |> handle_fdb_kvs(field_names)
-
-      _pk_field ->
-        case IndexInventory.select_index(idxs, [where_field]) do
-          {:ok, idx} ->
-            index_name = idx[:id]
-
-            indexkey_startswith =
-              Pack.to_fdb_indexkey(adapter_opts, source, index_name, [where_value])
-              |> Pack.add_delimiter(adapter_opts)
-
-            db_or_tenant
-            |> transactional(fn tx ->
-              tx
-              |> :erlfdb.get_range_startswith(indexkey_startswith)
-              |> :erlfdb.wait()
-            end)
-            |> Enum.map(fn {_index_fdb_key, index_fdb_value} ->
-              index_object = Pack.from_fdb_value(index_fdb_value)
-              index_object[:value]
-            end)
-            |> Enum.filter(fn data_object ->
-              # Filter by the where_values because our indexes can have key conflicts
-              where_value == data_object[where_field]
-            end)
-            |> Enum.map(fn data_object -> Fields.arrange(data_object, field_names) end)
-
-          {:error, _} ->
-            raise Unsupported,
-                  """
-                  FoundationDB Adapter does not support a where clause constraining on a field other than the primary key or an index.
-                  """
-        end
-    end
-  end
-
-  # No where clause, all records
-  def all(
-        db_or_tenant,
-        %{opts: adapter_opts},
-        %Ecto.Query{
-          select: %Ecto.Query.SelectExpr{fields: select_fields},
-          from: %Ecto.Query.FromExpr{source: {source, _schema}},
-          wheres: []
-        },
-        []
-      ) do
-    field_names = Fields.parse_select_fields(select_fields)
-    key_startswith = Pack.to_fdb_datakey_startswith(adapter_opts, source)
-
-    kvs =
-      transactional(db_or_tenant, fn tx ->
-        tx
-        |> :erlfdb.get_range_startswith(key_startswith)
-        |> :erlfdb.wait()
-      end)
-
-    handle_fdb_kvs(kvs, field_names)
-  end
-
-  def all(_db_or_tenant, _, query, _) do
-    raise Unsupported, """
-    FoundationDB Adapater has not implemented support for your query
-
-    #{inspect(Map.drop(query, [:__struct__]))}
-    """
+    Enum.map(kvs, fn {_key, data_object} -> Fields.arrange(data_object, field_names) end)
   end
 
   # No where clause, all records
@@ -288,6 +229,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         source,
         index_name,
         index_fields,
+        options,
         {inventory_key, inventory_value}
       ) do
     key_startswith = Pack.to_fdb_datakey_startswith(adapter_opts, source)
@@ -313,6 +255,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
             fdb_key,
             Pack.from_fdb_value(fdb_value),
             index_fields,
+            options,
             index_name,
             source
           )
@@ -337,20 +280,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
       end,
       0
     )
-  end
-
-  defp handle_fdb_kvs(kvs, field_names) do
-    kvs
-    |> Enum.filter(fn
-      {_k, :not_found} -> false
-      {_k, _v} -> true
-    end)
-    |> Enum.map(fn
-      {_k, fdb_value} ->
-        fdb_value
-        |> Pack.from_fdb_value()
-        |> Fields.arrange(field_names)
-    end)
   end
 
   @doc false
@@ -410,6 +339,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
          fdb_key,
          data_object = [{pk_field, pk_value} | _],
          index_fields,
+         index_options,
          index_name,
          source
        ) do
@@ -418,10 +348,17 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     index_entries =
       for idx_field <- index_fields, do: {idx_field, Keyword.get(data_object, idx_field)}
 
-    path_entries = index_entries ++ [{pk_field, pk_value}]
-    {_, path_vals} = Enum.unzip(path_entries)
+    {_, path_vals} = Enum.unzip(index_entries)
 
-    index_key = Pack.to_fdb_indexkey(adapter_opts, source, "#{index_name}", path_vals)
+    index_key =
+      Pack.to_fdb_indexkey(
+        adapter_opts,
+        index_options,
+        source,
+        "#{index_name}",
+        path_vals,
+        pk_value
+      )
 
     index_object =
       Pack.new_index_object(source, fdb_key, pk_field, pk_value, index_entries, data_object)
@@ -434,6 +371,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     for idx <- idxs do
       index_name = idx[:id]
       index_fields = idx[:fields]
+      index_options = idx[:options]
 
       {index_key, _index_object} =
         get_index_entry(
@@ -441,6 +379,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
           fdb_key,
           data_object,
           index_fields,
+          index_options,
           index_name,
           source
         )
@@ -453,6 +392,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     for idx <- idxs do
       index_name = idx[:id]
       index_fields = idx[:fields]
+      index_options = idx[:options]
 
       {index_key, index_object} =
         get_index_entry(
@@ -460,6 +400,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
           fdb_key,
           data_object,
           index_fields,
+          index_options,
           index_name,
           source
         )

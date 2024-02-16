@@ -28,7 +28,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _placeholders,
         _options
       ) do
-    %{source: source, schema: schema, prefix: tenant} = assert_tenancy!(adapter_opts, schema_meta)
+    %{source: source, schema: schema, prefix: tenant, context: context} =
+      assert_tenancy!(adapter_opts, schema_meta)
 
     entries =
       Enum.map(entries, fn data_object ->
@@ -37,7 +38,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         {{pk_field, pk}, data_object}
       end)
 
-    num_ins = Tx.insert_all(tenant, adapter_meta, source, entries)
+    num_ins = Tx.insert_all(tenant, adapter_meta, source, context, entries)
     {num_ins, nil}
   end
 
@@ -112,7 +113,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
          adapter_opts,
          schema_meta = %{source: source, schema: schema, prefix: tenant}
        ) do
-    {context, schema_meta = %{schema: schema, prefix: tenant}} =
+    schema_meta =
+      %{schema: schema, prefix: tenant, context: context} =
       case EctoAdapterMigration.prepare_source(source) do
         {:ok, {source, context}} ->
           tenant =
@@ -120,14 +122,20 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
               do: Tenant.open!(FDB.db(adapter_opts), tenant, adapter_opts),
               else: tenant
 
-          {context, %{schema_meta | source: source, schema: schema, prefix: tenant}}
+          schema_meta
+          |> Map.put(:source, source)
+          |> Map.put(:schema, schema)
+          |> Map.put(:prefix, tenant)
+          |> Map.put(:context, context)
 
         {:error, :unknown_source} ->
           context = Schema.get_context!(source, schema)
-          {context, schema_meta}
+
+          schema_meta
+          |> Map.put(:context, context)
       end
 
-    case Tx.is_safe?(tenant, context[:usetenant]) do
+    case Tx.is_safe?(tenant, Schema.get_option(context, :usetenant)) do
       {false, :unused_tenant} ->
         raise IncorrectTenancy, """
         FoundatioDB Adapter is expecting the struct for schema \

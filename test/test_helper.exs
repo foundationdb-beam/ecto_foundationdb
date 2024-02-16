@@ -13,10 +13,7 @@ Application.put_env(:ecto_foundationdb, TestRepo,
   storage_id: Ecto.Adapters.FoundationDB.Sandbox,
 
   # Increases number of index collisions
-  indexkey_encoder: fn x ->
-    i = :erlang.phash2(x, 0xFF)
-    <<i::unsigned-big-integer-size(8)>>
-  end
+  indexkey_encoder: &Ecto.Adapters.FoundationDB.Layer.Pack.indexkey_encoder(&1, 1, &2)
 )
 
 defmodule Ecto.Integration.Case do

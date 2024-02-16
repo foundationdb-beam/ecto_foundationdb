@@ -59,7 +59,7 @@ defmodule Ecto.Integration.IndexTest do
       hash_1 = "7925D7E6AF6D09F0"
       hash_2 = "9AB33581B7409263"
       encoder = Options.get(TestRepo.config(), :indexkey_encoder)
-      assert encoder.(hash_1) == encoder.(hash_2)
+      assert encoder.(hash_1, []) == encoder.(hash_2, [])
 
       {:ok, _user_hash_1} =
         %User{name: hash_1}

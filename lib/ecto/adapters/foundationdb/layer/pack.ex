@@ -14,15 +14,31 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
   However, this means our indexes will have conflicts that must be resolved with
   filtering.
   """
-  def indexkey_encoder(x) do
-    i = :erlang.phash2(x, 0xFFFFFFFF)
-    <<i::unsigned-big-integer-size(32)>>
+  def indexkey_encoder(x, index_options \\ []) do
+    indexkey_encoder(x, 4, index_options)
   end
 
-  def to_fdb_indexkey(adapter_opts, source, index_name, vals) when is_list(vals) do
+  def indexkey_encoder(x, num_bytes, index_options) do
+    if index_options[:timeseries] do
+      NaiveDateTime.to_iso8601(x)
+    else
+      <<n::unsigned-big-integer-size(num_bytes * 8)>> =
+        <<-1::unsigned-big-integer-size(num_bytes * 8)>>
+
+      i = :erlang.phash2(x, n)
+      <<i::unsigned-big-integer-size(num_bytes * 8)>>
+    end
+  end
+
+  def to_fdb_indexkey(adapter_opts, index_options, source, index_name, vals, id)
+      when is_list(vals) do
     fun = Options.get(adapter_opts, :indexkey_encoder)
-    vals = for v <- vals, do: fun.(v)
-    to_raw_fdb_key(adapter_opts, [source, @index_namespace, index_name | vals])
+    vals = for v <- vals, do: fun.(v, index_options)
+
+    to_raw_fdb_key(
+      adapter_opts,
+      [source, @index_namespace, index_name | vals] ++ if(is_nil(id), do: [], else: [id])
+    )
   end
 
   def add_delimiter(key, adapter_opts) do
