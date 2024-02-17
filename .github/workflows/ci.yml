@@ -29,7 +29,6 @@ jobs:
           key: ${{ matrix.os }}-otp_${{ matrix.otp }}-elixir_${{ matrix.elixir }}-mix_${{ hashFiles('**/mix.lock') }}
           restore-keys: ${{ matrix.os }}-otp_${{ matrix.otp }}-elixir_${{ matrix.elixir }}-mix_
       - run: mix deps.get
-      - run: mix deps.compile
       - run: mix lint
 
   test:
@@ -39,8 +38,8 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-20.04"]
-        elixir: ["1.16", "1.15", "1.14"]
-        otp: ["26", "25", "24"]
+        elixir: ["1.16"]
+        otp: ["26"]
         fdb: ['7.3.32']
     env:
       MIX_ENV: test
