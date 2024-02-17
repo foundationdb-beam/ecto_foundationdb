@@ -1,5 +1,7 @@
 # Ecto FoundationDB Adapter
 
+[![CI](https://github.com/foundationdb-beam/ecto_foundationdb/actions/workflows/ci.yml/badge.svg)](https://github.com/foundationdb-beam/ecto_foundationdb/actions/workflows/ci.yml)
+
 **Work in progress. Please see integration tests to see what's currently supported.**
 
 ## Driver
