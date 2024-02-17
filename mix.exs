@@ -8,7 +8,8 @@ defmodule EctoFoundationdb.MixProject do
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      elixirc_paths: elixirc_paths(Mix.env())
+      elixirc_paths: elixirc_paths(Mix.env()),
+      aliases: aliases()
     ]
   end
 
@@ -26,11 +27,21 @@ defmodule EctoFoundationdb.MixProject do
   defp deps do
     [
       # {:dep_from_hexpm, "~> 0.3.0"},
-      {:erlfdb,
-       git: "https://github.com/foundationdb-beam/erlfdb.git", branch: "main"},
+      {:erlfdb, git: "https://github.com/foundationdb-beam/erlfdb.git", branch: "main"},
       {:ecto, "~> 3.10"},
       {:ecto_sql, "~> 3.11"},
-      {:jason, "~> 1.4"}
+      {:jason, "~> 1.4"},
+      {:credo, "~> 1.6", only: [:dev, :test, :docs]}
+    ]
+  end
+
+  defp aliases do
+    [
+      lint: [
+        "format --check-formatted",
+        "deps.unlock --check-unused"
+        #        "credo --all --strict"
+      ]
     ]
   end
 end

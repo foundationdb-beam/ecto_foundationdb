@@ -114,9 +114,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     """
   end
 
-  defp make_indexkey_range(%{opts: adapter_opts}, plan = %QueryPlan.Equal{
-         layer_data: layer_data = %{idx: idx}
-       }) do
+  defp make_indexkey_range(
+         %{opts: adapter_opts},
+         plan = %QueryPlan.Equal{
+           layer_data: layer_data = %{idx: idx}
+         }
+       ) do
     start_key =
       Pack.to_fdb_indexkey(
         adapter_opts,
@@ -131,9 +134,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     %QueryPlan.Equal{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
-  defp make_indexkey_range(%{opts: adapter_opts}, plan = %QueryPlan.Between{
-         layer_data: layer_data = %{idx: idx}
-       }) do
+  defp make_indexkey_range(
+         %{opts: adapter_opts},
+         plan = %QueryPlan.Between{
+           layer_data: layer_data = %{idx: idx}
+         }
+       ) do
     index_options = idx[:options]
 
     if Keyword.get(index_options, :timeseries, false) do

@@ -28,7 +28,7 @@ defmodule Ecto.Integration.TimeSeriesTest do
                )
                |> TestRepo.all(prefix: tenant)
 
-        # TODO - updates, deletes
+      # TODO - updates, deletes
     end
   end
 end
