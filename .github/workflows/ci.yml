@@ -35,8 +35,6 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     name: Test Elixir ${{ matrix.elixir }}, OTP ${{ matrix.otp }}, OS ${{ matrix.os }}, FDB ${{ matrix.fdb }}
-    env:
-      MIX_ENV: test
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +43,7 @@ jobs:
         otp: ["26", "25", "24"]
         fdb: ['7.3.32']
     env:
+      MIX_ENV: test
       FDB_VERSION: ${{ matrix.fdb }}
     steps:
       - uses: actions/checkout@v3
