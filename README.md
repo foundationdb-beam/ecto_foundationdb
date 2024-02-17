@@ -4,12 +4,8 @@
 
 ## Driver
 
-An Ecto Adapter for FoundationDB, written using [apache/couchdb-erlfdb](https://github.com/apache/couchdb-erlfdb)
+An Ecto Adapter for FoundationDB, written using [foundationdb-beam/erlfdb](https://github.com/foundationdb-beam/erlfdb)
 as the driver for communicating with FoundationDB.
-
-Note: `ecto_foundationdb` is currently configured to use a temporary fork of `erlfdb` at
-[JesseStimpson/erlfdb](https://github.com/JesseStimpson/erlfdb). The fork includes support for
-FDB's [Tenants](https://apple.github.io/foundationdb/tenants.html).
 
 ## Installation
 
@@ -18,7 +14,7 @@ FDB's [Tenants](https://apple.github.io/foundationdb/tenants.html).
 ```elixir
 defp deps do
   [
-    {:ecto_foundationdb, git: "https://github.com/JesseStimpson/ecto_foundationdb.git", branch: "main"}
+    {:ecto_foundationdb, git: "https://github.com/foundationdb-beam/ecto_foundationdb.git", branch: "main"}
   ]
 end
 ```

@@ -55,7 +55,7 @@ defmodule Ecto.Integration.IndexTest do
                from(u in User, where: u.name == ^"John")
                |> TestRepo.all(prefix: tenant)
 
-      # Collision
+      # Forced Collision
       hash_1 = "7925D7E6AF6D09F0"
       hash_2 = "9AB33581B7409263"
       encoder = Options.get(TestRepo.config(), :indexkey_encoder)
