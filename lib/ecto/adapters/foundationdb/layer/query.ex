@@ -20,9 +20,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
 
     objs =
       kvs
+      |> Stream.unfold(fn
+        [] -> nil
+        [h | t] -> {h, t}
+      end)
       |> unpack(plan)
       |> filter(plan)
-      |> Enum.map(fn {_k, v} -> v end)
+      |> Stream.map(fn {_k, v} -> v end)
 
     {objs, continuation}
   end
@@ -98,7 +102,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     |> tx_get_range(plan, [])
     |> unpack(plan)
     |> filter(plan)
-    |> Enum.map(fn {fdb_key, data_object} ->
+    |> Stream.map(fn {fdb_key, data_object} ->
       Tx.update_data_object(
         tx,
         adapter_meta,
@@ -111,6 +115,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
         write_primary
       )
     end)
+    |> Enum.to_list()
     |> length()
   end
 
@@ -119,21 +124,22 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     |> tx_get_range(plan, [])
     |> unpack(plan)
     |> filter(plan)
-    |> Enum.map(fn {fdb_key, data_object} ->
+    |> Stream.map(fn {fdb_key, data_object} ->
       Tx.delete_data_object(tx, adapter_meta, plan.source, fdb_key, data_object, idxs)
     end)
+    |> Enum.to_list()
     |> length()
   end
 
   defp unpack(kvs, %{layer_data: %{idx: _idx}}) do
-    for {_k, v} <- kvs do
+    Stream.map(kvs, fn {_k, v} ->
       index_object = Pack.from_fdb_value(v)
       {index_object[:id], index_object[:data]}
-    end
+    end)
   end
 
   defp unpack(kvs, _plan) do
-    for {k, v} <- kvs, do: {k, Pack.from_fdb_value(v)}
+    Stream.map(kvs, fn {k, v} -> {k, Pack.from_fdb_value(v)} end)
   end
 
   defp filter(kvs, %QueryPlan.None{}) do
@@ -141,7 +147,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   end
 
   defp filter(kvs, plan = %QueryPlan.Equal{layer_data: %{idx: _idx}}) do
-    Enum.filter(kvs, fn {_key, data_object} ->
+    Stream.filter(kvs, fn {_key, data_object} ->
       # Filter by the where_values because our indexes can have key conflicts
       plan.param == data_object[plan.field]
     end)

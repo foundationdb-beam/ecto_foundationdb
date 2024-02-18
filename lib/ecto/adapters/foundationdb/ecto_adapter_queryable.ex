@@ -24,7 +24,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       ) do
     ordering_fn = Ordering.get_ordering_fn(order_bys)
     limit = get_limit(limit)
-    limit_fn = if limit == nil, do: & &1, else: &Enum.take(&1, limit)
+    limit_fn = if limit == nil, do: & &1, else: &Stream.take(&1, limit)
     {:nocache, {operation, query, {limit, limit_fn}, %{}, ordering_fn}}
   end
 
@@ -266,8 +266,9 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   defp select(objs, select_field_names) do
     rows =
       objs
-      |> Enum.map(fn data_object -> Fields.arrange(data_object, select_field_names) end)
+      |> Stream.map(fn data_object -> Fields.arrange(data_object, select_field_names) end)
       |> Fields.strip_field_names_for_ecto()
+      |> Enum.to_list()
 
     {length(rows), rows}
   end
