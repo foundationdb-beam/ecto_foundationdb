@@ -32,7 +32,10 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         Process.put(@tx, tx)
 
         try do
-          fun.()
+          cond do
+            is_function(fun, 0) -> fun.()
+            is_function(fun, 1) -> fun.(tx)
+          end
         after
           Process.delete(@tx)
           Process.delete(@db_or_tenant)
