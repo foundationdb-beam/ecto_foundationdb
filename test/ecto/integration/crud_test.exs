@@ -1,5 +1,5 @@
 defmodule Ecto.Integration.CrudTest do
-  use Ecto.Integration.Case
+  use Ecto.Integration.Case, async: true
 
   alias Ecto.Integration.TestRepo
   alias EctoFoundationDB.Schemas.User

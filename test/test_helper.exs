@@ -22,33 +22,35 @@ defmodule Ecto.Integration.Case do
   alias Ecto.Adapters.FoundationDB.Sandbox
 
   setup do
+    tenant1 = Ecto.UUID.autogenerate()
+    tenant2 = Ecto.UUID.autogenerate()
     tenant_task =
       Task.async(fn ->
-        Sandbox.checkout(TestRepo, "MyTenant", EctoFoundationDB.Integration.Migration)
+        Sandbox.checkout(TestRepo, tenant1, EctoFoundationDB.Integration.Migration)
       end)
 
     other_tenant_task =
       Task.async(fn ->
-        Sandbox.checkout(TestRepo, "OtherTenant", EctoFoundationDB.Integration.Migration)
+        Sandbox.checkout(TestRepo, tenant2, EctoFoundationDB.Integration.Migration)
       end)
 
     tenant = Task.await(tenant_task)
     other_tenant = Task.await(other_tenant_task)
 
     on_exit(fn ->
-      t1 = Task.async(fn -> Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, "MyTenant") end)
+      t1 = Task.async(fn -> Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, tenant1) end)
 
       t2 =
-        Task.async(fn -> Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, "OtherTenant") end)
+        Task.async(fn -> Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, tenant2) end)
 
       Task.await_many([t1, t2])
     end)
 
     {:ok,
      tenant: tenant,
-     tenant_id: "MyTenant",
+     tenant_id: tenant1,
      other_tenant: other_tenant,
-     other_tenant_id: "OtherTenant"}
+     other_tenant_id: tenant2}
   end
 end
 

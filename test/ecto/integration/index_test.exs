@@ -1,16 +1,10 @@
 defmodule Ecto.Integration.IndexTest do
-  use Ecto.Integration.Case
+  use Ecto.Integration.Case, async: true
 
   alias Ecto.Integration.TestRepo
   alias EctoFoundationDB.Schemas.User
-  # alias EctoFoundationDB.Schemas.Account
-  # alias EctoFoundationDB.Schemas.Product
-  # alias EctoFoundationDB.Schemas.Global
   alias Ecto.Adapters.FoundationDB
   alias Ecto.Adapters.FoundationDB.Options
-  # alias Ecto.Adapters.FoundationDB.Transaction
-  # alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
-  # alias Ecto.Adapters.FoundationDB.Exception.Unsupported
 
   import Ecto.Query
 
