@@ -33,20 +33,23 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         adapter_meta = %{opts: adapter_opts},
         _query_meta,
         _query_cache =
-          {:nocache, {:all, query, {_limit, limit_fn}, %{}, ordering_fn}},
+          {:nocache,
+           {:all,
+            query = %Ecto.Query{
+              select: %Ecto.Query.SelectExpr{
+                fields: select_fields
+              }
+            }, {_limit, limit_fn}, %{}, ordering_fn}},
         params,
         _options
       ) do
     {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
 
-    result =
-      tenant
-      |> execute_all(adapter_meta, context, query, params)
-      |> ordering_fn.()
-      |> limit_fn.()
-      |> Fields.strip_field_names_for_ecto()
-
-    {length(result), result}
+    tenant
+    |> execute_all(adapter_meta, context, query, params)
+    |> ordering_fn.()
+    |> limit_fn.()
+    |> select(Fields.parse_select_fields(select_fields))
   end
 
   def execute(
@@ -84,8 +87,17 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   end
 
   @impl Ecto.Adapter.Queryable
-  def stream(adapter_meta, query_meta, query_cache, params, options) do
-    raise "stream #{inspect(adapter_meta)} #{inspect(query_meta)} #{inspect(query_cache)} #{inspect(params)} #{inspect(options)}"
+  def stream(
+        adapter_meta = %{opts: adapter_opts},
+        _query_meta,
+        _query_cache =
+          {:nocache, {:all, query, {nil, _limit_fn}, %{}, _ordering_fn}},
+        params,
+        options
+      ) do
+    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+
+    stream_all(tenant, adapter_meta, context, query, params, options)
   end
 
   # Extract limit from an `Ecto.Query`
@@ -155,9 +167,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
          adapter_meta,
          context,
          %Ecto.Query{
-           select: %Ecto.Query.SelectExpr{
-             fields: select_fields
-           },
            from: %Ecto.Query.FromExpr{source: {source, schema}},
            wheres: wheres
          },
@@ -174,10 +183,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     #   4. Post-get filtering (Remove :not_found, remove index conflicts, )
     #   5. Arrange fields based on the select input
     plan = QueryPlan.get(source, schema, context, wheres, [], params)
-    kvs = Query.all(tenant, adapter_meta, plan)
-
-    field_names = Fields.parse_select_fields(select_fields)
-    Enum.map(kvs, fn {_key, data_object} -> Fields.arrange(data_object, field_names) end)
+    {objs, _continuation} = Query.all(tenant, adapter_meta, plan)
+    objs
   end
 
   defp execute_update_all(
@@ -193,5 +200,75 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
        ) do
     plan = QueryPlan.get(source, schema, context, wheres, updates, params)
     Query.update(tenant, adapter_meta, plan)
+  end
+
+  defp stream_all(
+         tenant,
+         adapter_meta,
+         context,
+         %Ecto.Query{
+           select: %Ecto.Query.SelectExpr{
+             fields: select_fields
+           },
+           from: %Ecto.Query.FromExpr{source: {source, schema}},
+           wheres: wheres
+         },
+         params,
+         options
+       ) do
+    field_names = Fields.parse_select_fields(select_fields)
+
+    fdb_limit = options[:max_rows] || 500
+
+    query_options = fn
+      nil ->
+        [limit: fdb_limit]
+
+      %Query.Continuation{start_key: start_key} ->
+        [start_key: start_key, limit: fdb_limit]
+
+      x ->
+        raise "opt #{inspect(x)}"
+    end
+
+    start_fun = fn ->
+      plan = QueryPlan.get(source, schema, context, wheres, [], params)
+
+      %{
+        adapter_meta: adapter_meta,
+        tenant: tenant,
+        plan: plan,
+        select_fields: select_fields,
+        continuation: nil
+      }
+    end
+
+    # :max_rows - The number of rows to load from the database as we stream. It is supported at least by Postgres and MySQL and defaults to 500.
+    next_fun =
+      fn
+        acc = %{continuation: %Query.Continuation{more?: false}} ->
+          {:halt, acc}
+
+        acc = %{plan: plan, continuation: continuation} ->
+          {objs, continuation} =
+            Query.all(tenant, adapter_meta, plan, query_options.(continuation))
+
+          {[select(objs, field_names)], %{acc | continuation: continuation}}
+      end
+
+    after_fun = fn _acc ->
+      :ok
+    end
+
+    Stream.resource(start_fun, next_fun, after_fun)
+  end
+
+  defp select(objs, select_field_names) do
+    rows =
+      objs
+      |> Enum.map(fn data_object -> Fields.arrange(data_object, select_field_names) end)
+      |> Fields.strip_field_names_for_ecto()
+
+    {length(rows), rows}
   end
 end

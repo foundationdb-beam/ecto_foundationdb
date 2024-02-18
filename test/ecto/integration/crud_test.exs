@@ -217,6 +217,26 @@ defmodule Ecto.Integration.CrudTest do
 
       assert user.name == "Jesse"
     end
+
+    test "stream all", context do
+      tenant = context[:tenant]
+
+      names = ~w/John James Jesse Sarah Bob Steve/
+
+      Transaction.commit(
+        tenant,
+        fn ->
+          for n <- names do
+            TestRepo.insert(%User{name: n})
+          end
+        end
+      )
+
+      # Each chunk of the stream is retrieved in a separate FDB transaction
+      stream = TestRepo.stream(User, prefix: tenant, max_rows: 2)
+      all_users = Enum.to_list(stream)
+      assert length(all_users) == length(names)
+    end
   end
 
   describe "delete" do

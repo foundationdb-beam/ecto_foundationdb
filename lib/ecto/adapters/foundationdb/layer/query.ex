@@ -7,17 +7,28 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
 
-  def all(db_or_tenant, adapter_meta, plan) do
-    plan = make_range(db_or_tenant, adapter_meta, plan)
+  defmodule Continuation do
+    defstruct more?: false, start_key: nil
+  end
 
-    db_or_tenant
-    |> Tx.transactional(fn tx -> tx_get_range(tx, plan) end)
-    |> unpack(plan)
-    |> filter(plan)
+  def all(db_or_tenant, adapter_meta, plan, options \\ []) do
+    plan = make_range(db_or_tenant, adapter_meta, plan, options)
+
+    kvs = Tx.transactional(db_or_tenant, fn tx -> tx_get_range(tx, plan, options) end)
+
+    continuation = continuation(kvs, options)
+
+    objs =
+      kvs
+      |> unpack(plan)
+      |> filter(plan)
+      |> Enum.map(fn {_k, v} -> v end)
+
+    {objs, continuation}
   end
 
   def update(db_or_tenant, adapter_meta, plan) do
-    plan = make_range(db_or_tenant, adapter_meta, plan)
+    plan = make_range(db_or_tenant, adapter_meta, plan, [])
 
     idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, plan.source)
 
@@ -33,7 +44,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   end
 
   def delete(db_or_tenant, adapter_meta, plan) do
-    plan = make_range(db_or_tenant, adapter_meta, plan)
+    plan = make_range(db_or_tenant, adapter_meta, plan, [])
 
     idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, plan.source)
 
@@ -41,15 +52,19 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     |> Tx.transactional(fn tx -> tx_delete_range(tx, adapter_meta, plan, idxs) end)
   end
 
-  defp make_range(db_or_tenant, adapter_meta, plan = %{layer_data: layer_data}) do
+  defp make_range(db_or_tenant, adapter_meta, plan = %{layer_data: layer_data}, options) do
     if plan.is_pk? do
-      make_datakey_range(adapter_meta, plan)
+      make_datakey_range(adapter_meta, plan, options)
     else
       idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, plan.source)
 
       case IndexInventory.select_index(idxs, [plan.field]) do
         {:ok, idx} ->
-          make_indexkey_range(adapter_meta, %{plan | layer_data: Map.put(layer_data, :idx, idx)})
+          make_indexkey_range(
+            adapter_meta,
+            %{plan | layer_data: Map.put(layer_data, :idx, idx)},
+            options
+          )
 
         {:error, _} ->
           raise Unsupported,
@@ -60,7 +75,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     end
   end
 
-  defp tx_get_range(tx, %{layer_data: %{range: {fdb_key, nil}}}) do
+  defp tx_get_range(tx, %{layer_data: %{range: {fdb_key, nil}}}, _options) do
     res = :erlfdb.wait(:erlfdb.get(tx, fdb_key))
 
     if res == :not_found do
@@ -70,8 +85,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     end
   end
 
-  defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key}}}) do
-    :erlfdb.wait(:erlfdb.get_range(tx, start_key, end_key))
+  defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key}}}, options) do
+    get_options = Keyword.take(options, [:limit])
+    :erlfdb.wait(:erlfdb.get_range(tx, start_key, end_key, get_options))
   end
 
   defp tx_update_range(tx, adapter_meta, plan = %{updates: updates}, idxs) do
@@ -79,7 +95,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     write_primary = Schema.get_option(plan.context, :write_primary)
 
     tx
-    |> tx_get_range(plan)
+    |> tx_get_range(plan, [])
     |> unpack(plan)
     |> filter(plan)
     |> Enum.map(fn {fdb_key, data_object} ->
@@ -100,7 +116,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
 
   defp tx_delete_range(tx, adapter_meta, plan, idxs) do
     tx
-    |> tx_get_range(plan)
+    |> tx_get_range(plan, [])
     |> unpack(plan)
     |> filter(plan)
     |> Enum.map(fn {fdb_key, data_object} ->
@@ -141,15 +157,21 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     kvs
   end
 
-  defp make_datakey_range(%{opts: adapter_opts}, plan = %QueryPlan.None{layer_data: layer_data}) do
+  defp make_datakey_range(
+         %{opts: adapter_opts},
+         plan = %QueryPlan.None{layer_data: layer_data},
+         options
+       ) do
     start_key = Pack.to_fdb_datakey(adapter_opts, plan.source, "")
     end_key = :erlfdb_key.strinc(start_key)
+    start_key = options[:start_key] || start_key
     %QueryPlan.None{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
   defp make_datakey_range(
          %{opts: adapter_opts},
-         plan = %QueryPlan.Equal{param: param, layer_data: layer_data}
+         plan = %QueryPlan.Equal{param: param, layer_data: layer_data},
+         _options
        ) do
     fdb_key = Pack.to_fdb_datakey(adapter_opts, plan.source, param)
     %QueryPlan.Equal{plan | layer_data: Map.put(layer_data, :range, {fdb_key, nil})}
@@ -161,17 +183,18 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
            param_left: param_left,
            param_right: param_right,
            layer_data: layer_data
-         }
+         },
+         options
        ) do
     start_key = Pack.to_fdb_datakey(adapter_opts, plan.source, param_left)
     end_key = Pack.to_fdb_datakey(adapter_opts, plan.source, param_right)
-
     start_key = if plan.inclusive_left?, do: start_key, else: :erlfdb_key.strinc(start_key)
     end_key = if plan.inclusive_right?, do: :erlfdb_key.strinc(end_key), else: end_key
+    start_key = options[:start_key] || start_key
     %QueryPlan.Between{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
-  defp make_indexkey_range(_adapter_meta, %QueryPlan.None{}) do
+  defp make_indexkey_range(_adapter_meta, %QueryPlan.None{}, _options) do
     raise Unsupported, """
     FoundationDB Adapter does not support empty where clause on an index. In fact, this code path should not be reachable.
     """
@@ -181,7 +204,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
          %{opts: adapter_opts},
          plan = %QueryPlan.Equal{
            layer_data: layer_data = %{idx: idx}
-         }
+         },
+         options
        ) do
     start_key =
       Pack.to_fdb_indexkey(
@@ -194,6 +218,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
       )
 
     end_key = :erlfdb_key.strinc(start_key)
+    start_key = options[:start_key] || start_key
     %QueryPlan.Equal{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
@@ -201,7 +226,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
          %{opts: adapter_opts},
          plan = %QueryPlan.Between{
            layer_data: layer_data = %{idx: idx}
-         }
+         },
+         options
        ) do
     index_options = idx[:options]
 
@@ -218,11 +244,28 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
                 ""
               )
 
+      start_key = options[:start_key] || start_key
+
       %QueryPlan.Between{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
     else
       raise Unsupported, """
       FoundationDB Adapter does not support 'between' queries on indexes that are not timeseries.
       """
+    end
+  end
+
+  defp continuation(kvs, options) do
+    case options[:limit] do
+      nil ->
+        %Continuation{more?: false}
+
+      limit ->
+        if length(kvs) >= limit do
+          {fdb_key, _} = List.last(kvs)
+          %Continuation{more?: true, start_key: :erlfdb_key.strinc(fdb_key)}
+        else
+          %Continuation{more?: false}
+        end
     end
   end
 end

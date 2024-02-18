@@ -1,7 +1,7 @@
 defmodule Ecto.Adapters.FoundationDB.Transaction do
   alias Ecto.Adapters.FoundationDB.Layer.Tx
 
-  def commit(db_or_tenant, fun) do
+  def commit(db_or_tenant, fun) when is_function(fun, 0) do
     fun = fn ->
       try do
         Tx.commit_proc(db_or_tenant, fun)
@@ -23,5 +23,9 @@ defmodule Ecto.Adapters.FoundationDB.Transaction do
       _ ->
         res
     end
+  end
+
+  def commit(db_or_tenant, fun) when is_function(fun, 1) do
+    :erlfdb.transactional(db_or_tenant, fun)
   end
 end

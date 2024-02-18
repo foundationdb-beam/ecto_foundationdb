@@ -127,6 +127,7 @@ Roughly in order of priority.
  - [x] Single index
  - [x] Initial documentation
  - [x] Time series index (auto gen pk, optionally skip primary write)
+ - [x] `TestRepo.stream`
  - [ ] Migration tooling (handling many tenants)
  - [ ] Migration locking
  - [ ] Layer isolation and docs
@@ -135,7 +136,6 @@ Roughly in order of priority.
  - [ ] FDB Watches
  - [ ] Benchmarking
  - [ ] Ecto Transactions
- - [ ] `TestRepo.stream`
  - [ ] Migration logging
  - [ ] Composite primary key
  - [ ] Pluggable Layers

@@ -21,7 +21,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
   def is_safe?(nil, false), do: {false, :tenant_only}
   def is_safe?(_tenant, false), do: {false, :unused_tenant}
 
-  def commit_proc(db_or_tenant, fun) do
+  def commit_proc(db_or_tenant, fun) when is_function(fun, 0) do
     nil = Process.get(@db_or_tenant)
     nil = Process.get(@tx)
 
@@ -32,10 +32,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         Process.put(@tx, tx)
 
         try do
-          cond do
-            is_function(fun, 0) -> fun.()
-            is_function(fun, 1) -> fun.(tx)
-          end
+          fun.()
         after
           Process.delete(@tx)
           Process.delete(@db_or_tenant)
