@@ -14,6 +14,7 @@ defmodule EctoFoundationDB.Schemas.Event do
 
   schema "events" do
     field(:timestamp, :naive_datetime_usec)
+    field(:data, :string)
 
     timestamps()
   end

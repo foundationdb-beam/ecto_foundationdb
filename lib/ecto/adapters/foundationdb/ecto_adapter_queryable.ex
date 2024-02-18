@@ -37,11 +37,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         _options
       ) do
-    query = %Ecto.Query{prefix: tenant} = assert_tenancy!(query, adapter_opts)
+    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
 
     result =
       tenant
-      |> execute_all(adapter_meta, query, params)
+      |> execute_all(adapter_meta, context, query, params)
       |> ordering_fn.()
       |> limit_fn.()
       |> Fields.strip_field_names_for_ecto()
@@ -53,12 +53,20 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         adapter_meta = %{opts: adapter_opts},
         _query_meta,
         _query_cache =
-          {:nocache, {:delete_all, query, {nil, _limit_fn}, %{}, _ordering_fn}},
+          {:nocache,
+           {:delete_all,
+            query = %Ecto.Query{
+              from: %Ecto.Query.FromExpr{source: {source, schema}},
+              wheres: wheres
+            }, {nil, _limit_fn}, %{}, _ordering_fn}},
         params,
         _options
       ) do
-    query = %Ecto.Query{prefix: tenant} = assert_tenancy!(query, adapter_opts)
-    num = Tx.delete_all(tenant, adapter_meta, query, params)
+    {context, %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+
+    plan = QueryPlan.get(source, schema, context, wheres, [], params)
+    num = Query.delete(tenant, adapter_meta, plan)
+
     {num, []}
   end
 
@@ -70,8 +78,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         _options
       ) do
-    query = %Ecto.Query{prefix: tenant} = assert_tenancy!(query, adapter_opts)
-    num = execute_update_all(tenant, adapter_meta, query, params)
+    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    num = execute_update_all(tenant, adapter_meta, context, query, params)
     {num, []}
   end
 
@@ -138,13 +146,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         raise Unsupported, "You must provide an open tenant, not a tenant ID"
 
       true ->
-        query
+        {context, query}
     end
   end
 
   defp execute_all(
          tenant,
          adapter_meta,
+         context,
          %Ecto.Query{
            select: %Ecto.Query.SelectExpr{
              fields: select_fields
@@ -164,7 +173,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     #   3. Use :erlfdb.get, :erlfdb.get_range
     #   4. Post-get filtering (Remove :not_found, remove index conflicts, )
     #   5. Arrange fields based on the select input
-    plan = QueryPlan.get(source, schema, wheres, [], params)
+    plan = QueryPlan.get(source, schema, context, wheres, [], params)
     kvs = Query.all(tenant, adapter_meta, plan)
 
     field_names = Fields.parse_select_fields(select_fields)
@@ -174,15 +183,15 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   defp execute_update_all(
          tenant,
          adapter_meta = %{opts: _adapter_opts},
-         query = %Ecto.Query{
+         context,
+         %Ecto.Query{
            from: %Ecto.Query.FromExpr{source: {source, schema}},
            wheres: wheres,
            updates: updates
          },
          params
        ) do
-    plan = QueryPlan.get(source, schema, wheres, updates, params)
+    plan = QueryPlan.get(source, schema, context, wheres, updates, params)
     Query.update(tenant, adapter_meta, plan)
-    IO.inspect(Map.drop(query, [:__struct__]))
   end
 end

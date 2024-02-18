@@ -61,13 +61,10 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
 
   def from_fdb_value(bin), do: :erlang.binary_to_term(bin)
 
-  def new_index_object(source, fdb_key, pk_field, pk_value, index_entries, value) do
+  def new_index_object(fdb_key, data_object) do
     [
-      pk: {pk_field, pk_value},
-      value: value,
-      index: index_entries,
-      source: source,
-      full_key: fdb_key
+      id: fdb_key,
+      data: data_object
     ]
   end
 

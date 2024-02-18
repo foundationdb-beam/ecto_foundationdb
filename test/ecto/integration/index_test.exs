@@ -74,23 +74,32 @@ defmodule Ecto.Integration.IndexTest do
     test "update_all via index", context do
       tenant = context[:tenant]
 
-      {:ok, %User{id: user1_id}} =
+      {:ok, user} =
         %User{name: "John"}
         |> FoundationDB.usetenant(tenant)
         |> TestRepo.insert()
 
-      {:ok, _user2} =
-        %User{name: "James"}
+      assert {1, _} =
+               from(u in User, where: u.name == ^"John")
+               |> TestRepo.update_all([set: [name: "Jane"]], prefix: tenant)
+
+      user_id = user.id
+      assert %User{id: ^user_id, name: "Jane"} = TestRepo.get!(User, user_id, prefix: tenant)
+    end
+
+    test "delete_all via index", context do
+      tenant = context[:tenant]
+
+      {:ok, user} =
+        %User{name: "John"}
         |> FoundationDB.usetenant(tenant)
         |> TestRepo.insert()
 
-      # assert [%User{id: ^user1_id, name: "Jane"}] =
-      #         from(u in User, where: u.name == ^"John")
-      #         |> TestRepo.update_all([set: [name: "Jane"]], prefix: tenant)
-      assert_raise(Unsupported, fn ->
-        from(u in User, where: u.name == ^"John")
-        |> TestRepo.update_all([set: [name: "Jane"]], prefix: tenant)
-      end)
+      assert {1, _} =
+               from(u in User, where: u.name == ^"John")
+               |> TestRepo.delete_all(prefix: tenant)
+
+      assert nil == TestRepo.get(User, user.id, prefix: tenant)
     end
 
     test "between query fails on value index", context do

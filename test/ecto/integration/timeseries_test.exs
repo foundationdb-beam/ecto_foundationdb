@@ -12,23 +12,39 @@ defmodule Ecto.Integration.TimeSeriesTest do
     test "timeseries consistency", context do
       tenant = context[:tenant]
 
-      {:ok, event} =
-        %Event{timestamp: NaiveDateTime.utc_now()}
+      # Insert
+      {:ok, event = %Event{id: event_id}} =
+        %Event{timestamp: ~N[2070-01-01 00:00:00.000000]}
+        |> FoundationDB.usetenant(tenant)
+        |> TestRepo.insert()
+
+      {:ok, _} =
+        %Event{timestamp: ~N[2777-01-01 00:00:00.000000]}
         |> FoundationDB.usetenant(tenant)
         |> TestRepo.insert()
 
       # Because write_primary: false
       nil = TestRepo.get(Event, event.id, prefix: tenant)
 
-      assert [%Event{}] =
-               from(e in Event,
-                 where:
-                   e.timestamp > ^~N[1970-01-01 00:00:00] and
-                     e.timestamp < ^~N[2999-01-01 00:00:00]
-               )
-               |> TestRepo.all(prefix: tenant)
+      # All
+      query =
+        from(e in Event,
+          where:
+            e.timestamp > ^~N[1970-01-01 00:00:00] and
+              e.timestamp < ^~N[2100-01-01 00:00:00]
+        )
 
-      # TODO - updates, deletes
+      assert [%Event{}] = TestRepo.all(query, prefix: tenant)
+
+      # Update
+      assert {1, _} = TestRepo.update_all(query, [set: [data: "foo"]], prefix: tenant)
+
+      assert [%Event{id: ^event_id, data: "foo"}] = TestRepo.all(query, prefix: tenant)
+
+      # Delete
+      assert {1, _} = TestRepo.delete_all(query, prefix: tenant)
+
+      assert [] == TestRepo.all(query, prefix: tenant)
     end
   end
 end

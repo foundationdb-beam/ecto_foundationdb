@@ -10,6 +10,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
+  alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
 
   @impl Ecto.Adapter.Schema
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
@@ -38,7 +39,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         {{pk_field, pk}, data_object}
       end)
 
-    num_ins = Tx.insert_all(tenant, adapter_meta, source, context, entries)
+    idxs = IndexInventory.get_for_source(adapter_meta, tenant, source)
+
+    num_ins =
+      Tx.transactional(tenant, fn tx ->
+        Tx.insert_all(tx, adapter_meta, source, context, entries, idxs)
+      end)
+
     {num_ins, nil}
   end
 
@@ -81,7 +88,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
-    case Tx.update_pks(tenant, adapter_meta, source, context, pk_field, [pk], update_data) do
+    idxs = IndexInventory.get_for_source(adapter_meta, tenant, source)
+
+    res =
+      Tx.transactional(tenant, fn tx ->
+        Tx.update_pks(tx, adapter_meta, source, context, pk_field, [pk], update_data, idxs)
+      end)
+
+    case res do
       1 ->
         {:ok, []}
 
@@ -102,7 +116,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
-    case Tx.delete_pks(tenant, adapter_meta, source, [pk]) do
+    idxs = IndexInventory.get_for_source(adapter_meta, tenant, source)
+
+    res =
+      Tx.transactional(tenant, fn tx ->
+        Tx.delete_pks(tx, adapter_meta, source, [pk], idxs)
+      end)
+
+    case res do
       1 ->
         {:ok, []}
 

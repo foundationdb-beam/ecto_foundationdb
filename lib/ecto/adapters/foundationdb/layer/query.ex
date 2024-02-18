@@ -1,7 +1,9 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Query do
+  alias Ecto.Adapters.FoundationDB.Layer.Fields
   alias Ecto.Adapters.FoundationDB.QueryPlan
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
   alias Ecto.Adapters.FoundationDB.Layer.Tx
+  alias Ecto.Adapters.FoundationDB.Schema
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
 
@@ -9,7 +11,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     plan = make_range(db_or_tenant, adapter_meta, plan)
 
     db_or_tenant
-    |> get_range(plan)
+    |> Tx.transactional(fn tx -> tx_get_range(tx, plan) end)
     |> unpack(plan)
     |> filter(plan)
   end
@@ -17,8 +19,26 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   def update(db_or_tenant, adapter_meta, plan) do
     plan = make_range(db_or_tenant, adapter_meta, plan)
 
+    idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, plan.source)
+
     db_or_tenant
-    |> update_range(plan)
+    |> Tx.transactional(fn tx -> tx_update_range(tx, adapter_meta, plan, idxs) end)
+  end
+
+  def delete(db_or_tenant, adapter_meta, plan = %QueryPlan.None{}) do
+    # Special case, very efficient
+    Tx.transactional(db_or_tenant, fn tx ->
+      Tx.clear_all(tx, adapter_meta, plan.source)
+    end)
+  end
+
+  def delete(db_or_tenant, adapter_meta, plan) do
+    plan = make_range(db_or_tenant, adapter_meta, plan)
+
+    idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, plan.source)
+
+    db_or_tenant
+    |> Tx.transactional(fn tx -> tx_delete_range(tx, adapter_meta, plan, idxs) end)
   end
 
   defp make_range(db_or_tenant, adapter_meta, plan = %{layer_data: layer_data}) do
@@ -40,8 +60,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     end
   end
 
-  defp get_range(db_or_tenant, %{layer_data: %{range: {fdb_key, nil}}}) do
-    res = Tx.transactional(db_or_tenant, fn tx -> :erlfdb.wait(:erlfdb.get(tx, fdb_key)) end)
+  defp tx_get_range(tx, %{layer_data: %{range: {fdb_key, nil}}}) do
+    res = :erlfdb.wait(:erlfdb.get(tx, fdb_key))
 
     if res == :not_found do
       []
@@ -50,34 +70,50 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     end
   end
 
-  defp get_range(db_or_tenant, %{layer_data: %{range: {start_key, end_key}}}) do
-    Tx.transactional(db_or_tenant, fn tx ->
-      :erlfdb.wait(:erlfdb.get_range(tx, start_key, end_key))
-    end)
+  defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key}}}) do
+    :erlfdb.wait(:erlfdb.get_range(tx, start_key, end_key))
   end
 
-  defp update_range(db_or_tenant, plan = %{layer_data: %{range: {fdb_key, nil}}}) do
-    Tx.transactional(db_or_tenant, fn tx ->
-      [{fdb_key, :erlfdb.wait(:erlfdb.get(tx, fdb_key))}]
-      |> unpack(plan)
-      |> filter(plan)
-    end)
+  defp tx_update_range(tx, adapter_meta, plan = %{updates: updates}, idxs) do
+    pk_field = Fields.get_pk_field!(plan.schema)
+    write_primary = Schema.get_option(plan.context, :write_primary)
 
-    raise Unsupported, "FoundationDB Adapter has not implemented this"
+    tx
+    |> tx_get_range(plan)
+    |> unpack(plan)
+    |> filter(plan)
+    |> Enum.map(fn {fdb_key, data_object} ->
+      Tx.update_data_object(
+        tx,
+        adapter_meta,
+        plan.source,
+        pk_field,
+        fdb_key,
+        data_object,
+        updates,
+        idxs,
+        write_primary
+      )
+    end)
+    |> length()
   end
 
-  defp update_range(db_or_tenant, plan = %{layer_data: %{range: {start_key, end_key}}}) do
-    Tx.transactional(db_or_tenant, fn tx ->
-      :erlfdb.wait(:erlfdb.get_range(tx, start_key, end_key))
-      |> unpack(plan)
-      |> filter(plan)
+  defp tx_delete_range(tx, adapter_meta, plan, idxs) do
+    tx
+    |> tx_get_range(plan)
+    |> unpack(plan)
+    |> filter(plan)
+    |> Enum.map(fn {fdb_key, data_object} ->
+      Tx.delete_data_object(tx, adapter_meta, plan.source, fdb_key, data_object, idxs)
     end)
-
-    raise Unsupported, "FoundationDB Adapter has not implemented this"
+    |> length()
   end
 
   defp unpack(kvs, %{layer_data: %{idx: _idx}}) do
-    for {k, v} <- kvs, do: {k, Pack.from_fdb_value(v)[:value]}
+    for {_k, v} <- kvs do
+      index_object = Pack.from_fdb_value(v)
+      {index_object[:id], index_object[:data]}
+    end
   end
 
   defp unpack(kvs, _plan) do

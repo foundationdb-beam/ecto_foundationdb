@@ -18,15 +18,19 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
     :ets.delete_all_objects(cache)
     inventory_kv = new_index(adapter_meta, source, index_name, index_fields, options)
 
-    Tx.create_index(
-      db_or_tenant,
-      adapter_meta,
-      source,
-      index_name,
-      index_fields,
-      options,
-      inventory_kv
-    )
+    Tx.transactional(db_or_tenant, fn tx ->
+      Tx.create_index(
+        tx,
+        adapter_meta,
+        source,
+        index_name,
+        index_fields,
+        options,
+        inventory_kv
+      )
+    end)
+
+    :ok
   end
 
   def new_index(%{opts: adapter_opts}, source, index_name, index_fields, options) do
