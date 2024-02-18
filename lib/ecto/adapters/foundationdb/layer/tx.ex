@@ -1,9 +1,7 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
-  alias Ecto.Adapters.FoundationDB.QueryPlan
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
   alias Ecto.Adapters.FoundationDB.Layer.Fields
   alias Ecto.Adapters.FoundationDB.Layer.Pack
-  alias Ecto.Adapters.FoundationDB.Layer.Query
   alias Ecto.Adapters.FoundationDB.Schema
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
@@ -96,10 +94,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
       tx, {fdb_key, data_object}, :not_found, count ->
         fdb_value = Pack.to_fdb_value(data_object)
 
-        if write_primary do
-          :erlfdb.set(tx, fdb_key, fdb_value)
-        end
-
+        if write_primary, do: :erlfdb.set(tx, fdb_key, fdb_value)
         set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source)
         count + 1
 
@@ -114,6 +109,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         db_or_tenant,
         adapter_meta = %{opts: adapter_opts},
         source,
+        context,
         pk_field,
         pks,
         update_data
@@ -121,6 +117,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, source)
 
     keys = for pk <- pks, do: Pack.to_fdb_datakey(adapter_opts, source, pk)
+
+    write_primary = Schema.get_option(context, :write_primary)
 
     get_stage = fn tx, key -> :erlfdb.get(tx, key) end
 
@@ -135,7 +133,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
           |> Keyword.merge(update_data, fn _k, _v1, v2 -> v2 end)
           |> Fields.to_front(pk_field)
 
-        :erlfdb.set(tx, fdb_key, Pack.to_fdb_value(data_object))
+        if write_primary, do: :erlfdb.set(tx, fdb_key, Pack.to_fdb_value(data_object))
         clear_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source)
         set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source)
 
@@ -172,35 +170,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     end
 
     transactional(db_or_tenant, fn tx -> pipeline(tx, keys, get_stage, 0, clear_stage) end)
-  end
-
-  def all(
-        db_or_tenant,
-        adapter_meta,
-        %Ecto.Query{
-          select: %Ecto.Query.SelectExpr{
-            fields: select_fields
-          },
-          from: %Ecto.Query.FromExpr{source: {source, schema}},
-          wheres: wheres
-        },
-        params
-      ) do
-    # Steps:
-    #   0. Validate wheres for supported query types
-    #     i. Equal -> where_field == param[0]
-    #     ii. Between -> where_field > param[0] and where_field < param[1]
-    #     iii. None -> empty where clause
-    #   1. pk or index?
-    #   2. construct start key and end key from the first where expression
-    #   3. Use :erlfdb.get, :erlfdb.get_range
-    #   4. Post-get filtering (Remove :not_found, remove index conflicts, )
-    #   5. Arrange fields based on the select input
-    plan = QueryPlan.get(source, schema, wheres, params)
-    kvs = Query.exec(db_or_tenant, adapter_meta, plan)
-
-    field_names = Fields.parse_select_fields(select_fields)
-    Enum.map(kvs, fn {_key, data_object} -> Fields.arrange(data_object, field_names) end)
   end
 
   # No where clause, all records

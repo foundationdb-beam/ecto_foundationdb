@@ -5,6 +5,7 @@ defmodule Ecto.Integration.IndexTest do
   alias EctoFoundationDB.Schemas.User
   alias Ecto.Adapters.FoundationDB
   alias Ecto.Adapters.FoundationDB.Options
+  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
 
   import Ecto.Query
 
@@ -68,6 +69,51 @@ defmodule Ecto.Integration.IndexTest do
       assert [%User{name: ^hash_1}] =
                from(u in User, where: u.name == ^hash_1)
                |> TestRepo.all(prefix: tenant)
+    end
+
+    test "update_all via index", context do
+      tenant = context[:tenant]
+
+      {:ok, %User{id: user1_id}} =
+        %User{name: "John"}
+        |> FoundationDB.usetenant(tenant)
+        |> TestRepo.insert()
+
+      {:ok, _user2} =
+        %User{name: "James"}
+        |> FoundationDB.usetenant(tenant)
+        |> TestRepo.insert()
+
+      # assert [%User{id: ^user1_id, name: "Jane"}] =
+      #         from(u in User, where: u.name == ^"John")
+      #         |> TestRepo.update_all([set: [name: "Jane"]], prefix: tenant)
+      assert_raise(Unsupported, fn ->
+        from(u in User, where: u.name == ^"John")
+        |> TestRepo.update_all([set: [name: "Jane"]], prefix: tenant)
+      end)
+    end
+
+    test "between query fails on value index", context do
+      tenant = context[:tenant]
+
+      {:ok, _user1} =
+        %User{name: "John"}
+        |> FoundationDB.usetenant(tenant)
+        |> TestRepo.insert()
+
+      {:ok, _user2} =
+        %User{name: "James"}
+        |> FoundationDB.usetenant(tenant)
+        |> TestRepo.insert()
+
+      assert_raise(Unsupported, ~r/does not support 'between' queries/, fn ->
+        from(u in User,
+          where:
+            u.name > ^"J" and
+              u.name < ^"K"
+        )
+        |> TestRepo.all(prefix: tenant)
+      end)
     end
   end
 end

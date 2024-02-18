@@ -5,13 +5,20 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
 
-  def exec(db_or_tenant, adapter_meta, plan) do
+  def all(db_or_tenant, adapter_meta, plan) do
     plan = make_range(db_or_tenant, adapter_meta, plan)
 
     db_or_tenant
     |> get_range(plan)
     |> unpack(plan)
     |> filter(plan)
+  end
+
+  def update(db_or_tenant, adapter_meta, plan) do
+    plan = make_range(db_or_tenant, adapter_meta, plan)
+
+    db_or_tenant
+    |> update_range(plan)
   end
 
   defp make_range(db_or_tenant, adapter_meta, plan = %{layer_data: layer_data}) do
@@ -47,6 +54,26 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     Tx.transactional(db_or_tenant, fn tx ->
       :erlfdb.wait(:erlfdb.get_range(tx, start_key, end_key))
     end)
+  end
+
+  defp update_range(db_or_tenant, plan = %{layer_data: %{range: {fdb_key, nil}}}) do
+    Tx.transactional(db_or_tenant, fn tx ->
+      [{fdb_key, :erlfdb.wait(:erlfdb.get(tx, fdb_key))}]
+      |> unpack(plan)
+      |> filter(plan)
+    end)
+
+    raise Unsupported, "FoundationDB Adapter has not implemented this"
+  end
+
+  defp update_range(db_or_tenant, plan = %{layer_data: %{range: {start_key, end_key}}}) do
+    Tx.transactional(db_or_tenant, fn tx ->
+      :erlfdb.wait(:erlfdb.get_range(tx, start_key, end_key))
+      |> unpack(plan)
+      |> filter(plan)
+    end)
+
+    raise Unsupported, "FoundationDB Adapter has not implemented this"
   end
 
   defp unpack(kvs, %{layer_data: %{idx: _idx}}) do
@@ -142,7 +169,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
        ) do
     index_options = idx[:options]
 
-    if Keyword.get(index_options, :timeseries, false) do
+    if index_options[:timeseries] do
       [start_key, end_key] =
         for x <- [plan.param_left, plan.param_right],
             do:

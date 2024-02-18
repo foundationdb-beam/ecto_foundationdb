@@ -24,6 +24,7 @@ defmodule Ecto.Integration.Case do
   setup do
     tenant1 = Ecto.UUID.autogenerate()
     tenant2 = Ecto.UUID.autogenerate()
+
     tenant_task =
       Task.async(fn ->
         Sandbox.checkout(TestRepo, tenant1, EctoFoundationDB.Integration.Migration)
@@ -47,10 +48,7 @@ defmodule Ecto.Integration.Case do
     end)
 
     {:ok,
-     tenant: tenant,
-     tenant_id: tenant1,
-     other_tenant: other_tenant,
-     other_tenant_id: tenant2}
+     tenant: tenant, tenant_id: tenant1, other_tenant: other_tenant, other_tenant_id: tenant2}
   end
 end
 

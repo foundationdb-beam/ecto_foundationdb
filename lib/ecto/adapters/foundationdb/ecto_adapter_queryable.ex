@@ -11,6 +11,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   alias Ecto.Adapters.FoundationDB.Tenant
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
+  alias Ecto.Adapters.FoundationDB.Layer.Query
+  alias Ecto.Adapters.FoundationDB.QueryPlan
 
   @impl Ecto.Adapter.Queryable
   def prepare(
@@ -39,7 +41,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
     result =
       tenant
-      |> Tx.all(adapter_meta, query, params)
+      |> execute_all(adapter_meta, query, params)
       |> ordering_fn.()
       |> limit_fn.()
       |> Fields.strip_field_names_for_ecto()
@@ -57,6 +59,19 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       ) do
     query = %Ecto.Query{prefix: tenant} = assert_tenancy!(query, adapter_opts)
     num = Tx.delete_all(tenant, adapter_meta, query, params)
+    {num, []}
+  end
+
+  def execute(
+        adapter_meta = %{opts: adapter_opts},
+        _query_meta,
+        _query_cache =
+          {:nocache, {:update_all, query, {nil, _limit_fn}, %{}, _ordering_fn}},
+        params,
+        _options
+      ) do
+    query = %Ecto.Query{prefix: tenant} = assert_tenancy!(query, adapter_opts)
+    num = execute_update_all(tenant, adapter_meta, query, params)
     {num, []}
   end
 
@@ -125,5 +140,49 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       true ->
         query
     end
+  end
+
+  defp execute_all(
+         tenant,
+         adapter_meta,
+         %Ecto.Query{
+           select: %Ecto.Query.SelectExpr{
+             fields: select_fields
+           },
+           from: %Ecto.Query.FromExpr{source: {source, schema}},
+           wheres: wheres
+         },
+         params
+       ) do
+    # Steps:
+    #   0. Validate wheres for supported query types
+    #     i. Equal -> where_field == param[0]
+    #     ii. Between -> where_field > param[0] and where_field < param[1]
+    #     iii. None -> empty where clause
+    #   1. pk or index?
+    #   2. construct start key and end key from the first where expression
+    #   3. Use :erlfdb.get, :erlfdb.get_range
+    #   4. Post-get filtering (Remove :not_found, remove index conflicts, )
+    #   5. Arrange fields based on the select input
+    plan = QueryPlan.get(source, schema, wheres, [], params)
+    kvs = Query.all(tenant, adapter_meta, plan)
+
+    field_names = Fields.parse_select_fields(select_fields)
+    Enum.map(kvs, fn {_key, data_object} -> Fields.arrange(data_object, field_names) end)
+  end
+
+  defp execute_update_all(
+         tenant,
+         adapter_meta = %{opts: _adapter_opts},
+         query = %Ecto.Query{
+           from: %Ecto.Query.FromExpr{source: {source, schema}},
+           wheres: wheres,
+           updates: updates
+         },
+         params
+       ) do
+    plan = QueryPlan.get(source, schema, wheres, updates, params)
+    Query.update(tenant, adapter_meta, plan)
+    IO.inspect(Map.drop(query, [:__struct__]))
   end
 end

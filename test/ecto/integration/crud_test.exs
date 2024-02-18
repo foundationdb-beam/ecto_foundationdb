@@ -151,10 +151,23 @@ defmodule Ecto.Integration.CrudTest do
     test "get fail, 'where name ==' clause", context do
       tenant = context[:tenant]
 
-      assert_raise(Unsupported, fn ->
-        query = from(u in User, where: u.name == "John")
+      assert_raise(Unsupported, ~r/field other than the primary key or an index/, fn ->
+        query = from(u in User, where: u.inserted_at == ^~N[2999-01-01 00:00:00])
         TestRepo.all(query, prefix: tenant)
       end)
+    end
+
+    test "get fail, other queries", context do
+      tenant = context[:tenant]
+
+      assert_raise(
+        Unsupported,
+        ~r/FoundationDB Adapter has not implemented support for your query/,
+        fn ->
+          query = from(u in User, where: u.id != ^"foo")
+          TestRepo.all(query, prefix: tenant)
+        end
+      )
     end
 
     test "insert_all", context do

@@ -75,11 +75,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _returning,
         _options
       ) do
-    %{source: source, schema: schema, prefix: tenant} = assert_tenancy!(adapter_opts, schema_meta)
+    %{source: source, schema: schema, prefix: tenant, context: context} =
+      assert_tenancy!(adapter_opts, schema_meta)
+
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
-    case Tx.update_pks(tenant, adapter_meta, source, pk_field, [pk], update_data) do
+    case Tx.update_pks(tenant, adapter_meta, source, context, pk_field, [pk], update_data) do
       1 ->
         {:ok, []}
 
