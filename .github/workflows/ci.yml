@@ -11,12 +11,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       MIX_ENV: dev
+      FDB_VERSION: ${{ matrix.fdb }}
     name: Lint
     strategy:
       matrix:
         os: ["ubuntu-20.04"]
         elixir: ["1.16"]
         otp: ["26"]
+        fdb: ['7.3.32']
     steps:
       - uses: actions/checkout@v3
       - uses: erlef/setup-beam@v1
@@ -28,6 +30,10 @@ jobs:
           path: deps
           key: ${{ matrix.os }}-otp_${{ matrix.otp }}-elixir_${{ matrix.elixir }}-mix_${{ hashFiles('**/mix.lock') }}
           restore-keys: ${{ matrix.os }}-otp_${{ matrix.otp }}-elixir_${{ matrix.elixir }}-mix_
+      - name: Install FoundationDB
+        run: |
+          wget --quiet https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}/foundationdb-clients_${FDB_VERSION}-1_amd64.deb
+          sudo dpkg -i foundationdb-clients_${FDB_VERSION}-1_amd64.deb
       - run: mix deps.get
       - run: mix lint
 
