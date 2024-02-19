@@ -31,7 +31,10 @@ defmodule EctoFoundationdb.MixProject do
       {:ecto, "~> 3.10"},
       {:ecto_sql, "~> 3.11"},
       {:jason, "~> 1.4"},
-      {:credo, "~> 1.6", only: [:dev, :test, :docs]}
+      {:credo, "~> 1.6", only: [:dev, :test, :docs]},
+
+      # Benchmarks
+      {:benchee, "~> 1.0", only: :dev}
     ]
   end
 

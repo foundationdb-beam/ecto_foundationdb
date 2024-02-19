@@ -139,19 +139,8 @@ defmodule Ecto.Adapters.FoundationDB do
         :persistent_term.put({__MODULE__, :database}, {db, options})
         db
 
-      {db, ^options} ->
+      {db, _options} ->
         db
-
-      {_db, up_options} ->
-        raise Unsupported, """
-        FoundationDB Adapater was started with options
-
-        #{inspect(up_options)}
-
-        But since then, options have change to
-
-        #{inspect(options)}
-        """
     end
   end
 
