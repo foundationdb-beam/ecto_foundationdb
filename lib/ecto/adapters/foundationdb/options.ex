@@ -1,4 +1,7 @@
 defmodule Ecto.Adapters.FoundationDB.Options do
+  @moduledoc """
+  This internal module handles the options that are available to the application developer.
+  """
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Pack
 

@@ -1,8 +1,9 @@
 defmodule Ecto.Integration.TimeSeriesTest do
   use Ecto.Integration.Case, async: true
 
-  alias Ecto.Integration.TestRepo
   alias Ecto.Adapters.FoundationDB
+  alias Ecto.Integration.TestRepo
+
   alias EctoFoundationDB.Schemas.Event
 
   import Ecto.Query

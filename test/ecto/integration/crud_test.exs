@@ -2,14 +2,16 @@ defmodule Ecto.Integration.CrudTest do
   use Ecto.Integration.Case, async: true
 
   alias Ecto.Integration.TestRepo
-  alias EctoFoundationDB.Schemas.User
+
   alias EctoFoundationDB.Schemas.Account
-  alias EctoFoundationDB.Schemas.Product
   alias EctoFoundationDB.Schemas.Global
+  alias EctoFoundationDB.Schemas.Product
+  alias EctoFoundationDB.Schemas.User
+
   alias Ecto.Adapters.FoundationDB
-  alias Ecto.Adapters.FoundationDB.Transaction
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
+  alias Ecto.Adapters.FoundationDB.Transaction
 
   import Ecto.Query
 

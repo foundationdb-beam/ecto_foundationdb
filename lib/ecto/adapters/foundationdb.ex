@@ -18,8 +18,8 @@ defmodule Ecto.Adapters.FoundationDB do
        FoundationDB cluster. Defaults to `:erlfdb.open(cluster_file)`. WHen
        using `Ecto.Adapters.FoundationDB.Sandbox`, you should consider setting
        this option to `Sandbox.open_db/0`.
-    * `:indexkey_encoder` - 1-arity function that accepts a term as input
-       and provides a binary as output. Defaults to `Pack.indexkey_encoder/1`.
+    * `:indexkey_encoder` - 2-arity function that accepts a term as input
+       and provides a binary as output. Defaults to `Pack.indexkey_encoder/2`.
        This option provides some configurability to `ecto_foundationdb`'s
        management of indexes, and should rarely be used.
 
@@ -37,7 +37,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ### Data Types
 
   `ecto_foundationdb` stores your struct's data using `:erlang.term_to_binary/1`, and
-  retrives it with `:erlang.binary_to_term/1`. As such, there is no data type
+  retrieves it with `:erlang.binary_to_term/1`. As such, there is no data type
   conversion between Elixir types and Database Types. Any term you put in your
   struct will be stored and later retrieved.
 
@@ -52,11 +52,8 @@ defmodule Ecto.Adapters.FoundationDB do
   `ecto_foundationdb` implements a specific Layer on the FoundationDB
   key-value store. This Layer is intended to be generally useful, but you
   may not find it suitable for your workloads. The Layer is documented in
-  detail at `Ecto.Adapters.FoundationDB.Layer` (TODO). This project does not support
+  detail at `Ecto.Adapters.FoundationDB.Layer`. This project does not support
   plugging in other Layers.
-
-  For example, the `ecto_foundationdb` layer will not support time-series data
-  very well.
 
   ### Queries
 
@@ -126,10 +123,10 @@ defmodule Ecto.Adapters.FoundationDB do
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
 
   alias Ecto.Adapters.FoundationDB.EctoAdapter
-  alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
-  alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
-  alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
+  alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
+  alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
+  alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
 
   def db(repo) when is_atom(repo) do
     db(repo.config())

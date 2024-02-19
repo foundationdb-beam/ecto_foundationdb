@@ -1,13 +1,17 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Query do
-  alias Ecto.Adapters.FoundationDB.Layer.Fields
-  alias Ecto.Adapters.FoundationDB.QueryPlan
-  alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
-  alias Ecto.Adapters.FoundationDB.Layer.Tx
-  alias Ecto.Adapters.FoundationDB.Schema
-  alias Ecto.Adapters.FoundationDB.Layer.Pack
+  @moduledoc """
+  This internal module handles execution of Ecto Query requests.
+  """
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
+  alias Ecto.Adapters.FoundationDB.Layer.Fields
+  alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
+  alias Ecto.Adapters.FoundationDB.Layer.Pack
+  alias Ecto.Adapters.FoundationDB.Layer.Tx
+  alias Ecto.Adapters.FoundationDB.QueryPlan
+  alias Ecto.Adapters.FoundationDB.Schema
 
   defmodule Continuation do
+    @moduledoc false
     defstruct more?: false, start_key: nil
   end
 
@@ -20,10 +24,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
 
     objs =
       kvs
-      |> Stream.unfold(fn
-        [] -> nil
-        [h | t] -> {h, t}
-      end)
       |> unpack(plan)
       |> filter(plan)
       |> Stream.map(fn {_k, v} -> v end)
@@ -36,15 +36,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
 
     idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, plan.source)
 
-    db_or_tenant
-    |> Tx.transactional(fn tx -> tx_update_range(tx, adapter_meta, plan, idxs) end)
+    Tx.transactional(db_or_tenant, &tx_update_range(&1, adapter_meta, plan, idxs))
   end
 
   def delete(db_or_tenant, adapter_meta, plan = %QueryPlan.None{}) do
     # Special case, very efficient
-    Tx.transactional(db_or_tenant, fn tx ->
-      Tx.clear_all(tx, adapter_meta, plan.source)
-    end)
+    Tx.transactional(db_or_tenant, &Tx.clear_all(&1, adapter_meta, plan.source))
   end
 
   def delete(db_or_tenant, adapter_meta, plan) do
@@ -52,8 +49,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
 
     idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, plan.source)
 
-    db_or_tenant
-    |> Tx.transactional(fn tx -> tx_delete_range(tx, adapter_meta, plan, idxs) end)
+    Tx.transactional(db_or_tenant, &tx_delete_range(&1, adapter_meta, plan, idxs))
   end
 
   defp make_range(db_or_tenant, adapter_meta, plan = %{layer_data: layer_data}, options) do
@@ -102,19 +98,18 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     |> tx_get_range(plan, [])
     |> unpack(plan)
     |> filter(plan)
-    |> Stream.map(fn {fdb_key, data_object} ->
-      Tx.update_data_object(
+    |> Stream.map(
+      &Tx.update_data_object(
         tx,
         adapter_meta,
         plan.source,
         pk_field,
-        fdb_key,
-        data_object,
+        &1,
         updates,
         idxs,
         write_primary
       )
-    end)
+    )
     |> Enum.to_list()
     |> length()
   end
@@ -124,9 +119,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     |> tx_get_range(plan, [])
     |> unpack(plan)
     |> filter(plan)
-    |> Stream.map(fn {fdb_key, data_object} ->
-      Tx.delete_data_object(tx, adapter_meta, plan.source, fdb_key, data_object, idxs)
-    end)
+    |> Stream.map(&Tx.delete_data_object(tx, adapter_meta, plan.source, &1, idxs))
     |> Enum.to_list()
     |> length()
   end

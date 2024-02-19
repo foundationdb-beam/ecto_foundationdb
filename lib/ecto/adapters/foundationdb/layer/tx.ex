@@ -1,9 +1,12 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
+  @moduledoc """
+  This internal module handles the execution of `:erlfdb` operations within transactions.
+  """
+  alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
+  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Fields
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Schema
-  alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
-  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
 
   @db_or_tenant :__ectofdbtxcontext__
   @tx :__ectofdbtx__
@@ -11,15 +14,15 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
   def in_tenant_tx?(), do: in_tx?() and elem(Process.get(@db_or_tenant), 0) == :erlfdb_tenant
   def in_tx?(), do: not is_nil(Process.get(@tx))
 
-  def is_safe?(tenant, nil), do: is_safe?(tenant, false)
+  def safe?(tenant, nil), do: safe?(tenant, false)
 
-  def is_safe?(nil, true),
+  def safe?(nil, true),
     do: if(in_tenant_tx?(), do: true, else: {false, :missing_tenant})
 
-  def is_safe?(tenant, true) when is_binary(tenant), do: {false, :tenant_id}
-  def is_safe?(_tenant, true), do: true
-  def is_safe?(nil, false), do: {false, :tenant_only}
-  def is_safe?(_tenant, false), do: {false, :unused_tenant}
+  def safe?(tenant, true) when is_binary(tenant), do: {false, :tenant_id}
+  def safe?(_tenant, true), do: true
+  def safe?(nil, false), do: {false, :tenant_only}
+  def safe?(_tenant, false), do: {false, :unused_tenant}
 
   def commit_proc(db_or_tenant, fun) when is_function(fun, 0) do
     nil = Process.get(@db_or_tenant)
@@ -92,7 +95,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         fdb_value = Pack.to_fdb_value(data_object)
 
         if write_primary, do: :erlfdb.set(tx, fdb_key, fdb_value)
-        set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source)
+        set_indexes_for_one(tx, idxs, adapter_opts, {fdb_key, data_object}, source)
         count + 1
 
       _tx, {key, _}, _result, _acc ->
@@ -116,7 +119,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
 
     write_primary = Schema.get_option(context, :write_primary)
 
-    get_stage = fn tx, key -> :erlfdb.get(tx, key) end
+    get_stage = &:erlfdb.get/2
 
     update_stage = fn
       _tx, _key, :not_found, acc ->
@@ -130,8 +133,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
           adapter_meta,
           source,
           pk_field,
-          fdb_key,
-          data_object,
+          {fdb_key, data_object},
           [set: set_data],
           idxs,
           write_primary
@@ -148,8 +150,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         %{opts: adapter_opts},
         source,
         pk_field,
-        fdb_key,
-        data_object,
+        {fdb_key, data_object},
         updates,
         idxs,
         write_primary
@@ -162,14 +163,14 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
       |> Fields.to_front(pk_field)
 
     if write_primary, do: :erlfdb.set(tx, fdb_key, Pack.to_fdb_value(data_object))
-    clear_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source)
-    set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source)
+    clear_indexes_for_one(tx, idxs, adapter_opts, {fdb_key, data_object}, source)
+    set_indexes_for_one(tx, idxs, adapter_opts, {fdb_key, data_object}, source)
   end
 
   def delete_pks(tx, adapter_meta = %{opts: adapter_opts}, source, pks, idxs) do
     keys = for pk <- pks, do: Pack.to_fdb_datakey(adapter_opts, source, pk)
 
-    get_stage = fn tx, key -> :erlfdb.get(tx, key) end
+    get_stage = &:erlfdb.get/2
 
     clear_stage = fn
       _tx, _key, :not_found, acc ->
@@ -180,8 +181,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
           tx,
           adapter_meta,
           source,
-          fdb_key,
-          Pack.from_fdb_value(fdb_value),
+          {fdb_key, Pack.from_fdb_value(fdb_value)},
           idxs
         )
 
@@ -191,15 +191,14 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     pipeline(tx, keys, get_stage, 0, clear_stage)
   end
 
-  def delete_data_object(tx, %{opts: adapter_opts}, source, fdb_key, data_object, idxs) do
+  def delete_data_object(tx, %{opts: adapter_opts}, source, kv = {fdb_key, _}, idxs) do
     :erlfdb.clear(tx, fdb_key)
 
     clear_indexes_for_one(
       tx,
       idxs,
       adapter_opts,
-      fdb_key,
-      data_object,
+      kv,
       source
     )
   end
@@ -241,8 +240,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
       {index_key, index_object} =
         get_index_entry(
           adapter_opts,
-          fdb_key,
-          Pack.from_fdb_value(fdb_value),
+          {fdb_key, Pack.from_fdb_value(fdb_value)},
           index_fields,
           options,
           index_name,
@@ -322,8 +320,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
   # Note: pk is always first. See insert and update paths
   defp get_index_entry(
          adapter_opts,
-         fdb_key,
-         data_object = [{pk_field, pk_value} | _],
+         {fdb_key, data_object = [{pk_field, pk_value} | _]},
          index_fields,
          index_options,
          index_name,
@@ -353,7 +350,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     {index_key, index_object}
   end
 
-  defp clear_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source) do
+  defp clear_indexes_for_one(tx, idxs, adapter_opts, kv, source) do
     for idx <- idxs do
       index_name = idx[:id]
       index_fields = idx[:fields]
@@ -362,8 +359,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
       {index_key, _index_object} =
         get_index_entry(
           adapter_opts,
-          fdb_key,
-          data_object,
+          kv,
           index_fields,
           index_options,
           index_name,
@@ -374,7 +370,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     end
   end
 
-  defp set_indexes_for_one(tx, idxs, adapter_opts, fdb_key, data_object, source) do
+  defp set_indexes_for_one(tx, idxs, adapter_opts, kv, source) do
     for idx <- idxs do
       index_name = idx[:id]
       index_fields = idx[:fields]
@@ -383,8 +379,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
       {index_key, index_object} =
         get_index_entry(
           adapter_opts,
-          fdb_key,
-          data_object,
+          kv,
           index_fields,
           index_options,
           index_name,

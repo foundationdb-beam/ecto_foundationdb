@@ -17,6 +17,7 @@ Application.put_env(:ecto_foundationdb, TestRepo,
 )
 
 defmodule Ecto.Integration.Case do
+  @moduledoc false
   use ExUnit.CaseTemplate
 
   alias Ecto.Adapters.FoundationDB.Sandbox
@@ -39,10 +40,10 @@ defmodule Ecto.Integration.Case do
     other_tenant = Task.await(other_tenant_task)
 
     on_exit(fn ->
-      t1 = Task.async(fn -> Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, tenant1) end)
+      t1 = Task.async(fn -> Sandbox.checkin(TestRepo, tenant1) end)
 
       t2 =
-        Task.async(fn -> Ecto.Adapters.FoundationDB.Sandbox.checkin(TestRepo, tenant2) end)
+        Task.async(fn -> Sandbox.checkin(TestRepo, tenant2) end)
 
       Task.await_many([t1, t2])
     end)

@@ -39,8 +39,8 @@ defmodule EctoFoundationdb.MixProject do
     [
       lint: [
         "format --check-formatted",
-        "deps.unlock --check-unused"
-        #        "credo --all --strict"
+        "deps.unlock --check-unused",
+        "credo --all --strict"
       ]
     ]
   end

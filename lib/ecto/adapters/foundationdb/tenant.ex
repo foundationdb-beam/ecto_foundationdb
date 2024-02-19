@@ -1,4 +1,9 @@
 defmodule Ecto.Adapters.FoundationDB.Tenant do
+  @moduledoc """
+  This module allows the application to manage the creation and deletion of
+  tenants within the FoundationDB database. All transactions require a tenant,
+  so any application that uses the Ecto FoundationDB Adapter must use this module.
+  """
   alias Ecto.Adapters.FoundationDB, as: FDB
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
 

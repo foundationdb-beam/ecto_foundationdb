@@ -1,26 +1,29 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
+  @moduledoc """
+  Implemenation of Ecto.Adapter.Queryable
+  """
   @behaviour Ecto.Adapter.Queryable
 
   alias Ecto.Adapters.FoundationDB, as: FDB
 
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
-  alias Ecto.Adapters.FoundationDB.Layer.Ordering
-  alias Ecto.Adapters.FoundationDB.Layer.Fields
-  alias Ecto.Adapters.FoundationDB.Layer.Tx
-  alias Ecto.Adapters.FoundationDB.Schema
-  alias Ecto.Adapters.FoundationDB.Tenant
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
+  alias Ecto.Adapters.FoundationDB.Layer.Fields
+  alias Ecto.Adapters.FoundationDB.Layer.Ordering
   alias Ecto.Adapters.FoundationDB.Layer.Query
+  alias Ecto.Adapters.FoundationDB.Layer.Tx
   alias Ecto.Adapters.FoundationDB.QueryPlan
+  alias Ecto.Adapters.FoundationDB.Schema
+  alias Ecto.Adapters.FoundationDB.Tenant
 
   @impl Ecto.Adapter.Queryable
   def prepare(
         operation,
-        %Ecto.Query{
+        query = %Ecto.Query{
           order_bys: order_bys,
           limit: limit
-        } = query
+        }
       ) do
     ordering_fn = Ordering.get_ordering_fn(order_bys)
     limit = get_limit(limit)
@@ -127,7 +130,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
           {context, query}
       end
 
-    case Tx.is_safe?(tenant, Schema.get_option(context, :usetenant)) do
+    case Tx.safe?(tenant, Schema.get_option(context, :usetenant)) do
       {false, :unused_tenant} ->
         raise IncorrectTenancy, """
         FoundatioDB Adapter is expecting the query for schema \
@@ -243,7 +246,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       }
     end
 
-    # :max_rows - The number of rows to load from the database as we stream. It is supported at least by Postgres and MySQL and defaults to 500.
+    # :max_rows - The number of rows to load from the database as we stream.
+    # It is supported at least by Postgres and MySQL and defaults to 500.
     next_fun =
       fn
         acc = %{continuation: %Query.Continuation{more?: false}} ->

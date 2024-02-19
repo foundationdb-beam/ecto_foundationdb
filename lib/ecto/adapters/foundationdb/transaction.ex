@@ -1,4 +1,13 @@
 defmodule Ecto.Adapters.FoundationDB.Transaction do
+  @moduledoc """
+  This module defines the API that allows an application to excute FDB Transactions
+  that they define. Please be aware of the
+  [limitations that FoundationDB](https://apple.github.io/foundationdb/developer-guide.html#transaction-basics)
+  imposes on transactions.
+
+  For example, a transaction must complete
+  [within 5 seconds](https://apple.github.io/foundationdb/developer-guide.html#long-running-transactions).
+  """
   alias Ecto.Adapters.FoundationDB.Layer.Tx
 
   def commit(db_or_tenant, fun) when is_function(fun, 0) do

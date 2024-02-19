@@ -1,4 +1,9 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Fields do
+  @moduledoc """
+  Some functions to assist with managing the fields in an object as it is written to FDB storage.
+
+  The object is stored as a Keyword.
+  """
   def parse_select_fields(select_fields) do
     select_fields
     |> Enum.map(fn {{:., _, [{:&, [], [0]}, field]}, [], []} -> field end)
@@ -14,7 +19,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Fields do
   end
 
   def get_pk_field!(schema) do
-    # TODO: support composite primary key
     [pk_field] = schema.__schema__(:primary_key)
     pk_field
   end

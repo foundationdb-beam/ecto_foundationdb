@@ -1,16 +1,19 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
+  @moduledoc """
+  Implemenation of Ecto.Adapter.Schema
+  """
   @behaviour Ecto.Adapter.Schema
 
   alias Ecto.Adapters.FoundationDB, as: FDB
 
+  alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
+  alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
+  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Fields
+  alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
   alias Ecto.Adapters.FoundationDB.Layer.Tx
   alias Ecto.Adapters.FoundationDB.Schema
   alias Ecto.Adapters.FoundationDB.Tenant
-  alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
-  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
-  alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
-  alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
 
   @impl Ecto.Adapter.Schema
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
@@ -158,7 +161,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
           |> Map.put(:context, context)
       end
 
-    case Tx.is_safe?(tenant, Schema.get_option(context, :usetenant)) do
+    case Tx.safe?(tenant, Schema.get_option(context, :usetenant)) do
       {false, :unused_tenant} ->
         raise IncorrectTenancy, """
         FoundatioDB Adapter is expecting the struct for schema \

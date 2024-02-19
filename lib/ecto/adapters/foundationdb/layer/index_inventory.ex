@@ -1,4 +1,7 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
+  @moduledoc """
+  This is an internal module that manages index creation and metadata.
+  """
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Layer.Tx
@@ -62,20 +65,18 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
         res
 
       [] ->
-        idxs =
-          Tx.transactional(
-            db_or_tenant,
-            fn tx ->
-              tx
-              |> :erlfdb.get_range_startswith(source_range_startswith(adapter_opts, source))
-              |> :erlfdb.wait()
-              |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
-            end
-          )
+        idxs = Tx.transactional(db_or_tenant, &tx_idxs(&1, adapter_opts, source))
 
         :ets.insert(cache, {{__MODULE__, db_or_tenant, source}, idxs})
         idxs
     end
+  end
+
+  defp tx_idxs(tx, adapter_opts, source) do
+    tx
+    |> :erlfdb.get_range_startswith(source_range_startswith(adapter_opts, source))
+    |> :erlfdb.wait()
+    |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
   end
 
   def source_range_startswith(adapter_opts, source) do

@@ -1,4 +1,7 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
+  @moduledoc """
+  This internal module creates binaries to be used as FDB keys and values.
+  """
   alias Ecto.Adapters.FoundationDB.Options
 
   @data_namespace "d"

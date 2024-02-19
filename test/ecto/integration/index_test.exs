@@ -2,10 +2,12 @@ defmodule Ecto.Integration.IndexTest do
   use Ecto.Integration.Case, async: true
 
   alias Ecto.Integration.TestRepo
+
   alias EctoFoundationDB.Schemas.User
+
   alias Ecto.Adapters.FoundationDB
-  alias Ecto.Adapters.FoundationDB.Options
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
+  alias Ecto.Adapters.FoundationDB.Options
 
   import Ecto.Query
 

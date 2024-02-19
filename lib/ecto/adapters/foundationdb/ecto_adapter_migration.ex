@@ -7,9 +7,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
   @behaviour Ecto.Adapter.Migration
 
   alias Ecto.Adapters.FoundationDB, as: FDB
-  alias Ecto.Adapters.FoundationDB.Tenant
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
-  # alias Ecto.Adapters.FoundationDB.Layer.Tx
+  alias Ecto.Adapters.FoundationDB.Tenant
 
   @migration_keyspace_prefix <<0xFE>>
 
@@ -22,7 +21,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
 
   @impl true
   def supports_ddl_transaction?() do
-    # TODO: maybe support this?
     false
   end
 
