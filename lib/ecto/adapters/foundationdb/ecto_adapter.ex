@@ -18,7 +18,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapter do
     telemetry_prefix = Keyword.fetch!(config, :telemetry_prefix)
     telemetry = {config[:repo], log, telemetry_prefix ++ [:query]}
 
-    {:ok, Supervisor.Spec.supervisor(Supervisor, [[], [strategy: :one_for_one]]),
+    {:ok, Supervisor.child_spec(Ecto.Adapters.FoundationDB.Supervisor, []),
      %{telemetry: telemetry, stacktrace: stacktrace, opts: config}}
   end
 

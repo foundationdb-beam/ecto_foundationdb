@@ -120,8 +120,6 @@ defmodule Ecto.Adapters.FoundationDB do
   @behaviour Ecto.Adapter.Queryable
   @behaviour Ecto.Adapter.Migration
 
-  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
-
   alias Ecto.Adapters.FoundationDB.EctoAdapter
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
