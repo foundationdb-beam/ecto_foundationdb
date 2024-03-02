@@ -161,7 +161,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
          plan = %QueryPlan.None{layer_data: layer_data},
          options
        ) do
-    start_key = Pack.to_fdb_datakey(adapter_opts, plan.source, "")
+    start_key = Pack.to_fdb_datakey_startswith(adapter_opts, plan.source)
     end_key = :erlfdb_key.strinc(start_key)
     start_key = options[:start_key] || start_key
     %QueryPlan.None{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
