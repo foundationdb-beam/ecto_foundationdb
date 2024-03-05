@@ -2,6 +2,16 @@ defmodule Ecto.Adapters.FoundationDB.Options do
   @moduledoc """
   This internal module handles the options that are available to the application developer.
   """
+
+  @type option() ::
+          {:open_db, function()}
+          | {:storage_id, String.t()}
+          | {:key_delimiter, String.t()}
+          | {:indexkey_encoder, function()}
+          | {:cluster_file, :erlfdb.cluster_filename()}
+
+  @type t() :: [option()]
+
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Pack
 

@@ -6,12 +6,15 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
   When using this module, it creates a directory in the project root called `.erlfdb`. It
   is safe to delete this directory when you no longer need it (e.g. after test execution)
   """
+  alias Ecto.Adapters.FoundationDB.Database
   alias Ecto.Adapters.FoundationDB.Tenant
 
+  @spec open_db() :: Database.t()
   def open_db() do
     get_or_create_test_db()
   end
 
+  @spec checkout(Ecto.Repo.t(), Tenant.id(), module()) :: Tenant.t()
   def checkout(repo, id, migration) when is_binary(id) do
     case :persistent_term.get({__MODULE__, id, :tenant}, nil) do
       nil ->
@@ -28,10 +31,12 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
     end
   end
 
+  @spec checkin(Ecto.Repo.t(), Tenant.id()) :: :ok
   def checkin(repo, id) when is_binary(id) do
     db = :persistent_term.get({__MODULE__, :database})
     Tenant.clear_delete!(db, id, repo.config())
     :persistent_term.erase({__MODULE__, id, :tenant})
+    :ok
   end
 
   defp get_or_create_test_db() do

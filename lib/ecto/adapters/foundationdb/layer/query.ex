@@ -15,6 +15,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     defstruct more?: false, start_key: nil
   end
 
+  @doc """
+  Executes a query for retrieving data.
+  """
   def all(db_or_tenant, adapter_meta, plan, options \\ []) do
     plan = make_range(db_or_tenant, adapter_meta, plan, options)
 
@@ -31,6 +34,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     {objs, continuation}
   end
 
+  @doc """
+  Executes a query for updating data.
+  """
   def update(db_or_tenant, adapter_meta, plan) do
     plan = make_range(db_or_tenant, adapter_meta, plan, [])
 
@@ -39,6 +45,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     Tx.transactional(db_or_tenant, &tx_update_range(&1, adapter_meta, plan, idxs))
   end
 
+  @doc """
+  Executes a query for deleting data.
+  """
   def delete(db_or_tenant, adapter_meta, plan = %QueryPlan.None{}) do
     # Special case, very efficient
     Tx.transactional(db_or_tenant, &Tx.clear_all(&1, adapter_meta, plan.source))

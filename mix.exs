@@ -9,7 +9,10 @@ defmodule EctoFoundationdb.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
-      aliases: aliases()
+      aliases: aliases(),
+      dialyzer: [
+        ignore_warnings: ".dialyzer_ignore.exs"
+      ]
     ]
   end
 
@@ -32,6 +35,7 @@ defmodule EctoFoundationdb.MixProject do
       {:ecto_sql, "~> 3.11"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.6", only: [:dev, :test, :docs]},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
 
       # Benchmarks
       {:benchee, "~> 1.0", only: :dev}
@@ -43,7 +47,8 @@ defmodule EctoFoundationdb.MixProject do
       lint: [
         "format --check-formatted",
         "deps.unlock --check-unused",
-        "credo --all --strict"
+        "credo --all --strict",
+        "dialyzer --format short"
       ]
     ]
   end

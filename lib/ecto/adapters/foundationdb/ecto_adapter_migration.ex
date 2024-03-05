@@ -7,6 +7,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
   @behaviour Ecto.Adapter.Migration
 
   alias Ecto.Adapters.FoundationDB, as: FDB
+  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
   alias Ecto.Adapters.FoundationDB.Tenant
 
@@ -61,6 +62,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
       IndexInventory.create_index(tenant, adapter_meta, source, index_name, index_fields, options)
 
     {:ok, []}
+  end
+
+  def execute_ddl(
+        _adapter_meta,
+        unsupported,
+        _options
+      ) do
+    raise Unsupported, "Migration DDL not supported #{inspect(unsupported)}"
   end
 
   @impl true

@@ -65,13 +65,30 @@ defmodule Ecto.Adapters.FoundationDB do
     * `Repo.get` using primary key
     * `Repo.all` using no constraint. This will return all such structs for
       the tenant.
-    * `Repo.all` using an index. This will return matching structs for the
-      tenant. More on indexes below.
+    * `Repo.all` using an 'equal' constraint on an index field. This will return
+      matching structs for the tenant.
+
+      ```elixir
+      from(u in User, where: u.name == ^"John")
+      ```
+    * `Repo.all` using a 'between' contraint on a time series index field. This will
+      return structs in the tenant that have a timestamp between the given timespan
+      in the query.
+
+      ```elixir
+      from(e in Event,
+        where:
+          e.timestamp > ^~N[1970-01-01 00:00:00] and
+            e.timestamp < ^~N[2100-01-01 00:00:00]
+      )
+      ```
+
+    More on indexes below.
 
   ### Indexes
 
-  Simple indexes are supported. They are similar to Ecto SQL indexes in some ways,
-  but critically different in others.
+  Simple indexes and time series indexes are supported. They are similar to Ecto SQL
+  indexes in some ways, but critically different in others.
 
     1. An index is created via a migration file, as it is with Ecto SQL. However,
        this is the only supported purpose of migration files so far.
@@ -79,21 +96,15 @@ defmodule Ecto.Adapters.FoundationDB do
     2. Each index roughly doubles the size of data in your database for the
        schema on which it's created.
 
-    3. An index created on more than one field is hierarchical. Similar to Unix file
-       paths, each index value can be considered the parent of the next index value.
-       Because of the hierarchical nature, you can query for all records of a certain
-       set of index values only if you start at the top-most index and proceed without
-       skipping indexed fields. (Note: this still needs to be implemented)
-
-    4. Indexes are managed within transactions, so that they should always be
+    3. Indexes are managed within transactions, so that they should always be
        consistent.
 
-    5. Upon index creation, each tenant's data will be indexed in a transaction,
+    4. Upon index creation, each tenant's data will be indexed in a transaction,
        and because of FoundationDB's 5-second transaction limit, this means that
        it may be impossible to create an index on a very large dataset using
        purely `ecto_foundationdb`.
 
-    6. Migrations must be executed on a per tenant basis, and they can be
+    5. Migrations must be executed on a per tenant basis, and they can be
        run in parallel.
 
   ### Transactions
@@ -109,7 +120,13 @@ defmodule Ecto.Adapters.FoundationDB do
   Many of Ecto's features probably do not work with `ecto_foundationdb`. Please
   see the integration tests for a collection of use cases that is known to work.
 
-  It's important to note that even though `ecto_foundationdb` relies on `ecto_sql`,
+  Certainly, you'll find that most queries fail with an Ecto.Adapaters.FoundationDB.Exception.Unsupported
+  exception. The FoundationDB Layer concept precludes complex queries from being executed
+  within the database. Therefore, it only makes sense to implement a limited set of query types --
+  specifically those that do have optimized database query semantics. All other filtering, aggregation,
+  and grouping must be done by your Elixir code.
+
+  Lastly, it's important to note that even though `ecto_foundationdb` relies on `ecto_sql`,
   it's only for the `Ecto.Adapter.Migration` behaviour and `create index` function.
   The rest of `ecto_sql` is unused.
   """
@@ -120,16 +137,20 @@ defmodule Ecto.Adapters.FoundationDB do
   @behaviour Ecto.Adapter.Queryable
   @behaviour Ecto.Adapter.Migration
 
+  alias Ecto.Adapters.FoundationDB.Database
   alias Ecto.Adapters.FoundationDB.EctoAdapter
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
   alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
+  alias Ecto.Adapters.FoundationDB.Options
 
+  @spec db(Ecto.Repo.t()) :: Database.t()
   def db(repo) when is_atom(repo) do
     db(repo.config())
   end
 
+  @spec db(Options.t()) :: Database.t()
   def db(options) do
     case :persistent_term.get({__MODULE__, :database}, nil) do
       nil ->
@@ -142,6 +163,11 @@ defmodule Ecto.Adapters.FoundationDB do
     end
   end
 
+  # We cannot specify Tenant.t() here because Ecto defines a specific type
+  # on the prefix, namely: `String.t() | nil`. This is pretty unfortunate;
+  # any workaround would be hacky, brittle, and/or slow
+  #   e.g. ets, persistent_term, process dictionary, base64 encoded
+  @spec usetenant(Ecto.Schema.schema(), any()) :: Ecto.Schema.schema()
   def usetenant(struct, tenant) do
     Ecto.put_meta(struct, prefix: tenant)
   end

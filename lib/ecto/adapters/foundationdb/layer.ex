@@ -6,11 +6,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
   such as Postgres, these patterns will be familiar. However, there are many differences (for example SQL is
   not supported), so this document seeks to describe the capabilities of the Ecto FoundationDB Layer in detail.
 
-  ## Limitations
-
-  The documentation for the Layer is not yet complete. Please also refer to the integration tests in
-  `test/ecto/integration` for more detail on what is supported.
-
   ## Primary Write and Read
 
   Your Ecto Schema has a primary key field, which is usually a string or an integer. This primary
@@ -39,12 +34,17 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
     iex> user = Repo.insert!(%User{name: "John", department: "Engineering"}, prefix: tenant)
     iex> Repo.get!(User, user.id, prefix: tenant)
 
+  Within a tenant, all objects from your Schema can be retrieved at once.
+
+    iex> Repo.all(User, prefix: tenant)
+    [%User{id: "some-uuid", name: "John", department: "Engineering"}]
+
   Note: The Primary Write can be skipped by providing the `write_primary: false` option on the `@schema_context`.
   See Time Series Index for more.
 
   ## Index Write and Read
 
-  Within a tenant, all objects from your Schema can be retrieved at once. However, say you wanted to
+  As shown above, you can easily get all Users in a tenant. However, say you wanted to
   get all Users from a certain department with high efficiency.
 
   Via an Ecto Migration, you can specify an `Index` on the `:department` field.
@@ -58,9 +58,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
   end
   ```
 
-  The creation of this index duplicates the data of your User object so that it now exists under 2 keys:
-  the primary key, and the index key. The index key is structured so that a query on that value will
-  retrieve the expected objects.
+  When this index is created via the migration, the Ecto FoundationDB Adapter duplicates the data of your
+  User object so that it now exists under 2 keys: the primary key, and the index key. The index key is
+  structured so that a query on that value will retrieve the expected objects.
 
     iex> query = from(u in User, where: u.department == ^"Engineering")
     iex> Repo.all(query, prefix: tenant)
@@ -98,8 +98,10 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
   end
   ```
 
-  Notice in this example, we choose to use `write_primary: true` which skips the Primary Write, so that
-  our data is not duplicated. However, this means that the data can only be managed by providing a
+  Take note of the option `timeseries: true` on the index creation in the Migration module.
+
+  Also notice that in the Schema, we choose to use `write_primary: true`. This skips the Primary Write, so that
+  our data is not duplicated. However, this means that the data can **only** be managed by providing a
   timespan query.
 
     iex> query = from(e in Event,

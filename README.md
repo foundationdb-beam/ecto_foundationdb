@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/foundationdb-beam/ecto_foundationdb/actions/workflows/ci.yml/badge.svg)](https://github.com/foundationdb-beam/ecto_foundationdb/actions/workflows/ci.yml)
 
-**Work in progress. Please see integration tests to see what's currently supported.**
+**Work in progress.**
 
 ## Driver
 
@@ -11,7 +11,7 @@ as the driver for communicating with FoundationDB.
 
 ## Installation
 
-`ecto_foundationdb` is still under development; it's not ready for any production workloads.
+`ecto_foundationdb` is still under development; it's not ready for any production workloads, but it is ready for use in dev and test environments.
 
 ```elixir
 defp deps do
@@ -80,7 +80,7 @@ user = %User{name: "John"}
 MyApp.Repo.insert!(user)
 ```
 
-**Note**: Because we are using the "some-org" tenant, John is 
+**Note**: Because we are using the "some-org" tenant, John is
 considered a member of "some-org" without having to specify the relationship
 in the User schema itself.
 
@@ -105,10 +105,12 @@ roadmap.
 
 The `ecto_foundationdb` Layer supports the following data access patterns.
 
-* **Set/get/delete**: Write and read a Struct based on a unique primary key.
-* **Get all**: Retrieval of all Structs in a given tenant.
-* **Simple index**: Retrieval of all Structs in a tenant that match a particular field value. The index must be created ahead of time using a migration.
-* **Timeseries**: Retrieval of all Structs in a tenant that include a timestamp in between a given timespan. The timeseries index must be created ahead of time using a migration.
+- **Set/get/delete**: Write and read a Struct based on a unique primary key.
+- **Get all**: Retrieval of all Structs in a given tenant.
+- **Simple index**: Retrieval of all Structs in a tenant that match a particular field value. The index must be created ahead of time using a migration.
+- **Timeseries**: Retrieval of all Structs in a tenant that include a timestamp in between a given timespan. The timeseries index must be created ahead of time using a migration.
+
+Please see the full layer documentation at [Ecto.Adapaters.FoundationDB.Layer](lib/ecto/adapaters/foundationdb/layer.ex)
 
 ## Running tests
 
@@ -122,21 +124,20 @@ mix test
 
 Roughly in order of priority.
 
- - [x] Sandbox
- - [x] Basic crud operations
- - [x] Single index
- - [x] Initial documentation
- - [x] Time series index (auto gen pk, optionally skip primary write)
- - [x] `TestRepo.stream`
- - [x] Layer documentation
- - [ ] Migration tooling (handling many tenants)
- - [ ] Migration locking
- - [ ] Layer isolation and docs
- - [ ] Hierarchical multi index
- - [ ] Code cleanliness/readability (esp Tx module)
- - [ ] FDB Watches
- - [ ] Benchmarking
- - [ ] Ecto Transactions
- - [ ] Logging for all Adapter behaviours
- - [ ] Composite primary key
- - [ ] Pluggable Layers
+- [x] Sandbox
+- [x] Basic crud operations
+- [x] Single index
+- [x] Initial documentation
+- [x] Time series index (auto gen pk, optionally skip primary write)
+- [x] `TestRepo.stream`
+- [x] Layer documentation
+- [x] Layer isolation and docs
+- [ ] Migration tooling (handling many tenants)
+- [ ] Migration locking
+- [ ] Hierarchical multi index
+- [ ] FDB Watches
+- [ ] Benchmarking
+- [ ] Ecto Transactions
+- [ ] Logging for all Adapter behaviours
+- [ ] Composite primary key
+- [ ] Pluggable Layers
