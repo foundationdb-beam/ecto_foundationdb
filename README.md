@@ -110,7 +110,7 @@ The `ecto_foundationdb` Layer supports the following data access patterns.
 - **Simple index**: Retrieval of all Structs in a tenant that match a particular field value. The index must be created ahead of time using a migration.
 - **Timeseries**: Retrieval of all Structs in a tenant that include a timestamp in between a given timespan. The timeseries index must be created ahead of time using a migration.
 
-Please see the full layer documentation at [Ecto.Adapaters.FoundationDB.Layer](lib/ecto/adapaters/foundationdb/layer.ex)
+Please see the full layer documentation at [Ecto.Adapaters.FoundationDB.Layer](lib/ecto/adapters/foundationdb/layer.ex)
 
 ## Running tests
 
