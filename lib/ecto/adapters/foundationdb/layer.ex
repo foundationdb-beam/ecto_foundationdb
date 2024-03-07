@@ -100,7 +100,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
 
   Take note of the option `timeseries: true` on the index creation in the Migration module.
 
-  Also notice that in the Schema, we choose to use `write_primary: true`. This skips the Primary Write, so that
+  Also notice that in the Schema, we choose to use `write_primary: false`. This skips the Primary Write, so that
   our data is not duplicated. However, this means that the data can **only** be managed by providing a
   timespan query.
 
@@ -116,7 +116,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
 
   As the application developer, you can also take advantage of Transactions to implement your own
   data access semantics. For example, if you wanted to make sure that when a user is inserted, an
-  event is record of the operation, it can be done via a Transaction.
+  event is recorded of the operation, it can be done via a Transaction.
 
     iex> fun = fn ->
     ...>   Repo.insert!(%User{name: "John"})
@@ -124,7 +124,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
     ...> end
     iex> Transaction.commit(tenant, fun)
 
-  For now, this Transaction lives serparate from Ecto's own Transaction, so please be mindful when using
+  For now, this Transaction lives separate from Ecto's own Transaction, so please be mindful when using
   this feature to use `Ecto.Adapters.FoundationDB.Transaction`.
 
   """
