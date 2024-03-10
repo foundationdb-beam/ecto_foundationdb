@@ -7,6 +7,7 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
   is safe to delete this directory when you no longer need it (e.g. after test execution)
   """
   alias Ecto.Adapters.FoundationDB.Database
+  alias Ecto.Adapters.FoundationDB.Options
   alias Ecto.Adapters.FoundationDB.Tenant
 
   @spec open_db() :: Database.t()
@@ -14,11 +15,11 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
     get_or_create_test_db()
   end
 
-  @spec checkout(Ecto.Repo.t(), Tenant.id()) :: Tenant.t()
-  def checkout(repo, id) when is_binary(id) do
+  @spec checkout(Ecto.Repo.t(), Tenant.id(), Options.t()) :: Tenant.t()
+  def checkout(repo, id, options \\ []) when is_binary(id) do
     case :persistent_term.get({__MODULE__, id, :tenant}, nil) do
       nil ->
-        tenant = Tenant.open_empty!(repo, id)
+        tenant = Tenant.open_empty!(repo, id, options)
 
         :persistent_term.put({__MODULE__, id, :tenant}, tenant)
         tenant
@@ -30,8 +31,7 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
 
   @spec checkin(Ecto.Repo.t(), Tenant.id()) :: :ok
   def checkin(repo, id) when is_binary(id) do
-    db = :persistent_term.get({__MODULE__, :database})
-    Tenant.clear_delete!(db, id, repo.config())
+    Tenant.clear_delete!(repo, id)
     :persistent_term.erase({__MODULE__, id, :tenant})
     :ok
   end

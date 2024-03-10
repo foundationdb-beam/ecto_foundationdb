@@ -38,32 +38,81 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
   def from_prefix(tenant), do: tenant
 
   @doc """
-  Open a tenant. With the result returned by this function, the caller can
-  do database operations on the tenant's portion of the key-value store.
-  """
-  @spec open!(Ecto.Repo.t(), id()) :: t()
-  def open!(repo, id), do: open!(FDB.db(repo), id, repo.config())
-
-  @doc """
   Returns true if the tenant already exists in the database.
   """
   @spec exists?(Ecto.Repo.t(), id()) :: boolean()
   def exists?(repo, id), do: exists?(FDB.db(repo), id, repo.config())
 
   @doc """
+  Create a tenant in the database.
+  """
+  @spec create(Ecto.Repo.t(), id()) :: :ok
+  def create(repo, id), do: create(FDB.db(repo), id, repo.config())
+
+  @doc """
+  Clears data in a tenant and then deletes it. If the tenant doesn't exist, no-op.
+  """
+  @spec clear_delete!(Ecto.Repo.t(), id()) :: :ok
+  def clear_delete!(repo, id) do
+    options = repo.config()
+    db = FDB.db(repo)
+
+    if exists?(db, id, options) do
+      :ok = clear(db, id, options)
+      :ok = delete(db, id, options)
+    end
+
+    :ok
+  end
+
+  @doc """
   Open a tenant with a repo. With the result returned by this function, the caller can
   do database operations on the tenant's portion of the key-value store.
+
+  The tenant must already exist.
 
   When opening tenants with a repo, all migrations are automatically performed. This
   can cause open/2 to take a significant amount of time. Tenants can be kept open
   indefinitely, with any number of database transactions issued upon them.
   """
-  @spec open(Ecto.Repo.t(), id()) :: t()
-  def open(repo, id) do
-    config = repo.config()
-    tenant = open(FDB.db(repo), id, config)
+  @spec open(Ecto.Repo.t(), id(), Options.t()) :: t()
+  def open(repo, id, options \\ []) do
+    config = Keyword.merge(repo.config(), options)
+    tenant = db_open(FDB.db(repo), id, config)
     handle_open(repo, tenant, config)
     tenant
+  end
+
+  @doc """
+  Open a tenant. With the result returned by this function, the caller can
+  do database operations on the tenant's portion of the key-value store.
+
+  If the tenant does not exist, it is created.
+
+  When opening tenants with a repo, all migrations are automatically performed. This
+  can cause open/2 to take a significant amount of time. Tenants can be kept open
+  indefinitely, with any number of database transactions issued upon them.
+  """
+  @spec open!(Ecto.Repo.t(), id(), Options.t()) :: t()
+  def open!(repo, id, options \\ []) do
+    config = Keyword.merge(repo.config(), options)
+    tenant = db_open!(FDB.db(repo), id, config)
+    handle_open(repo, tenant, config)
+    tenant
+  end
+
+  @doc """
+  Helper function to ensure the given tenant exists and then clear
+  it of all data, and finally return an open handle. Useful in test code,
+  but in production, this would be dangerous.
+  """
+  @spec open_empty!(Ecto.Repo.t(), id(), Options.t()) :: t()
+  def open_empty!(repo, id, options_in \\ []) do
+    db = FDB.db(repo)
+    options = Keyword.merge(repo.config(), options_in)
+    :ok = ensure_created(db, id, options)
+    :ok = empty(db, id, options)
+    open(repo, id, options_in)
   end
 
   @doc """
@@ -71,12 +120,6 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
   """
   @spec list(Ecto.Repo.t()) :: [id()]
   def list(repo), do: list(FDB.db(repo), repo.config())
-
-  @doc """
-  Create a tenant in the database.
-  """
-  @spec create(Ecto.Repo.t(), id()) :: :ok
-  def create(repo, id), do: create(FDB.db(repo), id, repo.config())
 
   @doc """
   Clear all data for the given tenant. This cannot be undone.
@@ -91,37 +134,10 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
   @spec delete(Ecto.Repo.t(), id()) :: :ok
   def delete(repo, id), do: delete(FDB.db(repo), id, repo.config())
 
-  @spec open!(Database.t(), id(), Options.t()) :: t()
-  def open!(db, id, options) do
+  @spec db_open!(Database.t(), id(), Options.t()) :: t()
+  def db_open!(db, id, options) do
     :ok = ensure_created(db, id, options)
-    open(db, id, options)
-  end
-
-  @doc """
-  Helper function to ensure the given tenant exists and then clear
-  it of all data, and finally return an open handle. Useful in test code,
-  but in production, this would be dangerous.
-  """
-  @spec open_empty!(Ecto.Repo.t(), id()) :: t()
-  def open_empty!(repo, id) do
-    db = FDB.db(repo)
-    options = repo.config()
-    :ok = ensure_created(db, id, options)
-    :ok = empty(db, id, options)
-    open(repo, id)
-  end
-
-  @doc """
-  Clears data in a tenant and then deletes it. If the tenant doesn't exist, no-op.
-  """
-  @spec clear_delete!(Database.t(), id(), Options.t()) :: :ok
-  def clear_delete!(db, id, options) do
-    if exists?(db, id, options) do
-      :ok = clear(db, id, options)
-      :ok = delete(db, id, options)
-    end
-
-    :ok
+    db_open(db, id, options)
   end
 
   @doc """
@@ -141,8 +157,8 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
   @spec exists?(Database.t(), id(), Options.t()) :: boolean()
   def exists?(db, id, options), do: EctoAdapterStorage.tenant_exists?(db, id, options)
 
-  @spec open(Database.t(), id(), Options.t()) :: t()
-  def open(db, id, options), do: EctoAdapterStorage.open_tenant(db, id, options)
+  @spec db_open(Database.t(), id(), Options.t()) :: t()
+  def db_open(db, id, options), do: EctoAdapterStorage.open_tenant(db, id, options)
 
   @spec list(Database.t(), Options.t()) :: [id()]
   def list(db, options) do
@@ -164,7 +180,7 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
   @spec delete(Database.t(), id(), Options.t()) :: :ok
   def delete(db, id, options), do: EctoAdapterStorage.delete_tenant(db, id, options)
 
-  defp handle_open(repo, tenant, _options) do
-    Migrator.up(repo, tenant)
+  defp handle_open(repo, tenant, options) do
+    Migrator.up(repo, tenant, options)
   end
 end

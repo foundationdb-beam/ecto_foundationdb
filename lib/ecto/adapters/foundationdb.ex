@@ -22,6 +22,8 @@ defmodule Ecto.Adapters.FoundationDB do
        and provides a binary as output. Defaults to `Pack.indexkey_encoder/2`.
        This option provides some configurability to `ecto_foundationdb`'s
        management of indexes, and should rarely be used.
+    * `:migrator` - A module that implements the `Ecto.Adapters.FoundationDB.Migrator`
+      behaviour. Required when using any indexes. Defualts to `nil`.
 
   ## Limitations and caveats
 
@@ -119,7 +121,7 @@ defmodule Ecto.Adapters.FoundationDB do
 
   `ecto_foundationdb` also does Migrations differently than `:ecto_sql` adapters that
   you may be familiar with. You are expected to define a `:migrator` option on your repo
-  that is a module implementing the `Ecto.Adapters.FoundationDB.Migrator` behaivour.
+  that is a module implementing the `Ecto.Adapters.FoundationDB.Migrator` behaviour.
 
   This behaviour defines an ordered list of versioned migration modules that need to be
   executed for each tenant. As tenants are opened during your application runtime,

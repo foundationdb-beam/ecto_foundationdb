@@ -9,7 +9,7 @@ defmodule Ecto.Adapters.FoundationDB.Options do
           | {:key_delimiter, String.t()}
           | {:indexkey_encoder, function()}
           | {:open_tenant_callback, function()}
-          | {:migrations_path, function()}
+          | {:migrator, module()}
           | {:cluster_file, :erlfdb.cluster_filename()}
 
   @type t() :: [option()]
@@ -17,6 +17,7 @@ defmodule Ecto.Adapters.FoundationDB.Options do
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Pack
 
+  @spec get(t(), atom()) :: any()
   def get(options, :open_db) do
     Keyword.get(options, :open_db, fn -> :erlfdb.open(get(options, :cluster_file)) end)
   end

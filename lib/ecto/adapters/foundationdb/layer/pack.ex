@@ -92,6 +92,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
   For this reason, the only safe approach is to encode all terms with the same mechanism.
   We choose `:erlang.term_to_binary()` for this encoding.
 
+  If you need to inspect the raw keys stored in FDB, we suggest you use the following
+
+  ```elixir
+  inspect(key, binaries: :as_strings)
+  ```
+
   ## Examples
 
     iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_fdb_datakey([], "table", "my-pk-id")

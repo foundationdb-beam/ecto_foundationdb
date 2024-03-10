@@ -35,6 +35,17 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
     :ok
   end
 
+  @doc """
+  Create an FDB kv to be stored in the schema_migrations source. This kv contains
+  the information necessary to manage data objects' associated indexes.
+
+  ## Examples
+
+    iex> {k, v} = Ecto.Adapters.FoundationDB.Layer.IndexInventory.new_index(%{opts: []}, "users", "users_name_index", [:name], [])
+    iex> {k, Ecto.Adapters.FoundationDB.Layer.Pack.from_fdb_value(v)}
+    {"\\xFEindexes/users/users_name_index", [id: "users_name_index", source: "users", fields: [:name], options: []]}
+
+  """
   def new_index(%{opts: adapter_opts}, source, index_name, index_fields, options) do
     inventory_key = Pack.to_raw_fdb_key(adapter_opts, [source(), source, index_name])
 
@@ -44,6 +55,19 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
     {inventory_key, inventory_value}
   end
 
+  @doc """
+  Using a list of fields, usually given by an ecto where clause, select an index from those
+  that are available.
+
+  ## Examples
+
+    iex> Ecto.Adapters.FoundationDB.Layer.IndexInventory.select_index([[fields: [:name]]], [:name])
+    {:ok, [fields: [:name]]}
+
+    iex> Ecto.Adapters.FoundationDB.Layer.IndexInventory.select_index([[fields: [:name]]], [:department])
+    {:error, :no_valid_index}
+
+  """
   def select_index([], _where_fields) do
     {:error, :no_valid_index}
   end
@@ -73,6 +97,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
     |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
   end
 
+  @doc """
+  ## Examples
+
+  iex> Ecto.Adapters.FoundationDB.Layer.IndexInventory.source_range_startswith([], "users")
+  "\\xFEindexes/users/"
+  """
   def source_range_startswith(adapter_opts, source) do
     Pack.to_raw_fdb_key(adapter_opts, [source(), source, ""])
   end
