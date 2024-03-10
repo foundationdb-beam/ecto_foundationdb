@@ -132,8 +132,8 @@ Roughly in order of priority.
 - [x] `TestRepo.stream`
 - [x] Layer documentation
 - [x] Layer isolation and docs
-- [ ] Migration tooling (handling many tenants)
-- [ ] Migration locking
+- [x] Migration tooling (handling many tenants)
+- [ ] Migration locking + Index caching
 - [ ] Hierarchical multi index
 - [ ] FDB Watches
 - [ ] Benchmarking

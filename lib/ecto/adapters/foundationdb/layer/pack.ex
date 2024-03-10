@@ -53,7 +53,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
   ## Examples
 
     iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_fdb_indexkey([], [], "table", "my_index", ["abc", "123"], "my-pk-id")
-    "table/i/my_index/M\\xDA\\xD8\\xFB/V\\xE3\\xD1\\x01/my-pk-id"
+    "table/i/my_index/M\\xDA\\xD8\\xFB/V\\xE3\\xD1\\x01/\\x83m\\0\\0\\0\\bmy-pk-id"
 
   """
   def to_fdb_indexkey(adapter_opts, index_options, source, index_name, vals, id)
@@ -63,7 +63,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
 
     to_raw_fdb_key(
       adapter_opts,
-      [source, @index_namespace, index_name | vals] ++ if(is_nil(id), do: [], else: [id])
+      [source, @index_namespace, index_name | vals] ++
+        if(is_nil(id), do: [], else: [encode_pk_for_key(id)])
     )
   end
 
@@ -104,7 +105,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
 
   """
   def to_fdb_datakey(adapter_opts, source, x) do
-    to_raw_fdb_key(adapter_opts, [source, @data_namespace, :erlang.term_to_binary(x)])
+    to_raw_fdb_key(adapter_opts, [source, @data_namespace, encode_pk_for_key(x)])
   end
 
   @doc """
@@ -150,4 +151,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
       data: data_object
     ]
   end
+
+  #
+  defp encode_pk_for_key(id), do: :erlang.term_to_binary(id)
 end

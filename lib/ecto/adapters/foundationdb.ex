@@ -115,6 +115,20 @@ defmodule Ecto.Adapters.FoundationDB do
   that a transaction always executes on a single tenant, and so individual Repo calls
   inside your transaction do not need to specify a `:prefix`.
 
+  ### Migrations
+
+  `ecto_foundationdb` also does Migrations differently than `:ecto_sql` adapters that
+  you may be familiar with. You are expected to define a `:migrator` option on your repo
+  that is a module implementing the `Ecto.Adapters.FoundationDB.Migrator` behaivour.
+
+  This behaviour defines an ordered list of versioned migration modules that need to be
+  executed for each tenant. As tenants are opened during your application runtime,
+  the migrations will be executed automatically. This distributes the migration across
+  a potentially long period of time, as migrations will not be executed
+  unless the tenant is opened.
+
+  Migrations can be completed in full with a call to `Ecto.Adapters.FoundationDB.Migrator.up_all/1`
+
   ### Other Ecto Features
 
   Many of Ecto's features probably do not work with `ecto_foundationdb`. Please
@@ -144,6 +158,7 @@ defmodule Ecto.Adapters.FoundationDB do
   alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
   alias Ecto.Adapters.FoundationDB.Options
+  alias Ecto.Adapters.FoundationDB.Tenant
 
   @spec db(Ecto.Repo.t()) :: Database.t()
   def db(repo) when is_atom(repo) do
@@ -163,13 +178,9 @@ defmodule Ecto.Adapters.FoundationDB do
     end
   end
 
-  # We cannot specify Tenant.t() here because Ecto defines a specific type
-  # on the prefix, namely: `String.t() | nil`. This is pretty unfortunate;
-  # any workaround would be hacky, brittle, and/or slow
-  #   e.g. ets, persistent_term, process dictionary, base64 encoded
-  @spec usetenant(Ecto.Schema.schema(), any()) :: Ecto.Schema.schema()
+  @spec usetenant(Ecto.Schema.schema(), Tenant.t()) :: Ecto.Schema.schema()
   def usetenant(struct, tenant) do
-    Ecto.put_meta(struct, prefix: tenant)
+    Ecto.put_meta(struct, prefix: Tenant.to_prefix(tenant))
   end
 
   @impl Ecto.Adapter

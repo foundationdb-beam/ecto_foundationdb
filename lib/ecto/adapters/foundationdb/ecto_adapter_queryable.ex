@@ -4,8 +4,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   """
   @behaviour Ecto.Adapter.Queryable
 
-  alias Ecto.Adapters.FoundationDB, as: FDB
-
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
@@ -46,9 +44,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         _options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    {context, query = %Ecto.Query{prefix: tenant_prefix}} = assert_tenancy!(query, adapter_opts)
 
-    tenant
+    tenant_prefix
+    |> Tenant.from_prefix()
     |> execute_all(adapter_meta, context, query, params)
     |> ordering_fn.()
     |> limit_fn.()
@@ -68,10 +67,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         _options
       ) do
-    {context, %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    {context, %Ecto.Query{prefix: tenant_prefix}} = assert_tenancy!(query, adapter_opts)
 
     plan = QueryPlan.get(source, schema, context, wheres, [], params)
-    num = Query.delete(tenant, adapter_meta, plan)
+    num = Query.delete(Tenant.from_prefix(tenant_prefix), adapter_meta, plan)
 
     {num, []}
   end
@@ -84,8 +83,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         _options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
-    num = execute_update_all(tenant, adapter_meta, context, query, params)
+    {context, query = %Ecto.Query{prefix: tenant_prefix}} = assert_tenancy!(query, adapter_opts)
+
+    num =
+      execute_update_all(Tenant.from_prefix(tenant_prefix), adapter_meta, context, query, params)
+
     {num, []}
   end
 
@@ -98,9 +100,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    {context, query = %Ecto.Query{prefix: tenant_prefix}} = assert_tenancy!(query, adapter_opts)
 
-    stream_all(tenant, adapter_meta, context, query, params, options)
+    tenant_prefix
+    |> Tenant.from_prefix()
+    |> stream_all(adapter_meta, context, query, params, options)
   end
 
   # Extract limit from an `Ecto.Query`
@@ -112,16 +116,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
            prefix: tenant,
            from: from = %Ecto.Query.FromExpr{source: {source, schema}}
          },
-         adapter_opts
+         _adapter_opts
        ) do
     {context, query = %Ecto.Query{prefix: tenant}} =
       case EctoAdapterMigration.prepare_source(source) do
         {:ok, {source, context}} ->
-          tenant =
-            if is_binary(tenant),
-              do: Tenant.open!(FDB.db(adapter_opts), tenant, adapter_opts),
-              else: tenant
-
           from = %Ecto.Query.FromExpr{from | source: {source, schema}}
           {context, %Ecto.Query{query | prefix: tenant, from: from}}
 
@@ -156,9 +155,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
       {false, :tenant_only} ->
         raise Unsupported, "Non-tenant transactions are not yet implemented."
-
-      {false, :tenant_id} ->
-        raise Unsupported, "You must provide an open tenant, not a tenant ID"
 
       true ->
         {context, query}

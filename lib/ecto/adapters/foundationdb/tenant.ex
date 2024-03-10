@@ -7,11 +7,35 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
 
   @type t() :: :erlfdb.tenant()
   @type id() :: :erlfdb.tenant_name()
+  @type prefix() :: String.t()
 
   alias Ecto.Adapters.FoundationDB, as: FDB
   alias Ecto.Adapters.FoundationDB.Database
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
+  alias Ecto.Adapters.FoundationDB.Migrator
   alias Ecto.Adapters.FoundationDB.Options
+  alias Ecto.Adapters.FoundationDB.Tenant
+
+  @spec to_prefix(Tenant.t()) :: Tenant.prefix()
+  def to_prefix(tenant) do
+    # This is a hack...
+    #
+    # :ecto_sql's migrations expect the prefix to be a string, so anything
+    # interfacting with the Migration behaviours must call to_prefix.
+    tenant
+    |> :erlang.term_to_binary()
+    |> Base.encode16()
+  end
+
+  @spec from_prefix(Tenant.prefix()) :: Tenant.t()
+  def from_prefix(tenant_prefix) when is_binary(tenant_prefix) do
+    tenant_prefix
+    |> Base.decode16!()
+    |> :erlang.binary_to_term()
+  end
+
+  @spec from_prefix(Tenant.t()) :: Tenant.t()
+  def from_prefix(tenant), do: tenant
 
   @doc """
   Open a tenant. With the result returned by this function, the caller can
@@ -27,11 +51,20 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
   def exists?(repo, id), do: exists?(FDB.db(repo), id, repo.config())
 
   @doc """
-  Open a tenant. With the result returned by this function, the caller can
+  Open a tenant with a repo. With the result returned by this function, the caller can
   do database operations on the tenant's portion of the key-value store.
+
+  When opening tenants with a repo, all migrations are automatically performed. This
+  can cause open/2 to take a significant amount of time. Tenants can be kept open
+  indefinitely, with any number of database transactions issued upon them.
   """
   @spec open(Ecto.Repo.t(), id()) :: t()
-  def open(repo, id), do: open(FDB.db(repo), id, repo.config())
+  def open(repo, id) do
+    config = repo.config()
+    tenant = open(FDB.db(repo), id, config)
+    handle_open(repo, tenant, config)
+    tenant
+  end
 
   @doc """
   List all tenants in the database. Could be expensive.
@@ -69,11 +102,13 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
   it of all data, and finally return an open handle. Useful in test code,
   but in production, this would be dangerous.
   """
-  @spec open_empty!(Database.t(), id(), Options.t()) :: t()
-  def open_empty!(db, id, options) do
+  @spec open_empty!(Ecto.Repo.t(), id()) :: t()
+  def open_empty!(repo, id) do
+    db = FDB.db(repo)
+    options = repo.config()
     :ok = ensure_created(db, id, options)
     :ok = empty(db, id, options)
-    open(db, id, options)
+    open(repo, id)
   end
 
   @doc """
@@ -128,4 +163,8 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
 
   @spec delete(Database.t(), id(), Options.t()) :: :ok
   def delete(db, id, options), do: EctoAdapterStorage.delete_tenant(db, id, options)
+
+  defp handle_open(repo, tenant, _options) do
+    Migrator.up(repo, tenant)
+  end
 end

@@ -46,9 +46,9 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
     end
   end
 
-  def open_tenant(dbtx, tenant_id, options) do
+  def open_tenant(db, tenant_id, options) do
     tenant_name = get_tenant_name(tenant_id, options)
-    open_named_tenant(dbtx, tenant_name)
+    open_named_tenant(db, tenant_name)
   end
 
   def delete_tenant(dbtx, tenant_id, options) do

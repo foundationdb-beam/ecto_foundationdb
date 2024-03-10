@@ -18,10 +18,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   @doc """
   Executes a query for retrieving data.
   """
-  def all(db_or_tenant, adapter_meta, plan, options \\ []) do
-    plan = make_range(db_or_tenant, adapter_meta, plan, options)
-
-    kvs = Tx.transactional(db_or_tenant, fn tx -> tx_get_range(tx, plan, options) end)
+  def all(db_or_tenant, adapter_meta = %{opts: adapter_opts}, plan, options \\ []) do
+    {plan, kvs} =
+      Tx.transactional(db_or_tenant, fn tx ->
+        idxs = IndexInventory.tx_idxs(tx, adapter_opts, plan.source)
+        plan = make_range(idxs, adapter_meta, plan, options)
+        {plan, tx_get_range(tx, plan, options)}
+      end)
 
     continuation = continuation(kvs, options)
 
@@ -37,12 +40,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   @doc """
   Executes a query for updating data.
   """
-  def update(db_or_tenant, adapter_meta, plan) do
-    plan = make_range(db_or_tenant, adapter_meta, plan, [])
-
-    idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, plan.source)
-
-    Tx.transactional(db_or_tenant, &tx_update_range(&1, adapter_meta, plan, idxs))
+  def update(db_or_tenant, adapter_meta = %{opts: adapter_opts}, plan) do
+    Tx.transactional(db_or_tenant, fn tx ->
+      idxs = IndexInventory.tx_idxs(tx, adapter_opts, plan.source)
+      plan = make_range(idxs, adapter_meta, plan, [])
+      tx_update_range(tx, adapter_meta, plan, idxs)
+    end)
   end
 
   @doc """
@@ -53,20 +56,18 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     Tx.transactional(db_or_tenant, &Tx.clear_all(&1, adapter_meta, plan.source))
   end
 
-  def delete(db_or_tenant, adapter_meta, plan) do
-    plan = make_range(db_or_tenant, adapter_meta, plan, [])
-
-    idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, plan.source)
-
-    Tx.transactional(db_or_tenant, &tx_delete_range(&1, adapter_meta, plan, idxs))
+  def delete(db_or_tenant, adapter_meta = %{opts: adapter_opts}, plan) do
+    Tx.transactional(db_or_tenant, fn tx ->
+      idxs = IndexInventory.tx_idxs(tx, adapter_opts, plan.source)
+      plan = make_range(idxs, adapter_meta, plan, [])
+      tx_delete_range(tx, adapter_meta, plan, idxs)
+    end)
   end
 
-  defp make_range(db_or_tenant, adapter_meta, plan = %{layer_data: layer_data}, options) do
+  defp make_range(idxs, adapter_meta, plan = %{layer_data: layer_data}, options) do
     if plan.is_pk? do
       make_datakey_range(adapter_meta, plan, options)
     else
-      idxs = IndexInventory.get_for_source(adapter_meta, db_or_tenant, plan.source)
-
       case IndexInventory.select_index(idxs, [plan.field]) do
         {:ok, idx} ->
           make_indexkey_range(
@@ -136,6 +137,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   defp unpack(kvs, %{layer_data: %{idx: _idx}}) do
     Stream.map(kvs, fn {_k, v} ->
       index_object = Pack.from_fdb_value(v)
+
       {index_object[:id], index_object[:data]}
     end)
   end
@@ -222,11 +224,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
         plan.source,
         idx[:id],
         [plan.param],
-        ""
+        nil
       )
 
     end_key = :erlfdb_key.strinc(start_key)
     start_key = options[:start_key] || start_key
+
     %QueryPlan.Equal{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
@@ -249,7 +252,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
                 plan.source,
                 idx[:id],
                 [x],
-                ""
+                nil
               )
 
       start_key = options[:start_key] || start_key

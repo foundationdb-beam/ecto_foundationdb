@@ -14,20 +14,17 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
     get_or_create_test_db()
   end
 
-  @spec checkout(Ecto.Repo.t(), Tenant.id(), module()) :: Tenant.t()
-  def checkout(repo, id, migration) when is_binary(id) do
+  @spec checkout(Ecto.Repo.t(), Tenant.id()) :: Tenant.t()
+  def checkout(repo, id) when is_binary(id) do
     case :persistent_term.get({__MODULE__, id, :tenant}, nil) do
       nil ->
-        db = get_or_create_test_db()
-        tenant = Tenant.open_empty!(db, id, repo.config())
-
-        :ok = Ecto.Migrator.up(repo, 0, migration, prefix: id, log: false)
+        tenant = Tenant.open_empty!(repo, id)
 
         :persistent_term.put({__MODULE__, id, :tenant}, tenant)
         tenant
 
       _ ->
-        raise "FoundationDB Sandbox Tenant named #{repo} is already checked out"
+        raise "FoundationDB Sandbox Tenant named #{id} is already checked out"
     end
   end
 

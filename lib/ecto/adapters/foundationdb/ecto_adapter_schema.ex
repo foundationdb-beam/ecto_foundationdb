@@ -4,8 +4,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   """
   @behaviour Ecto.Adapter.Schema
 
-  alias Ecto.Adapters.FoundationDB, as: FDB
-
   alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
@@ -32,7 +30,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _placeholders,
         _options
       ) do
-    %{source: source, schema: schema, prefix: tenant, context: context} =
+    %{source: source, schema: schema, prefix: tenant_prefix, context: context} =
       assert_tenancy!(adapter_opts, schema_meta)
 
     entries =
@@ -42,10 +40,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         {{pk_field, pk}, data_object}
       end)
 
-    idxs = IndexInventory.get_for_source(adapter_meta, tenant, source)
+    tenant = Tenant.from_prefix(tenant_prefix)
 
     num_ins =
       Tx.transactional(tenant, fn tx ->
+        idxs = IndexInventory.tx_idxs(tx, adapter_opts, source)
         Tx.insert_all(tx, adapter_meta, source, context, entries, idxs)
       end)
 
@@ -85,16 +84,17 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _returning,
         _options
       ) do
-    %{source: source, schema: schema, prefix: tenant, context: context} =
+    %{source: source, schema: schema, prefix: tenant_prefix, context: context} =
       assert_tenancy!(adapter_opts, schema_meta)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
-    idxs = IndexInventory.get_for_source(adapter_meta, tenant, source)
+    tenant = Tenant.from_prefix(tenant_prefix)
 
     res =
       Tx.transactional(tenant, fn tx ->
+        idxs = IndexInventory.tx_idxs(tx, adapter_opts, source)
         Tx.update_pks(tx, adapter_meta, source, context, pk_field, [pk], update_data, idxs)
       end)
 
@@ -115,14 +115,17 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _returning,
         _options
       ) do
-    %{source: source, schema: schema, prefix: tenant} = assert_tenancy!(adapter_opts, schema_meta)
+    %{source: source, schema: schema, prefix: tenant_prefix} =
+      assert_tenancy!(adapter_opts, schema_meta)
+
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
-    idxs = IndexInventory.get_for_source(adapter_meta, tenant, source)
+    tenant = Tenant.from_prefix(tenant_prefix)
 
     res =
       Tx.transactional(tenant, fn tx ->
+        idxs = IndexInventory.tx_idxs(tx, adapter_opts, source)
         Tx.delete_pks(tx, adapter_meta, source, [pk], idxs)
       end)
 
@@ -136,18 +139,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   end
 
   defp assert_tenancy!(
-         adapter_opts,
+         _adapter_opts,
          schema_meta = %{source: source, schema: schema, prefix: tenant}
        ) do
     schema_meta =
       %{schema: schema, prefix: tenant, context: context} =
       case EctoAdapterMigration.prepare_source(source) do
         {:ok, {source, context}} ->
-          tenant =
-            if is_binary(tenant),
-              do: Tenant.open!(FDB.db(adapter_opts), tenant, adapter_opts),
-              else: tenant
-
           schema_meta
           |> Map.put(:source, source)
           |> Map.put(:schema, schema)
@@ -192,9 +190,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
       {false, :tenant_only} ->
         raise Unsupported, "Non-tenant transactions are not yet implemented."
-
-      {false, :tenant_id} ->
-        raise Unsupported, "You must provide an open tenant, not a tenant ID"
 
       true ->
         schema_meta

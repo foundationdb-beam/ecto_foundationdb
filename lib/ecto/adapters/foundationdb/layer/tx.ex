@@ -19,7 +19,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
   def safe?(nil, true),
     do: if(in_tenant_tx?(), do: true, else: {false, :missing_tenant})
 
-  def safe?(tenant, true) when is_binary(tenant), do: {false, :tenant_id}
   def safe?(_tenant, true), do: true
   def safe?(nil, false), do: {false, :tenant_only}
   def safe?(_tenant, false), do: {false, :unused_tenant}
@@ -81,7 +80,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     entries =
       entries
       |> Enum.map(fn {{pk_field, pk}, data_object} ->
-        key = Pack.to_fdb_datakey(adapter_opts, source, pk)
+        key =
+          Pack.to_fdb_datakey(adapter_opts, source, pk)
+
         data_object = Fields.to_front(data_object, pk_field)
         {key, data_object}
       end)
@@ -94,7 +95,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
       tx, {fdb_key, data_object}, :not_found, count ->
         fdb_value = Pack.to_fdb_value(data_object)
 
-        if write_primary, do: :erlfdb.set(tx, fdb_key, fdb_value)
+        if write_primary, do: do_set(tx, fdb_key, fdb_value)
         set_indexes_for_one(tx, idxs, adapter_opts, {fdb_key, data_object}, source)
         count + 1
 
@@ -162,7 +163,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
       |> Keyword.merge(set_data, fn _k, _v1, v2 -> v2 end)
       |> Fields.to_front(pk_field)
 
-    if write_primary, do: :erlfdb.set(tx, fdb_key, Pack.to_fdb_value(data_object))
+    if write_primary, do: do_set(tx, fdb_key, Pack.to_fdb_value(data_object))
     clear_indexes_for_one(tx, idxs, adapter_opts, {fdb_key, data_object}, source)
     set_indexes_for_one(tx, idxs, adapter_opts, {fdb_key, data_object}, source)
   end
@@ -230,7 +231,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
 
     # Write a key that indicates the index exists. All other operations will
     # use this info to maintain the index
-    :erlfdb.set(tx, inventory_key, inventory_value)
+    do_set(tx, inventory_key, inventory_value)
 
     # Write the actual index for any existing data in this tenant
     tx
@@ -247,7 +248,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
           source
         )
 
-      :erlfdb.set(tx, index_key, index_object)
+      do_set(tx, index_key, index_object)
     end)
   end
 
@@ -386,7 +387,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
           source
         )
 
-      :erlfdb.set(tx, index_key, index_object)
+      do_set(tx, index_key, index_object)
     end
+  end
+
+  defp do_set(tx, fdb_key, fdb_value) do
+    :erlfdb.set(tx, fdb_key, fdb_value)
   end
 end

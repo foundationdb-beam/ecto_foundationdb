@@ -8,6 +8,8 @@ defmodule Ecto.Adapters.FoundationDB.Options do
           | {:storage_id, String.t()}
           | {:key_delimiter, String.t()}
           | {:indexkey_encoder, function()}
+          | {:open_tenant_callback, function()}
+          | {:migrations_path, function()}
           | {:cluster_file, :erlfdb.cluster_filename()}
 
   @type t() :: [option()]
@@ -28,6 +30,9 @@ defmodule Ecto.Adapters.FoundationDB.Options do
     do: Keyword.get(options, :indexkey_encoder, &Pack.indexkey_encoder/2)
 
   def get(options, :cluster_file), do: Keyword.get(options, :cluster_file, "")
+
+  def get(options, :migrator),
+    do: Keyword.get(options, :migrator, nil)
 
   def get(options, key),
     do:

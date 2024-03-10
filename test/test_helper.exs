@@ -13,7 +13,8 @@ Application.put_env(:ecto_foundationdb, TestRepo,
   storage_id: Ecto.Adapters.FoundationDB.Sandbox,
 
   # Increases number of index collisions
-  indexkey_encoder: &Ecto.Adapters.FoundationDB.Layer.Pack.indexkey_encoder(&1, 1, &2)
+  indexkey_encoder: &Ecto.Adapters.FoundationDB.Layer.Pack.indexkey_encoder(&1, 1, &2),
+  migrator: EctoFoundationDB.Integration.TestMigrator
 )
 
 defmodule Ecto.Integration.Case do
@@ -28,12 +29,12 @@ defmodule Ecto.Integration.Case do
 
     tenant_task =
       Task.async(fn ->
-        Sandbox.checkout(TestRepo, tenant1, EctoFoundationDB.Integration.Migration)
+        Sandbox.checkout(TestRepo, tenant1)
       end)
 
     other_tenant_task =
       Task.async(fn ->
-        Sandbox.checkout(TestRepo, tenant2, EctoFoundationDB.Integration.Migration)
+        Sandbox.checkout(TestRepo, tenant2)
       end)
 
     tenant = Task.await(tenant_task)

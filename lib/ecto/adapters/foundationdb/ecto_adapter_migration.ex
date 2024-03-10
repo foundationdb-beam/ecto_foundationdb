@@ -6,7 +6,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
   """
   @behaviour Ecto.Adapter.Migration
 
-  alias Ecto.Adapters.FoundationDB, as: FDB
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
   alias Ecto.Adapters.FoundationDB.Tenant
@@ -14,6 +13,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
   @migration_keyspace_prefix <<0xFE>>
 
   def prepare_source(k = "schema_migrations"),
+    # Unsupported: configurable migration table name (`:migration_source`)
+    # and repo (`:migration_repo`)
     do: {:ok, {prepare_migration_key(k), [usetenant: true]}}
 
   def prepare_source(_k), do: {:error, :unknown_source}
@@ -43,23 +44,26 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
   end
 
   def execute_ddl(
-        adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: _adapter_opts},
         {:create,
          %Ecto.Migration.Index{
-           prefix: tenant_id,
+           prefix: tenant_prefix,
            table: source,
            name: index_name,
            columns: index_fields,
            options: options
          }},
         _options
-      )
-      when is_binary(tenant_id) do
-    db = FDB.db(adapter_opts)
-    tenant = Tenant.open!(db, tenant_id, adapter_opts)
-
+      ) do
     :ok =
-      IndexInventory.create_index(tenant, adapter_meta, source, index_name, index_fields, options)
+      IndexInventory.create_index(
+        Tenant.from_prefix(tenant_prefix),
+        adapter_meta,
+        source,
+        index_name,
+        index_fields,
+        options
+      )
 
     {:ok, []}
   end

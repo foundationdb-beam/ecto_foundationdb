@@ -12,13 +12,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
 
   def create_index(
         db_or_tenant,
-        adapter_meta = %{cache: cache},
+        adapter_meta,
         source,
         index_name,
         index_fields,
         options
       ) do
-    :ets.delete_all_objects(cache)
     inventory_kv = new_index(adapter_meta, source, index_name, index_fields, options)
 
     Tx.transactional(db_or_tenant, fn tx ->
@@ -59,20 +58,15 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
     end
   end
 
-  def get_for_source(%{cache: cache, opts: adapter_opts}, db_or_tenant, source) do
-    case :ets.lookup(cache, {__MODULE__, db_or_tenant, source}) do
-      [{_, res}] ->
-        res
+  @doc """
+  This function retrieves the indexes that have been created for the given source table.
 
-      [] ->
-        idxs = Tx.transactional(db_or_tenant, &tx_idxs(&1, adapter_opts, source))
-
-        :ets.insert(cache, {{__MODULE__, db_or_tenant, source}, idxs})
-        idxs
-    end
-  end
-
-  defp tx_idxs(tx, adapter_opts, source) do
+  These keys change very rarely -- specifically whenever migrations are executed. If we
+  can find a safe way to cache them in memory then we can avoid this get/wait in each
+  transaction. However, such a cache would need to be properly locked during migrations,
+  which can be quite complicated across multiple Elixir nodes.
+  """
+  def tx_idxs(tx, adapter_opts, source) do
     tx
     |> :erlfdb.get_range_startswith(source_range_startswith(adapter_opts, source))
     |> :erlfdb.wait()
