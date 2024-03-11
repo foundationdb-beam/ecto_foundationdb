@@ -10,6 +10,7 @@ defmodule EctoFoundationdb.MixProject do
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
       aliases: aliases(),
+      included_applications: [:ex_fdbmonitor],
       dialyzer: [
         ignore_warnings: ".dialyzer_ignore.exs"
       ]
@@ -37,6 +38,14 @@ defmodule EctoFoundationdb.MixProject do
       {:credo, "~> 1.6", only: [:dev, :test, :docs]},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
 
+      # Clustered tests
+      {:local_cluster, "~> 1.2", only: [:test]},
+      {:ex_fdbmonitor,
+       git: "https://github.com/foundationdb-beam/ex_fdbmonitor.git",
+       branch: "main",
+       runtime: false,
+       only: [:test]},
+
       # Benchmarks
       {:benchee, "~> 1.0", only: :dev}
     ]
@@ -44,6 +53,7 @@ defmodule EctoFoundationdb.MixProject do
 
   defp aliases do
     [
+      test: "test --no-start",
       lint: [
         "format --check-formatted",
         "deps.unlock --check-unused",

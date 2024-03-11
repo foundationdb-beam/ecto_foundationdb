@@ -80,6 +80,12 @@ defmodule Ecto.Integration.MigrationsCase do
   end
 end
 
+# For cluster tests
+{_, 0} = System.cmd("epmd", ["-daemon"])
+:ok = LocalCluster.start()
+
+Application.ensure_all_started(:ecto_foundationdb)
+
 _ = Ecto.Adapters.FoundationDB.storage_down(TestRepo.config())
 :ok = Ecto.Adapters.FoundationDB.storage_up(TestRepo.config())
 
