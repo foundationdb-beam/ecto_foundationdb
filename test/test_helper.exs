@@ -1,11 +1,5 @@
 Logger.configure(level: :info)
 
-Application.put_env(:ecto, :primary_key_type, :binary_id)
-Application.put_env(:ecto, :async_integration_tests, false)
-
-ecto = Mix.Project.deps_paths()[:ecto]
-Code.require_file("#{ecto}/integration_test/support/schemas.exs", __DIR__)
-
 alias Ecto.Integration.TestRepo
 
 Application.put_env(:ecto_foundationdb, TestRepo,
