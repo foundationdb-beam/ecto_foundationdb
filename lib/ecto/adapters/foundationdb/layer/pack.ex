@@ -23,7 +23,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
     <<37, 99, 56, 165>>
 
     iex> Ecto.Adapters.FoundationDB.Layer.Pack.indexkey_encoder(~N[2024-03-01 12:34:56], timeseries: true)
-    "2024-03-01T12:34:56"
+    "20240301T123456.000000"
 
   """
   def indexkey_encoder(x, index_options \\ []) do
@@ -39,7 +39,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
   """
   def indexkey_encoder(x, num_bytes, index_options) do
     if index_options[:timeseries] do
-      NaiveDateTime.to_iso8601(x)
+      x
+      |> NaiveDateTime.add(0, :microsecond)
+      |> NaiveDateTime.to_iso8601(:basic)
     else
       <<n::unsigned-big-integer-size(num_bytes * 8)>> =
         <<-1::unsigned-big-integer-size(num_bytes * 8)>>

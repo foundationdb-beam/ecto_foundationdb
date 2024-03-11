@@ -12,9 +12,9 @@ defmodule Ecto.Adapters.FoundationDB.Migrator do
   alias Ecto.Adapters.FoundationDB.Options
   alias Ecto.Adapters.FoundationDB.Tenant
 
-  @spec up_all(Ecto.Repo.t()) :: :ok
-  def up_all(repo) do
-    options = repo.config()
+  @spec up_all(Ecto.Repo.t(), Options.t()) :: :ok
+  def up_all(repo, options \\ []) do
+    options = Keyword.merge(repo.config(), options)
     db = FoundationDB.db(repo)
     ids = Tenant.list(db, options)
 
@@ -34,7 +34,13 @@ defmodule Ecto.Adapters.FoundationDB.Migrator do
     Stream.run(stream)
   end
 
-  @spec up(Ecto.Repo.t(), Tenant.t(), Options.t()) :: :ok
+  @spec up(Ecto.Repo.t(), Tenant.t() | Tenant.id(), Options.t()) :: :ok
+  def up(repo, tenant_id, options) when is_binary(tenant_id) do
+    db = FoundationDB.db(repo)
+    tenant = Tenant.db_open(db, tenant_id, options)
+    up(repo, tenant, options)
+  end
+
   def up(repo, tenant, options) do
     migrator = Options.get(options, :migrator)
 
