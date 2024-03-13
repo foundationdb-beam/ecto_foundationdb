@@ -50,10 +50,10 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
   Via an Ecto Migration, you can specify an `Index` on the `:department` field.
 
   ```elixir
-  defmodule EctoFoundationDB.Migration do
-    use Ecto.Migration
+  defmodule MyApp.Migration do
+    use Ecto.Adapters.FoundationDB.Migration
     def change() do
-      create(index(:users, [:department]))
+      [create(index(:users, [:department]))]
     end
   end
   ```
@@ -91,9 +91,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
 
   ```elixir
   defmodule EctoFoundationDB.Migration do
-    use Ecto.Migration
+    use Ecto.Adapters.FoundationDB.Migration
     def change() do
-      create(index(:events, [:timestamp], timeseries: true))
+      [create(index(:events, [:timestamp], options: [timeseries: true]))]
     end
   end
   ```

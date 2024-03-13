@@ -38,7 +38,8 @@ config :my_app,
   ecto_repos: [MyApp.Repo]
 
 config :my_app, MyApp.Repo,
-  cluster_file: "/etc/foundationdb/fdb.cluster"
+  cluster_file: "/etc/foundationdb/fdb.cluster",
+  migrator: MyApp.Migrator
 ```
 
 ### Tenants
@@ -133,7 +134,8 @@ Roughly in order of priority.
 - [x] Layer documentation
 - [x] Layer isolation and docs
 - [x] Migration tooling (handling many tenants)
-- [ ] Migration locking + Index caching
+- [x] Migration locking
+- [ ] Index caching
 - [ ] Hierarchical multi index
 - [ ] FDB Watches
 - [ ] Benchmarking

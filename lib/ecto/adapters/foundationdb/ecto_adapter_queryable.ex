@@ -13,7 +13,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   alias Ecto.Adapters.FoundationDB.Layer.Tx
   alias Ecto.Adapters.FoundationDB.QueryPlan
   alias Ecto.Adapters.FoundationDB.Schema
-  alias Ecto.Adapters.FoundationDB.Tenant
 
   @impl Ecto.Adapter.Queryable
   def prepare(
@@ -44,10 +43,9 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         _options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant_prefix}} = assert_tenancy!(query, adapter_opts)
+    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
 
-    tenant_prefix
-    |> Tenant.from_prefix()
+    tenant
     |> execute_all(adapter_meta, context, query, params)
     |> ordering_fn.()
     |> limit_fn.()
@@ -67,10 +65,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         _options
       ) do
-    {context, %Ecto.Query{prefix: tenant_prefix}} = assert_tenancy!(query, adapter_opts)
+    {context, %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
 
     plan = QueryPlan.get(source, schema, context, wheres, [], params)
-    num = Query.delete(Tenant.from_prefix(tenant_prefix), adapter_meta, plan)
+    num = Query.delete(tenant, adapter_meta, plan)
 
     {num, []}
   end
@@ -83,10 +81,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         _options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant_prefix}} = assert_tenancy!(query, adapter_opts)
+    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
 
     num =
-      execute_update_all(Tenant.from_prefix(tenant_prefix), adapter_meta, context, query, params)
+      execute_update_all(tenant, adapter_meta, context, query, params)
 
     {num, []}
   end
@@ -100,10 +98,9 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant_prefix}} = assert_tenancy!(query, adapter_opts)
+    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
 
-    tenant_prefix
-    |> Tenant.from_prefix()
+    tenant
     |> stream_all(adapter_meta, context, query, params, options)
   end
 

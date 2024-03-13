@@ -11,7 +11,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
   alias Ecto.Adapters.FoundationDB.Layer.Tx
   alias Ecto.Adapters.FoundationDB.Schema
-  alias Ecto.Adapters.FoundationDB.Tenant
 
   @impl Ecto.Adapter.Schema
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
@@ -30,7 +29,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _placeholders,
         _options
       ) do
-    %{source: source, schema: schema, prefix: tenant_prefix, context: context} =
+    %{source: source, schema: schema, prefix: tenant, context: context} =
       assert_tenancy!(adapter_opts, schema_meta)
 
     entries =
@@ -39,8 +38,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         pk = data_object[pk_field]
         {{pk_field, pk}, data_object}
       end)
-
-    tenant = Tenant.from_prefix(tenant_prefix)
 
     num_ins =
       Tx.transactional(tenant, fn tx ->
@@ -84,13 +81,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _returning,
         _options
       ) do
-    %{source: source, schema: schema, prefix: tenant_prefix, context: context} =
+    %{source: source, schema: schema, prefix: tenant, context: context} =
       assert_tenancy!(adapter_opts, schema_meta)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
-
-    tenant = Tenant.from_prefix(tenant_prefix)
 
     res =
       Tx.transactional(tenant, fn tx ->
@@ -115,13 +110,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _returning,
         _options
       ) do
-    %{source: source, schema: schema, prefix: tenant_prefix} =
+    %{source: source, schema: schema, prefix: tenant} =
       assert_tenancy!(adapter_opts, schema_meta)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
-
-    tenant = Tenant.from_prefix(tenant_prefix)
 
     res =
       Tx.transactional(tenant, fn tx ->

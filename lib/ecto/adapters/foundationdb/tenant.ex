@@ -14,28 +14,6 @@ defmodule Ecto.Adapters.FoundationDB.Tenant do
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
   alias Ecto.Adapters.FoundationDB.Migrator
   alias Ecto.Adapters.FoundationDB.Options
-  alias Ecto.Adapters.FoundationDB.Tenant
-
-  @spec to_prefix(Tenant.t()) :: Tenant.prefix()
-  def to_prefix(tenant) do
-    # This is a hack...
-    #
-    # :ecto_sql's migrations expect the prefix to be a string, so anything
-    # interfacting with the Migration behaviours must call to_prefix.
-    tenant
-    |> :erlang.term_to_binary()
-    |> Base.encode16()
-  end
-
-  @spec from_prefix(Tenant.prefix()) :: Tenant.t()
-  def from_prefix(tenant_prefix) when is_binary(tenant_prefix) do
-    tenant_prefix
-    |> Base.decode16!()
-    |> :erlang.binary_to_term()
-  end
-
-  @spec from_prefix(Tenant.t()) :: Tenant.t()
-  def from_prefix(tenant), do: tenant
 
   @doc """
   Returns true if the tenant already exists in the database.

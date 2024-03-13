@@ -32,7 +32,6 @@ defmodule EctoFoundationdb.MixProject do
       # {:dep_from_hexpm, "~> 0.3.0"},
       {:erlfdb, git: "https://github.com/foundationdb-beam/erlfdb.git", branch: "main"},
       {:ecto, "~> 3.10"},
-      {:ecto_sql, "~> 3.11"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.6", only: [:dev, :test, :docs]},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

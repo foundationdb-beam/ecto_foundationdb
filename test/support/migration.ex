@@ -1,17 +1,17 @@
 defmodule EctoFoundationDB.Integration.Migration.UserIndex do
   @moduledoc false
-  use Ecto.Migration
+  use Ecto.Adapters.FoundationDB.Migration
 
   def change() do
-    create(index(:users, [:name]))
+    [create(index(:users, [:name]))]
   end
 end
 
 defmodule EctoFoundationDB.Integration.Migration.EventIndex do
   @moduledoc false
-  use Ecto.Migration
+  use Ecto.Adapters.FoundationDB.Migration
 
   def change() do
-    create(index(:events, [:timestamp], options: [timeseries: true]))
+    [create(index(:events, [:timestamp], options: [timeseries: true]))]
   end
 end

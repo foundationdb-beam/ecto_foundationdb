@@ -93,7 +93,8 @@ defmodule Ecto.Adapters.FoundationDB do
   indexes in some ways, but critically different in others.
 
     1. An index is created via a migration file, as it is with Ecto SQL. However,
-       this is the only supported purpose of migration files so far.
+       this is the only supported purpose of migration files so far. And this is
+       where the similarities with Ecto SQL end.
 
     2. Each index roughly doubles the size of data in your database for the
        schema on which it's created.
@@ -119,17 +120,73 @@ defmodule Ecto.Adapters.FoundationDB do
 
   ### Migrations
 
-  `ecto_foundationdb` also does Migrations differently than `:ecto_sql` adapters that
-  you may be familiar with. You are expected to define a `:migrator` option on your repo
-  that is a module implementing the `Ecto.Adapters.FoundationDB.Migrator` behaviour.
+  At first glance, `:ecto_foundationdb` migrations may look similar to that of `:ecto_sql`,
+  but the actual execution of migrations and how your app must be configured are very
+  different, so please read this section in full.
 
-  This behaviour defines an ordered list of versioned migration modules that need to be
-  executed for each tenant. As tenants are opened during your application runtime,
-  the migrations will be executed automatically. This distributes the migration across
-  a potentially long period of time, as migrations will not be executed
-  unless the tenant is opened.
+  As tenants are opened during your application runtime, migrations will be executed
+  automatically. This distributes the migration across a potentially long period of time,
+  as migrations will not be executed unless the tenant is opened.
 
-  Migrations can be completed in full with a call to `Ecto.Adapters.FoundationDB.Migrator.up_all/1`
+  Migrations can be completed in full with a call to
+  `Ecto.Adapters.FoundationDB.Migrator.up_all/1`
+
+  If your app uses indexes on any of your schemas, you must define a `:migrator`
+  option on your repo that is a module implementing the `Ecto.Adapters.FoundationDB.Migrator`
+  behaviour.
+
+  The `:migrator` is a module in your application runtime that provides the full list of
+  ordered migrations. These are the migrations that will be executed when a tenant is opened.
+  If you leave out a migration from the list, it will not be applied.
+
+  For example, your migrator might look like this:
+
+  ```elixir
+  defmodule MyApp.Migrator do
+    @behaviour Ecto.Adapters.FoundationDB.Migrator
+
+    @impl true
+    def migrations(MyApp.Repo) do
+      [
+        {0, MyApp.AMigrationForIndexCreation}
+      ]
+    end
+  end
+  ```
+
+  As each tenant is opened at runtime, it will advance version-by-version in individual
+  FDB transactions until it reaches the latest version.
+
+  Each migration is contained in a separate module, much like EctoSQL's. However, the operations
+  to be carried out **must be returned as a list.** For example, the creation of 2 indexes
+  may look like this:
+
+  ```elixir
+  defmodule MyApp.AMigrationForIndexCreation do
+    use Ecto.Adapters.FoundationDB.Migration
+    def change() do
+      [
+        create(index(:users, [:name]),
+        create(index(:posts, [:user_id]))
+      ]
+    end
+  end
+  ```
+
+  Note: The following are yet to be implemented.
+
+  1. Dropping an index
+  2. Moving down in migration versions (i.e. rollback)
+
+  Finally, the Mix tasks regarding ecto migrations are not supported.
+
+  ```elixir
+  # These commands are not supported. Do not use them with :ecto_foundationdb!
+  #    mix ecto.migrate
+  #    mix ecto.gen.migration
+  #    mix ecto.rollback
+  #    mix ecto.migrations
+  ```
 
   ### Other Ecto Features
 
@@ -151,7 +208,7 @@ defmodule Ecto.Adapters.FoundationDB do
   @behaviour Ecto.Adapter.Storage
   @behaviour Ecto.Adapter.Schema
   @behaviour Ecto.Adapter.Queryable
-  @behaviour Ecto.Adapter.Migration
+  @behaviour Ecto.Adapters.FoundationDB.Migration
 
   alias Ecto.Adapters.FoundationDB.Database
   alias Ecto.Adapters.FoundationDB.EctoAdapter
@@ -160,7 +217,6 @@ defmodule Ecto.Adapters.FoundationDB do
   alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
   alias Ecto.Adapters.FoundationDB.Options
-  alias Ecto.Adapters.FoundationDB.Tenant
 
   @spec db(Ecto.Repo.t()) :: Database.t()
   def db(repo) when is_atom(repo) do
@@ -180,9 +236,9 @@ defmodule Ecto.Adapters.FoundationDB do
     end
   end
 
-  @spec usetenant(Ecto.Schema.schema(), Tenant.t()) :: Ecto.Schema.schema()
+  @spec usetenant(Ecto.Schema.schema(), any()) :: Ecto.Schema.schema()
   def usetenant(struct, tenant) do
-    Ecto.put_meta(struct, prefix: Tenant.to_prefix(tenant))
+    Ecto.put_meta(struct, prefix: tenant)
   end
 
   @impl Ecto.Adapter
@@ -254,12 +310,9 @@ defmodule Ecto.Adapters.FoundationDB do
   defdelegate stream(adapter_meta, query_meta, query_cache, params, options),
     to: EctoAdapterQueryable
 
-  @impl Ecto.Adapter.Migration
+  @impl Ecto.Adapters.FoundationDB.Migration
   defdelegate supports_ddl_transaction?(), to: EctoAdapterMigration
 
-  @impl Ecto.Adapter.Migration
+  @impl Ecto.Adapters.FoundationDB.Migration
   defdelegate execute_ddl(adapter_meta, command, option), to: EctoAdapterMigration
-
-  @impl Ecto.Adapter.Migration
-  defdelegate lock_for_migrations(adapter_meta, options, fun), to: EctoAdapterMigration
 end
