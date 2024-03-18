@@ -214,6 +214,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
        ) do
     field_names = Fields.parse_select_fields(select_fields)
 
+    # :max_rows - The number of rows to load from the database as we stream.
+    # It is supported at least by Postgres and MySQL and defaults to 500.
     fdb_limit = options[:max_rows] || 500
 
     query_options = fn
@@ -239,8 +241,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       }
     end
 
-    # :max_rows - The number of rows to load from the database as we stream.
-    # It is supported at least by Postgres and MySQL and defaults to 500.
     next_fun =
       fn
         acc = %{continuation: %Query.Continuation{more?: false}} ->
@@ -258,6 +258,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     end
 
     Stream.resource(start_fun, next_fun, after_fun)
+  end
+
+  defp select(objs, []) do
+    Enum.to_list(objs)
   end
 
   defp select(objs, select_field_names) do

@@ -4,26 +4,29 @@ defmodule Ecto.Adapters.FoundationDB do
 
   It uses `:erlfdb` for communicating to the database.
 
-  ## Options
+  ## Standard Options
 
     * `:cluster_file` - The path to the fdb.cluster file. The default is
       `"/etc/foundationdb/fdb.cluster"`.
+    * `:migrator` - A module that implements the `Ecto.Adapters.FoundationDB.Migrator`
+      behaviour. Required when using any indexes. Defaults to `nil`.
+
+  ## Advanced Options
+
     * `:key_delimiter` - Keys in the database are constructed using this
       delimiter in between segments. Defaults to "/".
-    * `:storage_id` - All tenants created by this adapter are prefix with
+    * `:storage_id` - All tenants created by this adapter are prefixed with
       this string. This allows multiple configurations to operate on the
       same FoundationDB cluster indepedently. Defaults to
       `"Ecto.Adapters.FoundationDB"`.
     * `:open_db` - 0-arity function used for opening a reference to the
-       FoundationDB cluster. Defaults to `:erlfdb.open(cluster_file)`. WHen
+       FoundationDB cluster. Defaults to `:erlfdb.open(cluster_file)`. When
        using `Ecto.Adapters.FoundationDB.Sandbox`, you should consider setting
        this option to `Sandbox.open_db/0`.
     * `:indexkey_encoder` - 2-arity function that accepts a term as input
-       and provides a binary as output. Defaults to `Pack.indexkey_encoder/2`.
+       and provides a binary as output. Defaults to `Default.indexkey_encoder/2`.
        This option provides some configurability to `ecto_foundationdb`'s
-       management of indexes, and should rarely be used.
-    * `:migrator` - A module that implements the `Ecto.Adapters.FoundationDB.Migrator`
-      behaviour. Required when using any indexes. Defualts to `nil`.
+       management of Default indexes, and should rarely be used.
 
   ## Limitations and caveats
 
@@ -89,17 +92,20 @@ defmodule Ecto.Adapters.FoundationDB do
 
   ### Indexes
 
-  Simple indexes and time series indexes are supported. They are similar to Ecto SQL
-  indexes in some ways, but critically different in others.
+  Simple indexes and time series indexes are supported out of the box. They are
+  similar to Ecto SQL indexes in some ways, but critically different in others.
+
+  The out of the box indexes are called Default indexes, corresponding to the module
+  by the same name.
 
     1. An index is created via a migration file, as it is with Ecto SQL. However,
        this is the only supported purpose of migration files so far. And this is
        where the similarities with Ecto SQL end.
 
-    2. Each index roughly doubles the size of data in your database for the
+    2. Each Default index roughly doubles the size of data in your database for the
        schema on which it's created.
 
-    3. Indexes are managed within transactions, so that they should always be
+    3. Indexes are managed within transactions, so that they will always be
        consistent.
 
     4. Upon index creation, each tenant's data will be indexed in a transaction,
@@ -108,21 +114,24 @@ defmodule Ecto.Adapters.FoundationDB do
        purely `ecto_foundationdb`.
 
     5. Migrations must be executed on a per tenant basis, and they can be
-       run in parallel.
+       run in parallel. Migrations are managed automatically by this adapater.
 
   ### Transactions
 
   `ecto_foundationdb` implements its own transaction API. This was decided early on
-  to make sure we can support tenants. It's possible that we can switch to Ecto's
-  Transactions with more investigation. In the meantime, it's important to point out
-  that a transaction always executes on a single tenant, and so individual Repo calls
-  inside your transaction do not need to specify a `:prefix`.
+  to make sure we can support tenants and custom indexes. A transaction always
+  executes on a single tenant, and so individual Repo calls inside your
+  transaction do not need to specify a `:prefix`.
 
   ### Migrations
 
   At first glance, `:ecto_foundationdb` migrations may look similar to that of `:ecto_sql`,
   but the actual execution of migrations and how your app must be configured are very
-  different, so please read this section in full.
+  differently, so please read this section in full.
+
+  If your app uses indexes on any of your schemas, you must define a `:migrator`
+  option on your repo that is a module implementing the `Ecto.Adapters.FoundationDB.Migrator`
+  behaviour.
 
   As tenants are opened during your application runtime, migrations will be executed
   automatically. This distributes the migration across a potentially long period of time,
@@ -130,10 +139,6 @@ defmodule Ecto.Adapters.FoundationDB do
 
   Migrations can be completed in full with a call to
   `Ecto.Adapters.FoundationDB.Migrator.up_all/1`
-
-  If your app uses indexes on any of your schemas, you must define a `:migrator`
-  option on your repo that is a module implementing the `Ecto.Adapters.FoundationDB.Migrator`
-  behaviour.
 
   The `:migrator` is a module in your application runtime that provides the full list of
   ordered migrations. These are the migrations that will be executed when a tenant is opened.
@@ -148,7 +153,8 @@ defmodule Ecto.Adapters.FoundationDB do
     @impl true
     def migrations(MyApp.Repo) do
       [
-        {0, MyApp.AMigrationForIndexCreation}
+        {0, MyApp.AMigrationForIndexCreation},
+        {1, MyApp.AnIndexWeAddedLaterOn}
       ]
     end
   end
@@ -198,10 +204,6 @@ defmodule Ecto.Adapters.FoundationDB do
   within the database. Therefore, it only makes sense to implement a limited set of query types --
   specifically those that do have optimized database query semantics. All other filtering, aggregation,
   and grouping must be done by your Elixir code.
-
-  Lastly, it's important to note that even though `ecto_foundationdb` relies on `ecto_sql`,
-  it's only for the `Ecto.Adapter.Migration` behaviour and `create index` function.
-  The rest of `ecto_sql` is unused.
   """
 
   @behaviour Ecto.Adapter

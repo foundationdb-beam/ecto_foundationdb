@@ -10,7 +10,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
   @all_data_start_key ""
   @all_data_end_key <<0xFF>>
   @repo_data_start_key ""
-  @repo_data_end_key <<0xFE>>
+  @repo_data_end_key <<0xFEFF>>
 
   def list_tenants(dbtx, options) do
     start_key = get_tenant_name("", options)
@@ -152,7 +152,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
 
   defp get_tenant_name(tenant_id, options) do
     storage_id = Options.get(options, :storage_id)
-    Pack.to_raw_fdb_key(options, ["#{storage_id}", tenant_id])
+    Pack.to_raw_fdb_key(options, <<>>, ["#{storage_id}", tenant_id])
   end
 
   defp get_tenant(dbtx, tenant_id, options) do

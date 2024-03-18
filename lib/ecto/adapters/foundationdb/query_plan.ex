@@ -6,6 +6,11 @@ defmodule Ecto.Adapters.FoundationDB.QueryPlan do
   """
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Fields
+  alias Ecto.Adapters.FoundationDB.QueryPlan.Between
+  alias Ecto.Adapters.FoundationDB.QueryPlan.Equal
+  alias Ecto.Adapters.FoundationDB.QueryPlan.None
+
+  @type t() :: %None{} | %Equal{} | %Between{}
 
   defmodule None do
     @moduledoc false
@@ -53,7 +58,7 @@ defmodule Ecto.Adapters.FoundationDB.QueryPlan do
           %Ecto.Query.BooleanExpr{
             expr:
               {:==, [],
-               [{{:., [], [{:&, [], [0]}, where_field]}, [], []}, {:^, [], [param_index]}]}
+               [{{:., [], [{:&, [], [0]}, where_field]}, [], []}, {:^, [], [where_param]}]}
           }
         ],
         updates,
@@ -65,7 +70,7 @@ defmodule Ecto.Adapters.FoundationDB.QueryPlan do
       context: context,
       field: where_field,
       is_pk?: Fields.get_pk_field!(schema) == where_field,
-      param: Enum.at(params, param_index),
+      param: Enum.at(params, where_param),
       updates: resolve_updates(updates, params),
       layer_data: %{}
     }
@@ -84,12 +89,12 @@ defmodule Ecto.Adapters.FoundationDB.QueryPlan do
                  {op_left, [],
                   [
                     {{:., [], [{:&, [], [0]}, where_field_gt]}, [], []},
-                    {:^, [], [param_index_left]}
+                    {:^, [], [where_param_left]}
                   ]},
                  {op_right, [],
                   [
                     {{:., [], [{:&, [], [0]}, where_field_lt]}, [], []},
-                    {:^, [], [param_index_right]}
+                    {:^, [], [where_param_right]}
                   ]}
                ]}
           }
@@ -106,8 +111,8 @@ defmodule Ecto.Adapters.FoundationDB.QueryPlan do
       context: context,
       field: where_field_gt,
       is_pk?: Fields.get_pk_field!(schema) == where_field_gt,
-      param_left: Enum.at(params, param_index_left),
-      param_right: Enum.at(params, param_index_right),
+      param_left: Enum.at(params, where_param_left),
+      param_right: Enum.at(params, where_param_right),
       inclusive_left?: op_left == :>=,
       inclusive_right?: op_right == :<=,
       updates: resolve_updates(updates, params),
@@ -125,8 +130,8 @@ defmodule Ecto.Adapters.FoundationDB.QueryPlan do
 
   defp resolve_updates([%Ecto.Query.QueryExpr{expr: [set: pins]}], params) do
     field_vals =
-      for {field, {:^, [], [param_index]}} <- pins do
-        {field, Enum.at(params, param_index)}
+      for {field, {:^, [], [param_pos]}} <- pins do
+        {field, Enum.at(params, param_pos)}
       end
 
     [set: field_vals]

@@ -17,22 +17,12 @@ defmodule Ecto.Adapters.FoundationDB.Sandbox do
 
   @spec checkout(Ecto.Repo.t(), Tenant.id(), Options.t()) :: Tenant.t()
   def checkout(repo, id, options \\ []) when is_binary(id) do
-    case :persistent_term.get({__MODULE__, id, :tenant}, nil) do
-      nil ->
-        tenant = Tenant.open_empty!(repo, id, options)
-
-        :persistent_term.put({__MODULE__, id, :tenant}, tenant)
-        tenant
-
-      _ ->
-        raise "FoundationDB Sandbox Tenant named #{id} is already checked out"
-    end
+    Tenant.open_empty!(repo, id, options)
   end
 
   @spec checkin(Ecto.Repo.t(), Tenant.id()) :: :ok
   def checkin(repo, id) when is_binary(id) do
     Tenant.clear_delete!(repo, id)
-    :persistent_term.erase({__MODULE__, id, :tenant})
     :ok
   end
 

@@ -8,7 +8,7 @@ Application.put_env(:ecto_foundationdb, TestRepo,
   migrator: EctoFoundationDB.Integration.TestMigrator,
 
   # Increases number of index collisions
-  indexkey_encoder: &Ecto.Adapters.FoundationDB.Layer.Pack.indexkey_encoder(&1, 1, &2)
+  indexkey_encoder: &Ecto.Adapters.FoundationDB.Layer.Indexer.Default.indexkey_encoder(&1, 1, &2)
 )
 
 defmodule TenantsForCase do

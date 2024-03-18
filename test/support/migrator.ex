@@ -4,12 +4,12 @@ defmodule EctoFoundationDB.Integration.TestMigrator do
   @behaviour Ecto.Adapters.FoundationDB.Migrator
 
   @impl true
-  def options(Ecto.Integration.TestRepo) do
+  def options() do
     [log: false]
   end
 
   @impl true
-  def migrations(Ecto.Integration.TestRepo) do
+  def migrations() do
     [
       {0, EctoFoundationDB.Integration.Migration.UserIndex},
       {1, EctoFoundationDB.Integration.Migration.EventIndex}

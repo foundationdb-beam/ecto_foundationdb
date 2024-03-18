@@ -5,6 +5,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Fields
+  alias Ecto.Adapters.FoundationDB.Layer.Indexer
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Schema
 
@@ -23,7 +24,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
   def safe?(nil, false), do: {false, :tenant_only}
   def safe?(_tenant, false), do: {false, :unused_tenant}
 
-  def commit_proc(db_or_tenant, fun) when is_function(fun, 0) do
+  def commit(db_or_tenant, fun) do
     nil = Process.get(@db_or_tenant)
     nil = Process.get(@tx)
 
@@ -34,7 +35,10 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         Process.put(@tx, tx)
 
         try do
-          fun.()
+          cond do
+            is_function(fun, 0) -> fun.()
+            is_function(fun, 1) -> fun.(tx)
+          end
         after
           Process.delete(@tx)
           Process.delete(@db_or_tenant)
@@ -76,7 +80,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     end
   end
 
-  def insert_all(tx, %{opts: adapter_opts}, source, context, entries, idxs) do
+  def insert_all(tx, adapter_meta = %{opts: adapter_opts}, source, context, entries, idxs) do
     entries =
       entries
       |> Enum.map(fn {{pk_field, pk}, data_object} ->
@@ -96,7 +100,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         fdb_value = Pack.to_fdb_value(data_object)
 
         if write_primary, do: do_set(tx, fdb_key, fdb_value)
-        set_indexes_for_one(tx, idxs, adapter_opts, {fdb_key, data_object}, source)
+        Indexer.set(tx, idxs, adapter_meta, {fdb_key, data_object})
         count + 1
 
       _tx, {key, _}, _result, _acc ->
@@ -132,7 +136,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         update_data_object(
           tx,
           adapter_meta,
-          source,
           pk_field,
           {fdb_key, data_object},
           [set: set_data],
@@ -148,8 +151,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
 
   def update_data_object(
         tx,
-        %{opts: adapter_opts},
-        source,
+        adapter_meta,
         pk_field,
         {fdb_key, data_object},
         updates,
@@ -164,8 +166,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
       |> Fields.to_front(pk_field)
 
     if write_primary, do: do_set(tx, fdb_key, Pack.to_fdb_value(data_object))
-    clear_indexes_for_one(tx, idxs, adapter_opts, {fdb_key, data_object}, source)
-    set_indexes_for_one(tx, idxs, adapter_opts, {fdb_key, data_object}, source)
+    Indexer.update(tx, idxs, adapter_meta, {fdb_key, data_object})
   end
 
   def delete_pks(tx, adapter_meta = %{opts: adapter_opts}, source, pks, idxs) do
@@ -181,7 +182,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         delete_data_object(
           tx,
           adapter_meta,
-          source,
           {fdb_key, Pack.from_fdb_value(fdb_value)},
           idxs
         )
@@ -192,64 +192,25 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     pipeline(tx, keys, get_stage, 0, clear_stage)
   end
 
-  def delete_data_object(tx, %{opts: adapter_opts}, source, kv = {fdb_key, _}, idxs) do
+  def delete_data_object(
+        tx,
+        adapter_meta,
+        kv = {fdb_key, _},
+        idxs
+      ) do
     :erlfdb.clear(tx, fdb_key)
 
-    clear_indexes_for_one(
-      tx,
-      idxs,
-      adapter_opts,
-      kv,
-      source
-    )
+    Indexer.clear(tx, idxs, adapter_meta, kv)
   end
 
   def clear_all(tx, %{opts: adapter_opts}, source) do
-    # this key prefix will clear datakeys and indexkeys
+    # this key prefix will clear datakeys and indexkeys, but not user data or migration data
     key_startswith = Pack.to_raw_fdb_key(adapter_opts, [source, ""])
 
+    # this would be a lot faster if we didn't have to count the keys
     num = count_range_startswith(tx, key_startswith)
     :erlfdb.clear_range_startswith(tx, key_startswith)
     num
-  end
-
-  def create_index(
-        tx,
-        %{opts: adapter_opts},
-        source,
-        index_name,
-        index_fields,
-        options,
-        {inventory_key, inventory_value}
-      ) do
-    key_startswith = Pack.to_fdb_datakey_startswith(adapter_opts, source)
-    key_start = key_startswith
-    key_end = :erlfdb_key.strinc(key_startswith)
-
-    # Prevent updates on the keys so that we write the correct index values
-    :erlfdb.add_write_conflict_range(tx, key_start, key_end)
-
-    # Write a key that indicates the index exists. All other operations will
-    # use this info to maintain the index
-    do_set(tx, inventory_key, inventory_value)
-
-    # Write the actual index for any existing data in this tenant
-    tx
-    |> :erlfdb.get_range(key_start, key_end)
-    |> :erlfdb.wait()
-    |> Enum.map(fn {fdb_key, fdb_value} ->
-      {index_key, index_object} =
-        get_index_entry(
-          adapter_opts,
-          {fdb_key, Pack.from_fdb_value(fdb_value)},
-          index_fields,
-          options,
-          index_name,
-          source
-        )
-
-      do_set(tx, index_key, index_object)
-    end)
   end
 
   defp count_range_startswith(tx, startswith) do
@@ -315,79 +276,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         futures = futures -- [fut]
         acc = fun.(tx, map_entry, :erlfdb.get(fut), acc)
         fold_futures(tx, futures, futures_map, acc, fun)
-    end
-  end
-
-  # Note: pk is always first. See insert and update paths
-  defp get_index_entry(
-         adapter_opts,
-         {fdb_key, data_object = [{pk_field, pk_value} | _]},
-         index_fields,
-         index_options,
-         index_name,
-         source
-       ) do
-    index_fields = index_fields -- [pk_field]
-
-    index_entries =
-      for idx_field <- index_fields, do: {idx_field, Keyword.get(data_object, idx_field)}
-
-    {_, path_vals} = Enum.unzip(index_entries)
-
-    index_key =
-      Pack.to_fdb_indexkey(
-        adapter_opts,
-        index_options,
-        source,
-        "#{index_name}",
-        path_vals,
-        pk_value
-      )
-
-    index_object =
-      Pack.new_index_object(fdb_key, data_object)
-      |> Pack.to_fdb_value()
-
-    {index_key, index_object}
-  end
-
-  defp clear_indexes_for_one(tx, idxs, adapter_opts, kv, source) do
-    for idx <- idxs do
-      index_name = idx[:id]
-      index_fields = idx[:fields]
-      index_options = idx[:options]
-
-      {index_key, _index_object} =
-        get_index_entry(
-          adapter_opts,
-          kv,
-          index_fields,
-          index_options,
-          index_name,
-          source
-        )
-
-      :erlfdb.clear(tx, index_key)
-    end
-  end
-
-  defp set_indexes_for_one(tx, idxs, adapter_opts, kv, source) do
-    for idx <- idxs do
-      index_name = idx[:id]
-      index_fields = idx[:fields]
-      index_options = idx[:options]
-
-      {index_key, index_object} =
-        get_index_entry(
-          adapter_opts,
-          kv,
-          index_fields,
-          index_options,
-          index_name,
-          source
-        )
-
-      do_set(tx, index_key, index_object)
     end
   end
 

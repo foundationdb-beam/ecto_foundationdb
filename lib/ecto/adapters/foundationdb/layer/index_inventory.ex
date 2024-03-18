@@ -2,13 +2,14 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
   @moduledoc """
   This is an internal module that manages index creation and metadata.
   """
-  alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
+  alias Ecto.Adapters.FoundationDB.Layer.Indexer
+  alias Ecto.Adapters.FoundationDB.Layer.Indexer.Default
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Layer.Tx
 
   @index_inventory_source "indexes"
 
-  def source(), do: EctoAdapterMigration.prepare_migration_key(@index_inventory_source)
+  def source(), do: Pack.to_fdb_migrationsource(@index_inventory_source)
 
   def create_index(
         db_or_tenant,
@@ -18,18 +19,14 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
         index_fields,
         options
       ) do
-    inventory_kv = new_index(adapter_meta, source, index_name, index_fields, options)
+    {inventory_key, idx} = new_index(adapter_meta, source, index_name, index_fields, options)
 
     Tx.transactional(db_or_tenant, fn tx ->
-      Tx.create_index(
-        tx,
-        adapter_meta,
-        source,
-        index_name,
-        index_fields,
-        options,
-        inventory_kv
-      )
+      # Write a key that indicates the index exists. All other operations will
+      # use this info to maintain the index
+      :erlfdb.set(tx, inventory_key, Pack.to_fdb_value(idx))
+
+      Indexer.create(tx, idx, adapter_meta)
     end)
 
     :ok
@@ -41,18 +38,30 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
 
   ## Examples
 
-    iex> {k, v} = Ecto.Adapters.FoundationDB.Layer.IndexInventory.new_index(%{opts: []}, "users", "users_name_index", [:name], [])
-    iex> {k, Ecto.Adapters.FoundationDB.Layer.Pack.from_fdb_value(v)}
-    {"\\xFEindexes/users/users_name_index", [id: "users_name_index", source: "users", fields: [:name], options: []]}
+    iex> Ecto.Adapters.FoundationDB.Layer.IndexInventory.new_index(%{opts: []}, "users", "users_name_index", [:name], [])
+    {"\\xFE\\xFFindexes/users/users_name_index", [id: "users_name_index", indexer: Ecto.Adapters.FoundationDB.Layer.Indexer.Default, source: "users", fields: [:name], options: []]}
 
   """
   def new_index(%{opts: adapter_opts}, source, index_name, index_fields, options) do
     inventory_key = Pack.to_raw_fdb_key(adapter_opts, [source(), source, index_name])
 
-    inventory_value =
-      Pack.to_fdb_value(id: index_name, source: source, fields: index_fields, options: options)
+    idx = [
+      id: index_name,
+      indexer: get_indexer(options),
+      source: source,
+      fields: index_fields,
+      options: options
+    ]
 
-    {inventory_key, inventory_value}
+    {inventory_key, idx}
+  end
+
+  defp get_indexer(options) do
+    case Keyword.get(options, :indexer) do
+      :timeseries -> Default
+      nil -> Default
+      module -> module
+    end
   end
 
   @doc """
@@ -91,8 +100,10 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
   which can be quite complicated across multiple Elixir nodes.
   """
   def tx_idxs(tx, adapter_opts, source) do
+    key = source_range_startswith(adapter_opts, source)
+
     tx
-    |> :erlfdb.get_range_startswith(source_range_startswith(adapter_opts, source))
+    |> :erlfdb.get_range_startswith(key)
     |> :erlfdb.wait()
     |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
   end
@@ -101,7 +112,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
   ## Examples
 
   iex> Ecto.Adapters.FoundationDB.Layer.IndexInventory.source_range_startswith([], "users")
-  "\\xFEindexes/users/"
+  "\\xFE\\xFFindexes/users/"
   """
   def source_range_startswith(adapter_opts, source) do
     Pack.to_raw_fdb_key(adapter_opts, [source(), source, ""])

@@ -15,7 +15,7 @@ defmodule Ecto.Adapters.FoundationDB.Options do
   @type t() :: [option()]
 
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
-  alias Ecto.Adapters.FoundationDB.Layer.Pack
+  alias Ecto.Adapters.FoundationDB.Layer.Indexer.Default
 
   @spec get(t(), atom()) :: any()
   def get(options, :open_db) do
@@ -28,7 +28,7 @@ defmodule Ecto.Adapters.FoundationDB.Options do
   def get(options, :key_delimiter), do: Keyword.get(options, :key_delimiter, "/")
 
   def get(options, :indexkey_encoder),
-    do: Keyword.get(options, :indexkey_encoder, &Pack.indexkey_encoder/2)
+    do: Keyword.get(options, :indexkey_encoder, &Default.indexkey_encoder/2)
 
   def get(options, :cluster_file), do: Keyword.get(options, :cluster_file, "")
 

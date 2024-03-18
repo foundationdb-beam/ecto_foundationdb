@@ -28,10 +28,16 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Fields do
     iex> Ecto.Adapters.FoundationDB.Layer.Fields.arrange([b: 1, c: 2, a: 0], [:a, :b])
     [a: 0, b: 1]
 
+    iex> Ecto.Adapters.FoundationDB.Layer.Fields.arrange([b: 1, c: 2, a: 0], [])
+    [b: 1, c: 2, a: 0]
+
   """
+  def arrange(fields, []) do
+    fields
+  end
+
   def arrange(fields, field_names) do
-    field_names
-    |> Enum.map(fn field_name -> {field_name, fields[field_name]} end)
+    Enum.map(field_names, fn field_name -> {field_name, fields[field_name]} end)
   end
 
   @doc """

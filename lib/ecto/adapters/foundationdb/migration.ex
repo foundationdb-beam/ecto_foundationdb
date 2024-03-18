@@ -55,7 +55,7 @@ defmodule Ecto.Adapters.FoundationDB.Migration do
               nulls_distinct: nil,
               where: nil,
               comment: nil,
-              options: nil
+              options: []
 
     @type t :: %__MODULE__{
             table: String.t(),

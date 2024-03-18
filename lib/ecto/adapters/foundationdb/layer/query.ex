@@ -4,6 +4,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   """
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Fields
+  alias Ecto.Adapters.FoundationDB.Layer.Indexer
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Layer.Tx
@@ -30,8 +31,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
 
     objs =
       kvs
-      |> unpack(plan)
-      |> filter(plan)
+      |> unpack_and_filter(plan)
       |> Stream.map(fn {_k, v} -> v end)
 
     {objs, continuation}
@@ -70,11 +70,14 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     else
       case IndexInventory.select_index(idxs, [plan.field]) do
         {:ok, idx} ->
-          make_indexkey_range(
-            adapter_meta,
-            %{plan | layer_data: Map.put(layer_data, :idx, idx)},
-            options
-          )
+          range = Indexer.range(idx, adapter_meta, plan, options)
+
+          layer_data =
+            layer_data
+            |> Map.put(:idx, idx)
+            |> Map.put(:range, range)
+
+          %{plan | layer_data: layer_data}
 
         {:error, _} ->
           raise Unsupported,
@@ -106,13 +109,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
 
     tx
     |> tx_get_range(plan, [])
-    |> unpack(plan)
-    |> filter(plan)
+    |> unpack_and_filter(plan)
     |> Stream.map(
       &Tx.update_data_object(
         tx,
         adapter_meta,
-        plan.source,
         pk_field,
         &1,
         updates,
@@ -127,44 +128,23 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   defp tx_delete_range(tx, adapter_meta, plan, idxs) do
     tx
     |> tx_get_range(plan, [])
-    |> unpack(plan)
-    |> filter(plan)
-    |> Stream.map(&Tx.delete_data_object(tx, adapter_meta, plan.source, &1, idxs))
+    |> unpack_and_filter(plan)
+    |> Stream.map(&Tx.delete_data_object(tx, adapter_meta, &1, idxs))
     |> Enum.to_list()
     |> length()
   end
 
-  defp unpack(kvs, %{layer_data: %{idx: _idx}}) do
-    Stream.map(kvs, fn {_k, v} ->
-      index_object = Pack.from_fdb_value(v)
-
-      {index_object[:id], index_object[:data]}
+  defp unpack_and_filter(kvs, plan = %{layer_data: %{idx: idx}}) do
+    kvs
+    |> Stream.map(&Indexer.unpack(idx, plan, &1))
+    |> Stream.filter(fn
+      nil -> false
+      _ -> true
     end)
   end
 
-  defp unpack(kvs, _plan) do
+  defp unpack_and_filter(kvs, _plan) do
     Stream.map(kvs, fn {k, v} -> {k, Pack.from_fdb_value(v)} end)
-  end
-
-  defp filter(kvs, %QueryPlan.None{}) do
-    kvs
-  end
-
-  defp filter(kvs, plan = %QueryPlan.Equal{layer_data: %{idx: _idx}}) do
-    Stream.filter(kvs, fn {_key, data_object} ->
-      # Filter by the where_values because our indexes can have key conflicts
-      plan.param == data_object[plan.field]
-    end)
-  end
-
-  defp filter(kvs, %QueryPlan.Between{layer_data: %{idx: _idx}}) do
-    # Between on non-timeseries index is not supported, and between on
-    # time series index will not have conflicts, so no filtering needed
-    kvs
-  end
-
-  defp filter(kvs, _plan) do
-    kvs
   end
 
   defp make_datakey_range(
@@ -202,67 +182,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     end_key = if plan.inclusive_right?, do: :erlfdb_key.strinc(end_key), else: end_key
     start_key = options[:start_key] || start_key
     %QueryPlan.Between{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
-  end
-
-  defp make_indexkey_range(_adapter_meta, %QueryPlan.None{}, _options) do
-    raise Unsupported, """
-    FoundationDB Adapter does not support empty where clause on an index. In fact, this code path should not be reachable.
-    """
-  end
-
-  defp make_indexkey_range(
-         %{opts: adapter_opts},
-         plan = %QueryPlan.Equal{
-           layer_data: layer_data = %{idx: idx}
-         },
-         options
-       ) do
-    start_key =
-      Pack.to_fdb_indexkey(
-        adapter_opts,
-        idx[:options],
-        plan.source,
-        idx[:id],
-        [plan.param],
-        nil
-      )
-
-    end_key = :erlfdb_key.strinc(start_key)
-    start_key = options[:start_key] || start_key
-
-    %QueryPlan.Equal{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
-  end
-
-  defp make_indexkey_range(
-         %{opts: adapter_opts},
-         plan = %QueryPlan.Between{
-           layer_data: layer_data = %{idx: idx}
-         },
-         options
-       ) do
-    index_options = idx[:options]
-
-    if index_options[:timeseries] do
-      [start_key, end_key] =
-        for x <- [plan.param_left, plan.param_right],
-            do:
-              Pack.to_fdb_indexkey(
-                adapter_opts,
-                idx[:options],
-                plan.source,
-                idx[:id],
-                [x],
-                nil
-              )
-
-      start_key = options[:start_key] || start_key
-
-      %QueryPlan.Between{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
-    else
-      raise Unsupported, """
-      FoundationDB Adapter does not support 'between' queries on indexes that are not timeseries.
-      """
-    end
   end
 
   defp continuation(kvs, options) do

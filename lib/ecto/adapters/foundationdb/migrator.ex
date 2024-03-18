@@ -7,8 +7,8 @@ defmodule Ecto.Adapters.FoundationDB.Migrator do
 
   require Logger
 
-  @callback options(repo :: Ecto.Repo.t()) :: Keyword.t()
-  @callback migrations(repo :: Ecto.Repo.t()) :: [{non_neg_integer(), module()}]
+  @callback options() :: Keyword.t()
+  @callback migrations() :: [{non_neg_integer(), module()}]
 
   alias Ecto.Adapters.FoundationDB
   alias Ecto.Adapters.FoundationDB.Migration.Runner
@@ -49,24 +49,34 @@ defmodule Ecto.Adapters.FoundationDB.Migrator do
   def up(repo, tenant, options) do
     migrator = Options.get(options, :migrator)
 
-    case apply_on_migrator(migrator, :migrations, 1, [repo], []) do
-      [] ->
-        :ok
+    if is_nil(migrator) do
+      :ok
+    else
+      true = Code.ensure_loaded?(migrator)
 
-      migrations ->
-        {last_version, _module} = List.last(migrations)
-
-        if already_up?(tenant, repo, last_version) do
+      case apply_on_migrator(migrator, :migrations, 0, [], []) do
+        [] ->
           :ok
-        else
-          up_options = apply_on_migrator(migrator, :options, 1, [repo], [])
 
-          for {version, module} <- migrations do
-            mod_up(tenant, repo, version, module, up_options ++ [prefix: tenant])
-          end
+        migrations ->
+          up(repo, tenant, migrator, migrations, options)
+      end
+    end
+  end
 
-          :ok
-        end
+  def up(repo, tenant, migrator, migrations, _options) do
+    {last_version, _module} = List.last(migrations)
+
+    if already_up?(tenant, repo, last_version) do
+      :ok
+    else
+      up_options = apply_on_migrator(migrator, :options, 0, [], [])
+
+      for {version, module} <- migrations do
+        mod_up(tenant, repo, version, module, up_options ++ [prefix: tenant])
+      end
+
+      :ok
     end
   end
 

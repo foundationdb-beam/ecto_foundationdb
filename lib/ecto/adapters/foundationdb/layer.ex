@@ -47,7 +47,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
   As shown above, you can easily get all Users in a tenant. However, say you wanted to
   get all Users from a certain department with high efficiency.
 
-  Via an Ecto Migration, you can specify an `Index` on the `:department` field.
+  Via an Ecto Migration, you can specify a Default index on the `:department` field.
 
   ```elixir
   defmodule MyApp.Migration do
@@ -73,7 +73,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
 
   ## Time Series Index
 
-  This is a special kind of index that requires the indexed value to be `:naive_datetime_usec`. This
+  This is a special kind of Default index that requires the indexed value to be `:naive_datetime_usec`. This
   index allows a query to retrieve objects that have a datetime that exists in between two given endpoints
   of a timespan.
 
@@ -93,12 +93,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
   defmodule EctoFoundationDB.Migration do
     use Ecto.Adapters.FoundationDB.Migration
     def change() do
-      [create(index(:events, [:timestamp], options: [timeseries: true]))]
+      [create(index(:events, [:timestamp], options: [indexer: :timeseries]))]
     end
   end
   ```
 
-  Take note of the option `timeseries: true` on the index creation in the Migration module.
+  Take note of the option `indexer: :timeseries` on the index creation in the Migration module.
 
   Also notice that in the Schema, we choose to use `write_primary: false`. This skips the Primary Write, so that
   our data is not duplicated. However, this means that the data can **only** be managed by providing a
@@ -108,6 +108,10 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
     ...>   where: e.timestamp >= ^~N[2024-01-01 00:00:00] and e.timestamp < ^~N[2024-01-01 12:00:00]
     ...> )
     iex> Repo.all(query, prefix: tenant)
+
+  ## User-defined Indexes
+
+  TBD
 
   ## Transactions
 

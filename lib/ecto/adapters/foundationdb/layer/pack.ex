@@ -4,71 +4,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
   """
   alias Ecto.Adapters.FoundationDB.Options
 
+  @adapter_prefix <<0xFE>>
+  @migration_keyspace_prefix <<0xFF>>
   @data_namespace "d"
-  @index_namespace "i"
-
-  @doc """
-  In the index key, values must be encoded into a fixed-length binary.
-
-  Fixed-length is required so that get_range can be used reliably in the presence of
-  arbitrary data. In a naive approach, the key_delimiter can conflict with
-  the bytes included in the index value.
-
-  However, this means our indexes will have conflicts that must be resolved with
-  filtering.
-
-  ## Examples
-
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.indexkey_encoder("an-example-key")
-    <<37, 99, 56, 165>>
-
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.indexkey_encoder(~N[2024-03-01 12:34:56], timeseries: true)
-    "20240301T123456.000000"
-
-  """
-  def indexkey_encoder(x, index_options \\ []) do
-    indexkey_encoder(x, 4, index_options)
-  end
-
-  @doc """
-  ## Examples
-
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.indexkey_encoder("an-example-key", 1, [])
-    <<102>>
-
-  """
-  def indexkey_encoder(x, num_bytes, index_options) do
-    if index_options[:timeseries] do
-      x
-      |> NaiveDateTime.add(0, :microsecond)
-      |> NaiveDateTime.to_iso8601(:basic)
-    else
-      <<n::unsigned-big-integer-size(num_bytes * 8)>> =
-        <<-1::unsigned-big-integer-size(num_bytes * 8)>>
-
-      i = :erlang.phash2(x, n)
-      <<i::unsigned-big-integer-size(num_bytes * 8)>>
-    end
-  end
-
-  @doc """
-  ## Examples
-
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_fdb_indexkey([], [], "table", "my_index", ["abc", "123"], "my-pk-id")
-    "table/i/my_index/M\\xDA\\xD8\\xFB/V\\xE3\\xD1\\x01/\\x83m\\0\\0\\0\\bmy-pk-id"
-
-  """
-  def to_fdb_indexkey(adapter_opts, index_options, source, index_name, vals, id)
-      when is_list(vals) do
-    fun = Options.get(adapter_opts, :indexkey_encoder)
-    vals = for v <- vals, do: fun.(v, index_options)
-
-    to_raw_fdb_key(
-      adapter_opts,
-      [source, @index_namespace, index_name | vals] ++
-        if(is_nil(id), do: [], else: [encode_pk_for_key(id)])
-    )
-  end
 
   @doc """
   ## Examples
@@ -103,24 +41,28 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
   ## Examples
 
     iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_fdb_datakey([], "table", "my-pk-id")
-    "table/d/\\x83m\\0\\0\\0\\bmy-pk-id"
+    "\\xFEtable/d/\\x83m\\0\\0\\0\\bmy-pk-id"
 
     iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_fdb_datakey([], "table", :"my-pk-id")
-    "table/d/\\x83w\\bmy-pk-id"
+    "\\xFEtable/d/\\x83w\\bmy-pk-id"
 
     iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_fdb_datakey([], "table", {:tuple, :term})
-    "table/d/\\x83h\\x02w\\x05tuplew\\x04term"
+    "\\xFEtable/d/\\x83h\\x02w\\x05tuplew\\x04term"
 
   """
   def to_fdb_datakey(adapter_opts, source, x) do
     to_raw_fdb_key(adapter_opts, [source, @data_namespace, encode_pk_for_key(x)])
   end
 
+  def to_fdb_migrationsource(source) do
+    @migration_keyspace_prefix <> source
+  end
+
   @doc """
   ## Examples
 
     iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_fdb_datakey_startswith([], "table")
-    "table/d/"
+    "\\xFEtable/d/"
 
   """
   def to_fdb_datakey_startswith(adapter_opts, source) do
@@ -131,14 +73,18 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
   ## Examples
 
     iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_raw_fdb_key([], ["table", "namespace", "id"])
-    "table/namespace/id"
+    "\\xFEtable/namespace/id"
 
     iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_raw_fdb_key([key_delimiter: <<0>>], ["table", "namespace", "id"])
-    "table\\0namespace\\0id"
+    "\\xFEtable\\0namespace\\0id"
 
   """
   def to_raw_fdb_key(adapter_opts, list) when is_list(list) do
-    Enum.join(list, Options.get(adapter_opts, :key_delimiter))
+    to_raw_fdb_key(adapter_opts, @adapter_prefix, list)
+  end
+
+  def to_raw_fdb_key(adapter_opts, prefix, list) when is_list(list) do
+    prefix <> Enum.join(list, Options.get(adapter_opts, :key_delimiter))
   end
 
   @doc """
@@ -153,13 +99,5 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
 
   def from_fdb_value(bin), do: :erlang.binary_to_term(bin)
 
-  def new_index_object(fdb_key, data_object) do
-    [
-      id: fdb_key,
-      data: data_object
-    ]
-  end
-
-  #
-  defp encode_pk_for_key(id), do: :erlang.term_to_binary(id)
+  def encode_pk_for_key(id), do: :erlang.term_to_binary(id)
 end

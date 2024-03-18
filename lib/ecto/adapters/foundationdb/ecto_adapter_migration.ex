@@ -8,18 +8,20 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
 
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
+  alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Migration.Index
 
-  @migration_keyspace_prefix <<0xFE>>
-
-  def prepare_source(k = "schema_migrations"),
+  def prepare_source(k = "schema_migrations") do
     # Unsupported: configurable migration table name (`:migration_source`)
     # and repo (`:migration_repo`)
-    do: {:ok, {prepare_migration_key(k), [usetenant: true]}}
+
+    # We put the schema_migrations source at the end of the keyspace so that
+    # we can empty out a tenant's data without changing its migrations
+    source = Pack.to_fdb_migrationsource(k)
+    {:ok, {source, [usetenant: true]}}
+  end
 
   def prepare_source(_k), do: {:error, :unknown_source}
-
-  def prepare_migration_key(key), do: "#{@migration_keyspace_prefix <> key}"
 
   @impl true
   def supports_ddl_transaction?() do

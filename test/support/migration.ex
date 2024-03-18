@@ -12,6 +12,6 @@ defmodule EctoFoundationDB.Integration.Migration.EventIndex do
   use Ecto.Adapters.FoundationDB.Migration
 
   def change() do
-    [create(index(:events, [:timestamp], options: [timeseries: true]))]
+    [create(index(:events, [:timestamp], options: [indexer: :timeseries]))]
   end
 end
