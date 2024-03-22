@@ -19,10 +19,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   @doc """
   Executes a query for retrieving data.
   """
-  def all(db_or_tenant, adapter_meta = %{opts: adapter_opts}, plan, options \\ []) do
+  def all(db_or_tenant, adapter_meta, plan, options \\ []) do
     {plan, kvs} =
-      Tx.transactional(db_or_tenant, fn tx ->
-        idxs = IndexInventory.tx_idxs(tx, adapter_opts, plan.source)
+      IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx, idxs ->
         plan = make_range(idxs, adapter_meta, plan, options)
         {plan, tx_get_range(tx, plan, options)}
       end)
@@ -40,9 +39,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   @doc """
   Executes a query for updating data.
   """
-  def update(db_or_tenant, adapter_meta = %{opts: adapter_opts}, plan) do
-    Tx.transactional(db_or_tenant, fn tx ->
-      idxs = IndexInventory.tx_idxs(tx, adapter_opts, plan.source)
+  def update(db_or_tenant, adapter_meta, plan) do
+    IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx, idxs ->
       plan = make_range(idxs, adapter_meta, plan, [])
       tx_update_range(tx, adapter_meta, plan, idxs)
     end)
@@ -56,9 +54,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     Tx.transactional(db_or_tenant, &Tx.clear_all(&1, adapter_meta, plan.source))
   end
 
-  def delete(db_or_tenant, adapter_meta = %{opts: adapter_opts}, plan) do
-    Tx.transactional(db_or_tenant, fn tx ->
-      idxs = IndexInventory.tx_idxs(tx, adapter_opts, plan.source)
+  def delete(db_or_tenant, adapter_meta, plan) do
+    IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx, idxs ->
       plan = make_range(idxs, adapter_meta, plan, [])
       tx_delete_range(tx, adapter_meta, plan, idxs)
     end)

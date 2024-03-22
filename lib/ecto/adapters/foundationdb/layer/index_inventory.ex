@@ -4,12 +4,32 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
   """
   alias Ecto.Adapters.FoundationDB.Layer.Indexer
   alias Ecto.Adapters.FoundationDB.Layer.Indexer.Default
+  alias Ecto.Adapters.FoundationDB.Layer.Indexer.MaxValue
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Layer.Tx
+  alias Ecto.Adapters.FoundationDB.Migration.SchemaMigration
 
-  @index_inventory_source "indexes"
+  @index_inventory_source "\xFFindexes"
+  @max_version_name "version"
+  @idx_operation_failed {:erlfdb_error, 1020}
 
-  def source(), do: Pack.to_fdb_migrationsource(@index_inventory_source)
+  def source(), do: @index_inventory_source
+
+  def builtin_indexes() do
+    migration_source = SchemaMigration.source()
+
+    %{
+      migration_source => [
+        [
+          id: @max_version_name,
+          indexer: MaxValue,
+          source: migration_source,
+          fields: [:version],
+          options: []
+        ]
+      ]
+    }
+  end
 
   def create_index(
         db_or_tenant,
@@ -92,20 +112,96 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
   end
 
   @doc """
-  This function retrieves the indexes that have been created for the given source table.
+  Executes function within a transaction, while also supplying the indexes currently
+  existing for the schema.
 
-  These keys change very rarely -- specifically whenever migrations are executed. If we
-  can find a safe way to cache them in memory then we can avoid this get/wait in each
-  transaction. However, such a cache would need to be properly locked during migrations,
-  which can be quite complicated across multiple Elixir nodes.
+  This function uses the Ecto cache and clever use of FDB constructs to guarantee
+  that the cache is consistent with transactional semantics.
   """
-  def tx_idxs(tx, adapter_opts, source) do
-    key = source_range_startswith(adapter_opts, source)
+  def transactional(db_or_tenant, %{cache: cache, opts: adapter_opts}, source, fun) do
+    cache? = :enabled == Application.get_env(:ecto_foundationdb, :idx_cache, :enabled)
+    cache_key = {__MODULE__, db_or_tenant, source}
 
-    tx
-    |> :erlfdb.get_range_startswith(key)
-    |> :erlfdb.wait()
-    |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
+    Tx.transactional(db_or_tenant, fn tx ->
+      tx_with_idxs_cache(tx, cache?, cache, adapter_opts, source, cache_key, fun)
+    end)
+  end
+
+  defp tx_with_idxs_cache(tx, cache?, cache, adapter_opts, source, cache_key, fun) do
+    now = System.monotonic_time(:millisecond)
+
+    {_, {cvsn, cidxs}, ts} = cache_lookup(cache?, cache, cache_key, now)
+
+    {vsn, idxs, validator} = tx_idxs(tx, adapter_opts, source, {cvsn, cidxs})
+
+    cache_update(cache?, cache, cache_key, {cvsn, cidxs}, {vsn, idxs}, ts, now)
+
+    try do
+      fun.(tx, idxs)
+    after
+      unless validator.() do
+        :ets.delete(cache, cache_key)
+        :erlang.error(@idx_operation_failed)
+      end
+    end
+  end
+
+  defp tx_idxs(tx, adapter_opts, source, cache_val) do
+    case Map.get(builtin_indexes(), source, nil) do
+      nil ->
+        tx_idxs_get(tx, adapter_opts, source, cache_val)
+
+      idxs ->
+        {-1, idxs, fn -> true end}
+    end
+  end
+
+  defp tx_idxs_get(tx, adapter_opts, source, {vsn, idxs}) do
+    max_version_key =
+      MaxValue.key(adapter_opts, SchemaMigration.source(), @max_version_name)
+
+    max_version_future = :erlfdb.get(tx, max_version_key)
+
+    case idxs do
+      idxs when is_list(idxs) ->
+        tx_idxs_try_cache({vsn, idxs}, max_version_future)
+
+      _idxs ->
+        tx_idxs_get_wait(tx, adapter_opts, source, max_version_future)
+    end
+  end
+
+  defp tx_idxs_try_cache({vsn, idxs}, max_version_future) do
+    # This validator function will return false if the cached vsn is out of date.
+    # We defer its execution via this anonymous function so that the
+    # important 'gets' can be waited on first, and this one can be checked
+    # at the very end. In this way, we are optimistic that the version
+    # will change very infrequently.
+    vsn_validator = fn ->
+      max_version =
+        max_version_future
+        |> :erlfdb.wait()
+        |> MaxValue.decode()
+
+      max_version <= vsn
+    end
+
+    {vsn, idxs, vsn_validator}
+  end
+
+  defp tx_idxs_get_wait(tx, adapter_opts, source, max_version_future) do
+    idxs =
+      tx
+      |> :erlfdb.get_range_startswith(source_range_startswith(adapter_opts, source))
+      |> :erlfdb.wait()
+      |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
+
+    max_version =
+      max_version_future
+      |> :erlfdb.wait()
+      |> MaxValue.decode()
+
+    {max_version, idxs, fn -> true end}
   end
 
   @doc """
@@ -116,5 +212,29 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
   """
   def source_range_startswith(adapter_opts, source) do
     Pack.to_raw_fdb_key(adapter_opts, [source(), source, ""])
+  end
+
+  defp cache_lookup(cache?, cache, cache_key, now) do
+    case {cache?, :ets.lookup(cache, cache_key)} do
+      {true, [item]} ->
+        item
+
+      _ ->
+        {cache_key, {-1, nil}, now}
+    end
+  end
+
+  defp cache_update(cache?, cache, cache_key, {cvsn, cidxs}, {vsn, idxs}, ts, now) do
+    cond do
+      cache? and vsn >= 0 and {vsn, idxs} != {cvsn, cidxs} ->
+        :ets.insert(cache, {cache_key, {vsn, idxs}, System.monotonic_time(:millisecond)})
+
+      cache? and cvsn >= 0 ->
+        diff = now - ts
+        :ets.update_counter(cache, cache_key, {3, diff})
+
+      true ->
+        :ok
+    end
   end
 end

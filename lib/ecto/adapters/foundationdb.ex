@@ -218,7 +218,9 @@ defmodule Ecto.Adapters.FoundationDB do
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
   alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
+  alias Ecto.Adapters.FoundationDB.Layer.Tx
   alias Ecto.Adapters.FoundationDB.Options
+  alias Ecto.Adapters.FoundationDB.Tenant
 
   @spec db(Ecto.Repo.t()) :: Database.t()
   def db(repo) when is_atom(repo) do
@@ -242,6 +244,23 @@ defmodule Ecto.Adapters.FoundationDB do
   def usetenant(struct, tenant) do
     Ecto.put_meta(struct, prefix: tenant)
   end
+
+  @doc """
+  Executes the given function in a transaction on the database.
+
+  If you provide an arity-0 function, your function will be executed in
+  a newly spawned process. This is to ensure that EctoFoundationDB can
+  safely manage the process dictionary.
+
+  Please be aware of the
+  [limitations that FoundationDB](https://apple.github.io/foundationdb/developer-guide.html#transaction-basics)
+  imposes on transactions.
+
+  For example, a transaction must complete
+  [within 5 seconds](https://apple.github.io/foundationdb/developer-guide.html#long-running-transactions).
+  """
+  @spec transactional(Database.t() | Tenant.t() | nil, function()) :: any()
+  def transactional(db_or_tenant, fun), do: Tx.transactional_external(db_or_tenant, fun)
 
   @impl Ecto.Adapter
   defmacro __before_compile__(_env), do: :ok

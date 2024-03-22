@@ -1,9 +1,9 @@
 defmodule Ecto.Integration.IndexerTest do
   use Ecto.Integration.MigrationsCase, async: true
 
+  alias Ecto.Adapters.FoundationDB
   alias Ecto.Adapters.FoundationDB.Layer.Indexer
   alias Ecto.Adapters.FoundationDB.Migrator
-  alias Ecto.Adapters.FoundationDB.Transaction
   alias Ecto.Integration.TestRepo
 
   alias EctoFoundationDB.Schemas.User
@@ -64,7 +64,7 @@ defmodule Ecto.Integration.IndexerTest do
     end
 
     def get_count(tenant) do
-      Transaction.commit(tenant, fn tx ->
+      FoundationDB.transactional(tenant, fn tx ->
         tx
         |> :erlfdb.get(@count_key)
         |> :erlfdb.wait()

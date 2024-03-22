@@ -1,23 +1,23 @@
 Code.require_file("../support/setup.exs", __DIR__)
 
-alias Ecto.Adapters.FoundationDB
 alias Ecto.Adapters.FoundationDB.Tenant
 alias Ecto.Bench.FDBRepo
 alias Ecto.Bench.User
 
-db = FoundationDB.db(FDBRepo)
-tenant = Tenant.open_empty!(db, "Ecto.Adapters.FoundationDB.Bench", [])
+tenant = Tenant.open_empty!(FDBRepo, "Ecto.Adapters.FoundationDB.Bench", [])
 
 inputs = %{
-  "Struct" => struct(User, User.sample_data()),
-  "Changeset" => User.changeset(User.sample_data())
+  "Struct" => fn -> struct(User, User.sample_data()) end,
+  "Changeset" => fn -> User.changeset(User.sample_data()) end
 }
 
 jobs = %{
-  "FDB Repo.insert!/1" => fn entry -> FDBRepo.insert(entry, prefix: tenant) end
+  "FDB Repo.insert!/1" => fn entry ->
+    FDBRepo.insert(entry.(), prefix: tenant)
+  end
 }
 
-path = System.get_env("BENCHMARKS_OUTPUT_PATH") || "bench/results"
+# path = System.get_env("BENCHMARKS_OUTPUT_PATH") || "bench/results"
 
 Benchee.run(
   jobs,

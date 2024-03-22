@@ -4,7 +4,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   """
   @behaviour Ecto.Adapter.Schema
 
-  alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Fields
@@ -40,8 +39,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       end)
 
     num_ins =
-      Tx.transactional(tenant, fn tx ->
-        idxs = IndexInventory.tx_idxs(tx, adapter_opts, source)
+      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs ->
         Tx.insert_all(tx, adapter_meta, source, context, entries, idxs)
       end)
 
@@ -88,8 +86,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     pk = filters[pk_field]
 
     res =
-      Tx.transactional(tenant, fn tx ->
-        idxs = IndexInventory.tx_idxs(tx, adapter_opts, source)
+      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs ->
         Tx.update_pks(tx, adapter_meta, source, context, pk_field, [pk], update_data, idxs)
       end)
 
@@ -117,8 +114,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     pk = filters[pk_field]
 
     res =
-      Tx.transactional(tenant, fn tx ->
-        idxs = IndexInventory.tx_idxs(tx, adapter_opts, source)
+      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs ->
         Tx.delete_pks(tx, adapter_meta, source, [pk], idxs)
       end)
 
@@ -133,24 +129,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   defp assert_tenancy!(
          _adapter_opts,
-         schema_meta = %{source: source, schema: schema, prefix: tenant}
+         schema_meta = %{source: source, schema: schema}
        ) do
     schema_meta =
       %{schema: schema, prefix: tenant, context: context} =
-      case EctoAdapterMigration.prepare_source(source) do
-        {:ok, {source, context}} ->
-          schema_meta
-          |> Map.put(:source, source)
-          |> Map.put(:schema, schema)
-          |> Map.put(:prefix, tenant)
-          |> Map.put(:context, context)
-
-        {:error, :unknown_source} ->
-          context = Schema.get_context!(source, schema)
-
-          schema_meta
-          |> Map.put(:context, context)
-      end
+      Map.put(schema_meta, :context, Schema.get_context!(source, schema))
 
     case Tx.safe?(tenant, Schema.get_option(context, :usetenant)) do
       {false, :unused_tenant} ->

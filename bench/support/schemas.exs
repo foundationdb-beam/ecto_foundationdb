@@ -1,7 +1,7 @@
 defmodule Ecto.Bench.User do
   use Ecto.Schema
 
-  @primary_key {:id, :binary_id, autogenerate: true}
+  @primary_key {:id, :binary_id, autogenerate: false}
   @schema_context usetenant: true
 
   schema "users" do
@@ -21,7 +21,8 @@ defmodule Ecto.Bench.User do
     :time_attr,
     :date_attr,
     :naive_datetime_attr,
-    :uuid
+    :uuid,
+    :id
   ]
 
   def changeset() do
@@ -40,7 +41,8 @@ defmodule Ecto.Bench.User do
       time_attr: Time.utc_now() |> Time.truncate(:second),
       date_attr: Date.utc_today(),
       naive_datetime_attr: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second),
-      uuid: Ecto.UUID.generate()
+      uuid: Ecto.UUID.generate(),
+      id: Ecto.UUID.generate()
     }
   end
 end

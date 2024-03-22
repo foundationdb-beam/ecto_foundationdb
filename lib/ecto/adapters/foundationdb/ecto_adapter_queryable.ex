@@ -4,7 +4,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   """
   @behaviour Ecto.Adapter.Queryable
 
-  alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Fields
@@ -111,20 +110,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   defp assert_tenancy!(
          query = %Ecto.Query{
            prefix: tenant,
-           from: from = %Ecto.Query.FromExpr{source: {source, schema}}
+           from: %Ecto.Query.FromExpr{source: {source, schema}}
          },
          _adapter_opts
        ) do
-    {context, query = %Ecto.Query{prefix: tenant}} =
-      case EctoAdapterMigration.prepare_source(source) do
-        {:ok, {source, context}} ->
-          from = %Ecto.Query.FromExpr{from | source: {source, schema}}
-          {context, %Ecto.Query{query | prefix: tenant, from: from}}
-
-        {:error, :unknown_source} ->
-          context = Schema.get_context!(source, schema)
-          {context, query}
-      end
+    context = Schema.get_context!(source, schema)
 
     case Tx.safe?(tenant, Schema.get_option(context, :usetenant)) do
       {false, :unused_tenant} ->

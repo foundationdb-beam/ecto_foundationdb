@@ -15,7 +15,6 @@ defmodule Ecto.Adapters.FoundationDB.Migrator do
   alias Ecto.Adapters.FoundationDB.Migration.SchemaMigration
   alias Ecto.Adapters.FoundationDB.Options
   alias Ecto.Adapters.FoundationDB.Tenant
-  alias Ecto.Adapters.FoundationDB.Transaction
 
   @spec up_all(Ecto.Repo.t(), Options.t()) :: :ok
   def up_all(repo, options \\ []) do
@@ -105,10 +104,9 @@ defmodule Ecto.Adapters.FoundationDB.Migrator do
 
     opts =
       opts
-      |> Keyword.put(:migration_source, config[:migration_source] || "schema_migrations")
       |> Keyword.put(:log, migrator_log(opts))
 
-    Transaction.commit(tenant, fn ->
+    FoundationDB.transactional(tenant, fn ->
       tx_do_up(repo, config, version, module, opts)
     end)
   end

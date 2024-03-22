@@ -24,7 +24,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
   def safe?(nil, false), do: {false, :tenant_only}
   def safe?(_tenant, false), do: {false, :unused_tenant}
 
-  def commit(db_or_tenant, fun) do
+  def transactional_external(db_or_tenant, fun) do
     nil = Process.get(@db_or_tenant)
     nil = Process.get(@tx)
 
@@ -104,7 +104,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         count + 1
 
       _tx, {key, _}, _result, _acc ->
-        raise Unsupported, "Key exists: #{key}"
+        raise Unsupported, "Key exists: #{inspect(key, binaries: :as_strings)}"
     end
 
     pipeline(tx, entries, get_stage, 0, set_stage)

@@ -11,7 +11,6 @@ defmodule Ecto.Integration.CrudTest do
   alias Ecto.Adapters.FoundationDB
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
-  alias Ecto.Adapters.FoundationDB.Transaction
 
   import Ecto.Query
 
@@ -80,7 +79,7 @@ defmodule Ecto.Integration.CrudTest do
 
       # Crossing a struct into another tenant is not allowed when using a transaction.
       assert_raise(IncorrectTenancy, ~r/original transaction context .* did not match/, fn ->
-        Transaction.commit(
+        FoundationDB.transactional(
           other_tenant,
           fn ->
             TestRepo.insert(user)
@@ -90,7 +89,7 @@ defmodule Ecto.Integration.CrudTest do
 
       # Here are 2 ways to force a struct into a different tenant's transaction
       assert :ok =
-               Transaction.commit(
+               FoundationDB.transactional(
                  other_tenant,
                  fn ->
                    # Specify the equivalent tenant
@@ -202,7 +201,7 @@ defmodule Ecto.Integration.CrudTest do
       # Operations inside a FoundationDB Adapater Transaction have the tenant applied
       # automatically.
       user =
-        Transaction.commit(
+        FoundationDB.transactional(
           tenant,
           fn ->
             {:ok, jesse} =
@@ -225,7 +224,7 @@ defmodule Ecto.Integration.CrudTest do
 
       names = ~w/John James Jesse Sarah Bob Steve/
 
-      Transaction.commit(
+      FoundationDB.transactional(
         tenant,
         fn ->
           for n <- names do

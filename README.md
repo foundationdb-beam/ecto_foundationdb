@@ -135,7 +135,7 @@ Roughly in order of priority.
 - [x] Layer isolation and docs
 - [x] Migration tooling (handling many tenants)
 - [x] Migration locking
-- [ ] Index caching
+- [x] Index caching
 - [ ] Hierarchical multi index
 - [ ] FDB Watches
 - [ ] Benchmarking

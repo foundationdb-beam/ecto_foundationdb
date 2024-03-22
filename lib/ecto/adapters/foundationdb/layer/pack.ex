@@ -5,7 +5,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
   alias Ecto.Adapters.FoundationDB.Options
 
   @adapter_prefix <<0xFE>>
-  @migration_keyspace_prefix <<0xFF>>
   @data_namespace "d"
 
   @doc """
@@ -52,10 +51,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
   """
   def to_fdb_datakey(adapter_opts, source, x) do
     to_raw_fdb_key(adapter_opts, [source, @data_namespace, encode_pk_for_key(x)])
-  end
-
-  def to_fdb_migrationsource(source) do
-    @migration_keyspace_prefix <> source
   end
 
   @doc """
