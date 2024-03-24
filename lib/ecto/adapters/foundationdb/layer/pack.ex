@@ -1,24 +1,40 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
   @moduledoc """
   This internal module creates binaries to be used as FDB keys and values.
-  """
-  alias Ecto.Adapters.FoundationDB.Options
 
-  @adapter_prefix <<0xFE>>
+  Primary writes are stored in
+      {@adapter_prefix, source, @data_namespace, id}
+
+  Default indexes are stored in
+      {@adapter_prefix, source, @index_namespace, index_name, length(index_values), [...index_values...], id}
+
+  Schema migrations are stored as primary writes and default indexes with
+      {@migration_prefix, source, ...}
+  """
+
+  @adapter_prefix <<0xFD>>
+  @migration_prefix <<0xFE>>
   @data_namespace "d"
+  @index_namespace "i"
 
   @doc """
   ## Examples
 
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.add_delimiter("my-key", [])
-    "my-key/"
-
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.add_delimiter("my-key", [key_delimiter: <<0>>])
-    "my-key\\0"
-
+    iex> Ecto.Adapters.FoundationDB.Layer.Pack.adapter_repo_range()
+    {"\\x01\\xFD\\x00\\x00", "\\x01\\xFD\\x00\\xFF"}
   """
-  def add_delimiter(key, adapter_opts) do
-    key <> Options.get(adapter_opts, :key_delimiter)
+  def adapter_repo_range() do
+    :erlfdb_tuple.range({@adapter_prefix})
+  end
+
+  @doc """
+  ## Examples
+
+  iex> Ecto.Adapters.FoundationDB.Layer.Pack.adapter_source_range("my-source")
+  {"\\x01\\xFD\\x00\\x01my-source\\x00\\x00", "\\x01\\xFD\\x00\\x01my-source\\x00\\xFF"}
+  """
+  def adapter_source_range(source) do
+    :erlfdb_tuple.range({prefix(source), source})
   end
 
   @doc """
@@ -39,48 +55,68 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
 
   ## Examples
 
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_fdb_datakey([], "table", "my-pk-id")
-    "\\xFEtable/d/\\x83m\\0\\0\\0\\bmy-pk-id"
-
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_fdb_datakey([], "table", :"my-pk-id")
-    "\\xFEtable/d/\\x83w\\bmy-pk-id"
-
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_fdb_datakey([], "table", {:tuple, :term})
-    "\\xFEtable/d/\\x83h\\x02w\\x05tuplew\\x04term"
-
+    iex> Ecto.Adapters.FoundationDB.Layer.Pack.primary_pack("my-source", "my-id")
+    iex> |> :erlfdb_tuple.unpack()
+    {"\\xFD", "my-source", "d", <<131, 109, 0, 0, 0, 5, 109, 121, 45, 105, 100>>}
   """
-  def to_fdb_datakey(adapter_opts, source, x) do
-    to_raw_fdb_key(adapter_opts, [source, @data_namespace, encode_pk_for_key(x)])
+  def primary_pack(source, id) do
+    namespaced_pack(source, @data_namespace, [encode_pk_for_key(id)])
   end
 
   @doc """
   ## Examples
 
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_fdb_datakey_startswith([], "table")
-    "\\xFEtable/d/"
-
+    iex> Ecto.Adapters.FoundationDB.Layer.Pack.primary_range("my-source")
+    {"\\x01\\xFD\\0\\x01my-source\\0\\x01d\\0\\0", "\\x01\\xFD\\0\\x01my-source\\0\\x01d\\0\\xFF"}
   """
-  def to_fdb_datakey_startswith(adapter_opts, source) do
-    to_raw_fdb_key(adapter_opts, [source, @data_namespace, ""])
+  def primary_range(source) do
+    namespaced_range(source, @data_namespace, [])
   end
 
   @doc """
+  We assume index_values are already encoded as binaries
+
   ## Examples
 
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_raw_fdb_key([], ["table", "namespace", "id"])
-    "\\xFEtable/namespace/id"
-
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.to_raw_fdb_key([key_delimiter: <<0>>], ["table", "namespace", "id"])
-    "\\xFEtable\\0namespace\\0id"
-
+    iex> Ecto.Adapters.FoundationDB.Layer.Pack.default_index_pack("my-source", "my-index", ["my-val"], "my-id")
+    iex> |> :erlfdb_tuple.unpack()
+    {"\\xFD", "my-source", "i", "my-index", 1, "my-val", <<131, 109, 0, 0, 0, 5, 109, 121, 45, 105, 100>>}
   """
-  def to_raw_fdb_key(adapter_opts, list) when is_list(list) do
-    to_raw_fdb_key(adapter_opts, @adapter_prefix, list)
+  def default_index_pack(source, index_name, index_values, id) do
+    vals =
+      ["#{index_name}", length(index_values)] ++
+        index_values ++ if(is_nil(id), do: [], else: [encode_pk_for_key(id)])
+
+    namespaced_pack(source, @index_namespace, vals)
   end
 
-  def to_raw_fdb_key(adapter_opts, prefix, list) when is_list(list) do
-    prefix <> Enum.join(list, Options.get(adapter_opts, :key_delimiter))
+  @doc """
+  We assume index_values are already encoded as binaries
+
+  ## Examples
+
+    iex> Ecto.Adapters.FoundationDB.Layer.Pack.default_index_range("my-source", "my-index", ["my-val"])
+    {"\\x01\\xFD\\0\\x01my-source\\0\\x01i\\0\\x01my-index\\0\\x15\\x01\\x01my-val\\0\\0", "\\x01\\xFD\\0\\x01my-source\\0\\x01i\\0\\x01my-index\\0\\x15\\x01\\x01my-val\\0\\xFF"}
+  """
+  def default_index_range(source, index_name, index_values) do
+    vals = ["#{index_name}", length(index_values)] ++ index_values
+    namespaced_range(source, @index_namespace, vals)
   end
+
+  def namespaced_pack(source, namespace, vals) when is_list(vals) do
+    ([prefix(source), source, namespace] ++ vals)
+    |> :erlang.list_to_tuple()
+    |> :erlfdb_tuple.pack()
+  end
+
+  def namespaced_range(source, namespace, vals) do
+    ([prefix(source), source, namespace] ++ vals)
+    |> :erlang.list_to_tuple()
+    |> :erlfdb_tuple.range()
+  end
+
+  defp prefix("\xFF" <> _), do: @migration_prefix
+  defp prefix(_), do: @adapter_prefix
 
   @doc """
   ## Examples

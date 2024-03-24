@@ -6,7 +6,6 @@ defmodule Ecto.Adapters.FoundationDB.Options do
   @type option() ::
           {:open_db, function()}
           | {:storage_id, String.t()}
-          | {:key_delimiter, String.t()}
           | {:indexkey_encoder, function()}
           | {:open_tenant_callback, function()}
           | {:migrator, module()}
@@ -24,8 +23,6 @@ defmodule Ecto.Adapters.FoundationDB.Options do
 
   def get(options, :storage_id),
     do: Keyword.get(options, :storage_id, "Ecto.Adapters.FoundationDB")
-
-  def get(options, :key_delimiter), do: Keyword.get(options, :key_delimiter, "/")
 
   def get(options, :indexkey_encoder),
     do: Keyword.get(options, :indexkey_encoder, &Default.indexkey_encoder/2)

@@ -80,12 +80,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     end
   end
 
-  def insert_all(tx, adapter_meta = %{opts: adapter_opts}, source, context, entries, idxs) do
+  def insert_all(tx, adapter_meta, source, context, entries, idxs) do
     entries =
       entries
       |> Enum.map(fn {{pk_field, pk}, data_object} ->
-        key =
-          Pack.to_fdb_datakey(adapter_opts, source, pk)
+        key = Pack.primary_pack(source, pk)
 
         data_object = Fields.to_front(data_object, pk_field)
         {key, data_object}
@@ -112,7 +111,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
 
   def update_pks(
         tx,
-        adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: _adapter_opts},
         source,
         context,
         pk_field,
@@ -120,7 +119,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         set_data,
         idxs
       ) do
-    keys = for pk <- pks, do: Pack.to_fdb_datakey(adapter_opts, source, pk)
+    keys = for pk <- pks, do: Pack.primary_pack(source, pk)
 
     write_primary = Schema.get_option(context, :write_primary)
 
@@ -169,8 +168,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     Indexer.update(tx, idxs, adapter_meta, {fdb_key, data_object})
   end
 
-  def delete_pks(tx, adapter_meta = %{opts: adapter_opts}, source, pks, idxs) do
-    keys = for pk <- pks, do: Pack.to_fdb_datakey(adapter_opts, source, pk)
+  def delete_pks(tx, adapter_meta = %{opts: _adapter_opts}, source, pks, idxs) do
+    keys = for pk <- pks, do: Pack.primary_pack(source, pk)
 
     get_stage = &:erlfdb.get/2
 
@@ -203,29 +202,18 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     Indexer.clear(tx, idxs, adapter_meta, kv)
   end
 
-  def clear_all(tx, %{opts: adapter_opts}, source) do
+  def clear_all(tx, %{opts: _adapter_opts}, source) do
     # this key prefix will clear datakeys and indexkeys, but not user data or migration data
-    key_startswith = Pack.to_raw_fdb_key(adapter_opts, [source, ""])
+    {key_start, key_end} = Pack.adapter_source_range(source)
 
     # this would be a lot faster if we didn't have to count the keys
-    num = count_range_startswith(tx, key_startswith)
-    :erlfdb.clear_range_startswith(tx, key_startswith)
+    num = count_range(tx, key_start, key_end)
+    :erlfdb.clear_range(tx, key_start, key_end)
     num
   end
 
-  defp count_range_startswith(tx, startswith) do
-    start_key = startswith
-    end_key = :erlfdb_key.strinc(startswith)
-
-    :erlfdb.fold_range(
-      tx,
-      start_key,
-      end_key,
-      fn _kv, acc ->
-        acc + 1
-      end,
-      0
-    )
+  defp count_range(tx, key_start, key_end) do
+    :erlfdb.fold_range(tx, key_start, key_end, fn _kv, acc -> acc + 1 end, 0)
   end
 
   @doc false

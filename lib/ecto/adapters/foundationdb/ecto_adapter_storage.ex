@@ -9,8 +9,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
 
   @all_data_start_key ""
   @all_data_end_key <<0xFF>>
-  @repo_data_start_key ""
-  @repo_data_end_key <<0xFEFF>>
 
   def list_tenants(dbtx, options) do
     start_key = get_tenant_name("", options)
@@ -69,7 +67,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
     tenant = open_tenant(dbtx, tenant_id, options)
 
     :erlfdb.transactional(tenant, fn tx ->
-      :erlfdb.clear_range(tx, @repo_data_start_key, @repo_data_end_key)
+      {start_key, end_key} = Pack.adapter_repo_range()
+      :erlfdb.clear_range(tx, start_key, end_key)
     end)
 
     :ok
@@ -152,7 +151,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
 
   defp get_tenant_name(tenant_id, options) do
     storage_id = Options.get(options, :storage_id)
-    Pack.to_raw_fdb_key(options, <<>>, ["#{storage_id}", tenant_id])
+
+    "#{storage_id}/" <> tenant_id
   end
 
   defp get_tenant(dbtx, tenant_id, options) do

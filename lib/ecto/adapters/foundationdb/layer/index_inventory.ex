@@ -39,7 +39,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
         index_fields,
         options
       ) do
-    {inventory_key, idx} = new_index(adapter_meta, source, index_name, index_fields, options)
+    {inventory_key, idx} = new_index(source, index_name, index_fields, options)
 
     Tx.transactional(db_or_tenant, fn tx ->
       # Write a key that indicates the index exists. All other operations will
@@ -58,12 +58,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
 
   ## Examples
 
-    iex> Ecto.Adapters.FoundationDB.Layer.IndexInventory.new_index(%{opts: []}, "users", "users_name_index", [:name], [])
-    {"\\xFE\\xFFindexes/users/users_name_index", [id: "users_name_index", indexer: Ecto.Adapters.FoundationDB.Layer.Indexer.Default, source: "users", fields: [:name], options: []]}
+    iex> {key, obj} = Ecto.Adapters.FoundationDB.Layer.IndexInventory.new_index("users", "users_name_index", [:name], [])
+    iex> {:erlfdb_tuple.unpack(key), obj}
+    {{"\\xFE", "\\xFFindexes", "users", "users_name_index"}, [id: "users_name_index", indexer: Ecto.Adapters.FoundationDB.Layer.Indexer.Default, source: "users", fields: [:name], options: []]}
 
   """
-  def new_index(%{opts: adapter_opts}, source, index_name, index_fields, options) do
-    inventory_key = Pack.to_raw_fdb_key(adapter_opts, [source(), source, index_name])
+  def new_index(source, index_name, index_fields, options) do
+    inventory_key = Pack.namespaced_pack(source(), source, ["#{index_name}"])
 
     idx = [
       id: index_name,
@@ -158,7 +159,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
 
   defp tx_idxs_get(tx, adapter_opts, source, {vsn, idxs}) do
     max_version_key =
-      MaxValue.key(adapter_opts, SchemaMigration.source(), @max_version_name)
+      MaxValue.key(SchemaMigration.source(), @max_version_name)
 
     max_version_future = :erlfdb.get(tx, max_version_key)
 
@@ -189,10 +190,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
     {vsn, idxs, vsn_validator}
   end
 
-  defp tx_idxs_get_wait(tx, adapter_opts, source, max_version_future) do
+  defp tx_idxs_get_wait(tx, _adapter_opts, source, max_version_future) do
+    {start_key, end_key} = Pack.namespaced_range(source(), source, [])
+
     idxs =
       tx
-      |> :erlfdb.get_range_startswith(source_range_startswith(adapter_opts, source))
+      |> :erlfdb.get_range(start_key, end_key)
       |> :erlfdb.wait()
       |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
 
@@ -202,16 +205,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
       |> MaxValue.decode()
 
     {max_version, idxs, fn -> true end}
-  end
-
-  @doc """
-  ## Examples
-
-  iex> Ecto.Adapters.FoundationDB.Layer.IndexInventory.source_range_startswith([], "users")
-  "\\xFE\\xFFindexes/users/"
-  """
-  def source_range_startswith(adapter_opts, source) do
-    Pack.to_raw_fdb_key(adapter_opts, [source(), source, ""])
   end
 
   defp cache_lookup(cache?, cache, cache_key, now) do

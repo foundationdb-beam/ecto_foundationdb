@@ -13,8 +13,6 @@ defmodule Ecto.Adapters.FoundationDB do
 
   ## Advanced Options
 
-    * `:key_delimiter` - Keys in the database are constructed using this
-      delimiter in between segments. Defaults to "/".
     * `:storage_id` - All tenants created by this adapter are prefixed with
       this string. This allows multiple configurations to operate on the
       same FoundationDB cluster indepedently. Defaults to

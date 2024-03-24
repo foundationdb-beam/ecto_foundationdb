@@ -145,40 +145,45 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   end
 
   defp make_datakey_range(
-         %{opts: adapter_opts},
+         %{opts: _adapter_opts},
          plan = %QueryPlan.None{layer_data: layer_data},
          options
        ) do
-    start_key = Pack.to_fdb_datakey_startswith(adapter_opts, plan.source)
-    end_key = :erlfdb_key.strinc(start_key)
+    {start_key, end_key} = Pack.primary_range(plan.source)
     start_key = options[:start_key] || start_key
     %QueryPlan.None{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
   defp make_datakey_range(
-         %{opts: adapter_opts},
+         %{opts: _adapter_opts},
          plan = %QueryPlan.Equal{param: param, layer_data: layer_data},
          _options
        ) do
-    fdb_key = Pack.to_fdb_datakey(adapter_opts, plan.source, param)
+    fdb_key = Pack.primary_pack(plan.source, param)
     %QueryPlan.Equal{plan | layer_data: Map.put(layer_data, :range, {fdb_key, nil})}
   end
 
   defp make_datakey_range(
-         %{opts: adapter_opts},
+         %{opts: _adapter_opts},
          plan = %QueryPlan.Between{
            param_left: param_left,
            param_right: param_right,
            layer_data: layer_data
          },
          options
-       ) do
-    start_key = Pack.to_fdb_datakey(adapter_opts, plan.source, param_left)
-    end_key = Pack.to_fdb_datakey(adapter_opts, plan.source, param_right)
-    start_key = if plan.inclusive_left?, do: start_key, else: :erlfdb_key.strinc(start_key)
-    end_key = if plan.inclusive_right?, do: :erlfdb_key.strinc(end_key), else: end_key
+       )
+       when is_binary(param_left) and is_binary(param_right) do
+    param_left = if plan.inclusive_left?, do: param_left, else: :erlfdb_key.strinc(param_left)
+    param_right = if plan.inclusive_right?, do: :erlfdb_key.strinc(param_right), else: param_right
+
+    start_key = Pack.primary_pack(plan.source, param_left)
+    end_key = Pack.primary_pack(plan.source, param_right)
     start_key = options[:start_key] || start_key
     %QueryPlan.Between{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
+  end
+
+  defp make_datakey_range(_adapter_meta, _plan, _options) do
+    raise Unsupported, "Between query must have binary parameters"
   end
 
   defp continuation(kvs, options) do
