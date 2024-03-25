@@ -42,7 +42,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer do
   def unpack(idx, plan, fdb_kv),
     do: apply(idx[:indexer], :unpack, [idx, plan, fdb_kv], &_unpack/3)
 
-  def _unpack(_idx, _plan, {fdb_key, fdb_value}), do: {fdb_key, Pack.from_fdb_value(fdb_value)}
+  # Default behavior for standard key-value response
+  defp _unpack(_idx, _plan, {fdb_key, fdb_value}), do: {fdb_key, Pack.from_fdb_value(fdb_value)}
+
+  # Default behavior for get_mapped_range response
+  defp _unpack(idx, plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, [fdb_kv]}),
+    do: _unpack(idx, plan, fdb_kv)
 
   defp _update(tx, idx, kv) do
     idx[:indexer].clear(tx, idx, kv)

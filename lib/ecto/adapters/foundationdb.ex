@@ -21,10 +21,6 @@ defmodule Ecto.Adapters.FoundationDB do
        FoundationDB cluster. Defaults to `:erlfdb.open(cluster_file)`. When
        using `Ecto.Adapters.FoundationDB.Sandbox`, you should consider setting
        this option to `Sandbox.open_db/0`.
-    * `:indexkey_encoder` - 2-arity function that accepts a term as input
-       and provides a binary as output. Defaults to `Default.indexkey_encoder/2`.
-       This option provides some configurability to `ecto_foundationdb`'s
-       management of Default indexes, and should rarely be used.
 
   ## Limitations and caveats
 

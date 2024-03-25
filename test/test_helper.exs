@@ -5,10 +5,7 @@ alias Ecto.Integration.TestRepo
 Application.put_env(:ecto_foundationdb, TestRepo,
   open_db: &Ecto.Adapters.FoundationDB.Sandbox.open_db/0,
   storage_id: Ecto.Adapters.FoundationDB.Sandbox,
-  migrator: EctoFoundationDB.Integration.TestMigrator,
-
-  # Increases number of index collisions
-  indexkey_encoder: &Ecto.Adapters.FoundationDB.Layer.Indexer.Default.indexkey_encoder(&1, 1, &2)
+  migrator: EctoFoundationDB.Integration.TestMigrator
 )
 
 defmodule TenantsForCase do

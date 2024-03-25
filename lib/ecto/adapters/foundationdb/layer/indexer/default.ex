@@ -8,35 +8,17 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   @behaviour Indexer
 
   @doc """
-  In the index key, values must be encoded into a fixed-length binary.
-
-  Fixed-length is required so that get_range can be used reliably in the presence of
-  arbitrary data.
-
-  However, this means our indexes will have conflicts that must be resolved with
-  filtering.
 
   ## Examples
 
     iex> Ecto.Adapters.FoundationDB.Layer.Indexer.Default.indexkey_encoder("an-example-key")
-    <<37, 99, 56, 165>>
+    "\\x83m\\0\\0\\0\\x0Ean-example-key"
 
     iex> Ecto.Adapters.FoundationDB.Layer.Indexer.Default.indexkey_encoder(~N[2024-03-01 12:34:56], indexer: :timeseries)
     "20240301T123456.000000"
 
   """
   def indexkey_encoder(x, index_options \\ []) do
-    indexkey_encoder(x, 4, index_options)
-  end
-
-  @doc """
-  ## Examples
-
-    iex> Ecto.Adapters.FoundationDB.Layer.Indexer.Default.indexkey_encoder("an-example-key", 1, [])
-    <<102>>
-
-  """
-  def indexkey_encoder(x, num_bytes, index_options) do
     case Keyword.get(index_options, :indexer, nil) do
       :timeseries ->
         x
@@ -44,11 +26,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
         |> NaiveDateTime.to_iso8601(:basic)
 
       nil ->
-        <<n::unsigned-big-integer-size(num_bytes * 8)>> =
-          <<-1::unsigned-big-integer-size(num_bytes * 8)>>
-
-        i = :erlang.phash2(x, n)
-        <<i::unsigned-big-integer-size(num_bytes * 8)>>
+        :erlang.term_to_binary(x)
     end
   end
 
@@ -156,35 +134,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
         FoundationDB Adapter does not support 'between' queries on indexes that are not timeseries.
         """
     end
-  end
-
-  @impl true
-  def unpack(idx, plan, fdb_kv = {_k, _v}) do
-    kv = Indexer._unpack(idx, plan, fdb_kv)
-    if include?(kv, plan), do: kv, else: nil
-  end
-
-  def unpack(idx, plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, [fdb_kv]}) do
-    unpack(idx, plan, fdb_kv)
-  end
-
-  defp include?(_kv, %QueryPlan.None{}) do
-    true
-  end
-
-  defp include?({_key, data_object}, plan = %QueryPlan.Equal{layer_data: %{idx: _idx}}) do
-    # Filter by the where_values because our indexes can have key conflicts
-    plan.param == data_object[plan.field]
-  end
-
-  defp include?(_kv, %QueryPlan.Between{layer_data: %{idx: _idx}}) do
-    # Between on non-timeseries index is not supported, and between on
-    # time series index will not have conflicts, so no filtering needed
-    true
-  end
-
-  defp include?(_kv, _plan) do
-    true
   end
 
   # Note: pk is always first. See insert and update paths
