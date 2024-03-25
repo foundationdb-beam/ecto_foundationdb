@@ -4,51 +4,49 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer do
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.QueryPlan
 
-  @callback create(:erlfdb.transaction(), Index.t(), map()) :: :ok
-  @callback set(:erlfdb.transaction(), Index.t(), map(), tuple()) :: :ok
-  @callback clear(:erlfdb.transaction(), Index.t(), map(), tuple()) :: :ok
-  @callback update(:erlfdb.transaction(), Index.t(), map(), tuple()) :: :ok
-  @callback range(Index.t(), map(), QueryPlan.t(), Keyword.t()) :: tuple()
+  @callback create(:erlfdb.transaction(), Index.t()) :: :ok
+  @callback set(:erlfdb.transaction(), Index.t(), tuple()) :: :ok
+  @callback clear(:erlfdb.transaction(), Index.t(), tuple()) :: :ok
+  @callback update(:erlfdb.transaction(), Index.t(), tuple()) :: :ok
+  @callback range(Index.t(), QueryPlan.t(), Keyword.t()) :: tuple()
   @callback unpack(Index.t(), QueryPlan.t(), tuple()) :: tuple()
-  @optional_callbacks update: 4, unpack: 3
+  @optional_callbacks update: 3, unpack: 3
 
-  def create(tx, idx, adapter_meta),
-    do: idx[:indexer].create(tx, idx, adapter_meta)
+  def create(tx, idx),
+    do: idx[:indexer].create(tx, idx)
 
-  def set(tx, idxs, adapter_meta, kv) do
+  def set(tx, idxs, kv) do
     for idx <- idxs,
-        do: idx[:indexer].set(tx, idx, adapter_meta, kv)
+        do: idx[:indexer].set(tx, idx, kv)
   end
 
-  def clear(tx, idxs, adapter_meta, kv) do
+  def clear(tx, idxs, kv) do
     for idx <- idxs,
-        do: idx[:indexer].clear(tx, idx, adapter_meta, kv)
+        do: idx[:indexer].clear(tx, idx, kv)
   end
 
-  def update(tx, idxs, adapter_meta, kv) do
+  def update(tx, idxs, kv) do
     for idx <- idxs do
       apply(
         idx[:indexer],
         :update,
-        [tx, idx, adapter_meta, kv],
-        &_update/4
+        [tx, idx, kv],
+        &_update/3
       )
     end
   end
 
-  def range(idx, adapter_meta, plan, options),
-    do: idx[:indexer].range(idx, adapter_meta, plan, options)
+  def range(idx, plan, options),
+    do: idx[:indexer].range(idx, plan, options)
 
   def unpack(idx, plan, fdb_kv),
     do: apply(idx[:indexer], :unpack, [idx, plan, fdb_kv], &_unpack/3)
 
-  def _unpack(_idx, _plan, {_fdb_key, fdb_value}), do: Pack.from_fdb_value(fdb_value)
+  def _unpack(_idx, _plan, {fdb_key, fdb_value}), do: {fdb_key, Pack.from_fdb_value(fdb_value)}
 
-  def pack(kv), do: Pack.to_fdb_value(kv)
-
-  defp _update(tx, idx, adapter_meta, kv) do
-    idx[:indexer].clear(tx, idx, adapter_meta, kv)
-    idx[:indexer].set(tx, idx, adapter_meta, kv)
+  defp _update(tx, idx, kv) do
+    idx[:indexer].clear(tx, idx, kv)
+    idx[:indexer].set(tx, idx, kv)
   end
 
   defp apply(module, fun, args, default_fun) do

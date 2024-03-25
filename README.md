@@ -135,11 +135,12 @@ Roughly in order of priority.
 - [x] Layer isolation and docs
 - [x] Migration tooling (handling many tenants)
 - [x] Migration locking
+- [x] Pluggable Indexers
+- [x] Benchmarking
 - [x] Index caching
+- [x] Mapped Range Indexes
 - [ ] Hierarchical multi index
 - [ ] FDB Watches
-- [ ] Benchmarking
 - [ ] Ecto Transactions
 - [ ] Logging for all Adapter behaviours
 - [ ] Composite primary key
-- [ ] Pluggable Layers

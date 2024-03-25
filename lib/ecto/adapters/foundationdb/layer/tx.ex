@@ -80,12 +80,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     end
   end
 
-  def insert_all(tx, adapter_meta = %{opts: adapter_opts}, source, context, entries, idxs) do
+  def insert_all(tx, source, context, entries, idxs) do
     entries =
       entries
       |> Enum.map(fn {{pk_field, pk}, data_object} ->
-        key =
-          Pack.to_fdb_datakey(adapter_opts, source, pk)
+        key = Pack.primary_pack(source, pk)
 
         data_object = Fields.to_front(data_object, pk_field)
         {key, data_object}
@@ -100,7 +99,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         fdb_value = Pack.to_fdb_value(data_object)
 
         if write_primary, do: do_set(tx, fdb_key, fdb_value)
-        Indexer.set(tx, idxs, adapter_meta, {fdb_key, data_object})
+        Indexer.set(tx, idxs, {fdb_key, data_object})
         count + 1
 
       _tx, {key, _}, _result, _acc ->
@@ -110,17 +109,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     pipeline(tx, entries, get_stage, 0, set_stage)
   end
 
-  def update_pks(
-        tx,
-        adapter_meta = %{opts: adapter_opts},
-        source,
-        context,
-        pk_field,
-        pks,
-        set_data,
-        idxs
-      ) do
-    keys = for pk <- pks, do: Pack.to_fdb_datakey(adapter_opts, source, pk)
+  def update_pks(tx, source, context, pk_field, pks, set_data, idxs) do
+    keys = for pk <- pks, do: Pack.primary_pack(source, pk)
 
     write_primary = Schema.get_option(context, :write_primary)
 
@@ -135,7 +125,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
 
         update_data_object(
           tx,
-          adapter_meta,
           pk_field,
           {fdb_key, data_object},
           [set: set_data],
@@ -151,7 +140,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
 
   def update_data_object(
         tx,
-        adapter_meta,
         pk_field,
         {fdb_key, data_object},
         updates,
@@ -166,11 +154,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
       |> Fields.to_front(pk_field)
 
     if write_primary, do: do_set(tx, fdb_key, Pack.to_fdb_value(data_object))
-    Indexer.update(tx, idxs, adapter_meta, {fdb_key, data_object})
+    Indexer.update(tx, idxs, {fdb_key, data_object})
   end
 
-  def delete_pks(tx, adapter_meta = %{opts: adapter_opts}, source, pks, idxs) do
-    keys = for pk <- pks, do: Pack.to_fdb_datakey(adapter_opts, source, pk)
+  def delete_pks(tx, source, pks, idxs) do
+    keys = for pk <- pks, do: Pack.primary_pack(source, pk)
 
     get_stage = &:erlfdb.get/2
 
@@ -179,12 +167,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         acc
 
       tx, fdb_key, fdb_value, acc ->
-        delete_data_object(
-          tx,
-          adapter_meta,
-          {fdb_key, Pack.from_fdb_value(fdb_value)},
-          idxs
-        )
+        delete_data_object(tx, {fdb_key, Pack.from_fdb_value(fdb_value)}, idxs)
 
         acc + 1
     end
@@ -192,40 +175,24 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     pipeline(tx, keys, get_stage, 0, clear_stage)
   end
 
-  def delete_data_object(
-        tx,
-        adapter_meta,
-        kv = {fdb_key, _},
-        idxs
-      ) do
+  def delete_data_object(tx, kv = {fdb_key, _}, idxs) do
     :erlfdb.clear(tx, fdb_key)
 
-    Indexer.clear(tx, idxs, adapter_meta, kv)
+    Indexer.clear(tx, idxs, kv)
   end
 
-  def clear_all(tx, %{opts: adapter_opts}, source) do
+  def clear_all(tx, %{opts: _adapter_opts}, source) do
     # this key prefix will clear datakeys and indexkeys, but not user data or migration data
-    key_startswith = Pack.to_raw_fdb_key(adapter_opts, [source, ""])
+    {key_start, key_end} = Pack.adapter_source_range(source)
 
     # this would be a lot faster if we didn't have to count the keys
-    num = count_range_startswith(tx, key_startswith)
-    :erlfdb.clear_range_startswith(tx, key_startswith)
+    num = count_range(tx, key_start, key_end)
+    :erlfdb.clear_range(tx, key_start, key_end)
     num
   end
 
-  defp count_range_startswith(tx, startswith) do
-    start_key = startswith
-    end_key = :erlfdb_key.strinc(startswith)
-
-    :erlfdb.fold_range(
-      tx,
-      start_key,
-      end_key,
-      fn _kv, acc ->
-        acc + 1
-      end,
-      0
-    )
+  defp count_range(tx, key_start, key_end) do
+    :erlfdb.fold_range(tx, key_start, key_end, fn _kv, acc -> acc + 1 end, 0)
   end
 
   @doc false

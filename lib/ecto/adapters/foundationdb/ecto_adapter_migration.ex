@@ -18,7 +18,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
   @impl true
 
   def execute_ddl(
-        adapter_meta = %{opts: _adapter_opts},
+        _adapter_meta,
         {:create,
          %Index{
            prefix: tenant,
@@ -32,7 +32,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
     :ok =
       IndexInventory.create_index(
         tenant,
-        adapter_meta,
         source,
         index_name,
         index_fields,

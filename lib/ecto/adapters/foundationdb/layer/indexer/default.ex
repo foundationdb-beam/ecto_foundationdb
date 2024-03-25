@@ -3,19 +3,15 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Indexer
   alias Ecto.Adapters.FoundationDB.Layer.Pack
-  alias Ecto.Adapters.FoundationDB.Options
   alias Ecto.Adapters.FoundationDB.QueryPlan
 
   @behaviour Indexer
-
-  @index_namespace "i"
 
   @doc """
   In the index key, values must be encoded into a fixed-length binary.
 
   Fixed-length is required so that get_range can be used reliably in the presence of
-  arbitrary data. In a naive approach, the key_delimiter can conflict with
-  the bytes included in the index value.
+  arbitrary data.
 
   However, this means our indexes will have conflicts that must be resolved with
   filtering.
@@ -57,18 +53,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   end
 
   @impl true
-  def create(tx, idx, %{opts: adapter_opts}) do
+  def create(tx, idx) do
     index_name = idx[:id]
     source = idx[:source]
     index_fields = idx[:fields]
     options = idx[:options]
 
-    key_startswith = Pack.to_fdb_datakey_startswith(adapter_opts, source)
-    key_start = key_startswith
-    key_end = :erlfdb_key.strinc(key_startswith)
-
-    # Prevent updates on the keys so that we write the correct index values
-    :erlfdb.add_write_conflict_range(tx, key_start, key_end)
+    {key_start, key_end} = Pack.primary_range(source)
 
     # Write the actual index for any existing data in this tenant
     #
@@ -80,7 +71,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
     |> Enum.each(fn {fdb_key, fdb_value} ->
       {index_key, index_object} =
         get_index_entry(
-          adapter_opts,
           {fdb_key, Pack.from_fdb_value(fdb_value)},
           index_fields,
           options,
@@ -95,14 +85,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   end
 
   @impl true
-  def set(tx, idx, adapter_meta, kv) do
+  def set(tx, idx, kv) do
     index_name = idx[:id]
     index_fields = idx[:fields]
     index_options = idx[:options]
 
     {index_key, index_object} =
       get_index_entry(
-        Map.get(adapter_meta, :opts, %{}),
         kv,
         index_fields,
         index_options,
@@ -115,14 +104,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   end
 
   @impl true
-  def clear(tx, idx, adapter_meta, kv) do
+  def clear(tx, idx, kv) do
     index_name = idx[:id]
     index_fields = idx[:fields]
     index_options = idx[:options]
 
     {index_key, _index_object} =
       get_index_entry(
-        Map.get(adapter_meta, :opts, %{}),
         kv,
         index_fields,
         index_options,
@@ -135,37 +123,29 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   end
 
   @impl true
-  def range(_idx, _adapter_meta, %QueryPlan.None{}, _options) do
+  def range(_idx, %QueryPlan.None{}, _options) do
     raise Unsupported, """
     FoundationDB Adapter does not support empty where clause on an index. In fact, this code path should not be reachable.
     """
   end
 
-  def range(idx, %{opts: adapter_opts}, plan = %QueryPlan.Equal{}, options) do
-    start_key =
-      to_fdb_indexkey(
-        adapter_opts,
-        idx[:options],
-        plan.source,
-        idx[:id],
-        [plan.param],
-        nil
-      )
+  def range(idx, plan = %QueryPlan.Equal{}, options) do
+    index_values = for val <- [plan.param], do: indexkey_encoder(val, idx[:options])
+    {start_key, end_key} = Pack.default_index_range(plan.source, idx[:id], index_values)
 
-    end_key = :erlfdb_key.strinc(start_key)
     start_key = options[:start_key] || start_key
 
-    {start_key, end_key}
+    {start_key, end_key, Pack.primary_mapper()}
   end
 
-  def range(idx, %{opts: adapter_opts}, plan = %QueryPlan.Between{}, options) do
+  def range(idx, plan = %QueryPlan.Between{}, options) do
     index_options = idx[:options]
 
     case Keyword.get(index_options, :indexer, nil) do
       :timeseries ->
         [start_key, end_key] =
           for x <- [plan.param_left, plan.param_right],
-              do: to_fdb_indexkey(adapter_opts, idx[:options], plan.source, idx[:id], [x], nil)
+              do: Pack.default_index_pack(plan.source, idx[:id], ["#{x}"], nil)
 
         start_key = options[:start_key] || start_key
 
@@ -179,9 +159,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   end
 
   @impl true
-  def unpack(idx, plan, fdb_kv) do
+  def unpack(idx, plan, fdb_kv = {_k, _v}) do
     kv = Indexer._unpack(idx, plan, fdb_kv)
     if include?(kv, plan), do: kv, else: nil
+  end
+
+  def unpack(idx, plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, [fdb_kv]}) do
+    unpack(idx, plan, fdb_kv)
   end
 
   defp include?(_kv, %QueryPlan.None{}) do
@@ -205,7 +189,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
 
   # Note: pk is always first. See insert and update paths
   defp get_index_entry(
-         adapter_opts,
          {fdb_key, data_object = [{pk_field, pk_value} | _]},
          index_fields,
          index_options,
@@ -214,36 +197,19 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
        ) do
     index_fields = index_fields -- [pk_field]
 
-    index_entries =
-      for idx_field <- index_fields, do: {idx_field, Keyword.get(data_object, idx_field)}
+    index_values =
+      for idx_field <- index_fields do
+        indexkey_encoder(Keyword.get(data_object, idx_field), index_options)
+      end
 
-    {_, path_vals} = Enum.unzip(index_entries)
+    index_key = Pack.default_index_pack(source, index_name, index_values, pk_value)
 
-    index_key =
-      to_fdb_indexkey(
-        adapter_opts,
-        index_options,
-        source,
-        "#{index_name}",
-        path_vals,
-        pk_value
-      )
+    case Keyword.get(index_options, :indexer, nil) do
+      :timeseries ->
+        {index_key, Pack.to_fdb_value(data_object)}
 
-    {index_key, Indexer.pack({fdb_key, data_object})}
-  end
-
-  #  iex> Ecto.Adapters.FoundationDB.Layer.Indexer.Default.to_fdb_indexkey([], [],
-  #  ...> "table", "my_index", ["abc", "123"], "my-pk-id")
-  #  "\\xFEtable/i/my_index/M\\xDA\\xD8\\xFB/V\\xE3\\xD1\\x01/\\x83m\\0\\0\\0\\bmy-pk-id"
-  defp to_fdb_indexkey(adapter_opts, index_options, source, index_name, vals, id)
-       when is_list(vals) do
-    fun = Options.get(adapter_opts, :indexkey_encoder)
-    vals = for v <- vals, do: fun.(v, index_options)
-
-    Pack.to_raw_fdb_key(
-      adapter_opts,
-      [source, @index_namespace, index_name | vals] ++
-        if(is_nil(id), do: [], else: [Pack.encode_pk_for_key(id)])
-    )
+      _ ->
+        {index_key, fdb_key}
+    end
   end
 end

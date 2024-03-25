@@ -58,9 +58,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
   end
   ```
 
-  When this index is created via the migration, the Ecto FoundationDB Adapter duplicates the data of your
-  User object so that it now exists under 2 keys: the primary key, and the index key. The index key is
-  structured so that a query on that value will retrieve the expected objects.
+  When this index is created via the migration, the Ecto FoundationDB Adapter writes a set of
+  keys and values to facilitate lookups based on the indexed field.
 
     iex> query = from(u in User, where: u.department == ^"Engineering")
     iex> Repo.all(query, prefix: tenant)
@@ -100,9 +99,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
 
   Take note of the option `indexer: :timeseries` on the index creation in the Migration module.
 
-  Also notice that in the Schema, we choose to use `write_primary: false`. This skips the Primary Write, so that
-  our data is not duplicated. However, this means that the data can **only** be managed by providing a
-  timespan query.
+  Also notice that in the Schema, we choose to use `write_primary: false`. This skips the Primary Write.
+  However, this means that the data can **only** be managed by providing a timespan query. It also means
+  that indexes cannot be created in the future, because indexes are always initialized from the Primary Write.
 
     iex> query = from(e in Event,
     ...>   where: e.timestamp >= ^~N[2024-01-01 00:00:00] and e.timestamp < ^~N[2024-01-01 12:00:00]
@@ -111,7 +110,17 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
 
   ## User-defined Indexes
 
-  TBD
+  The Ecto FoundationDB Adapter also supports user-defined indexes. These indexes are created and managed
+  by your application code. This is useful when you have a specific query pattern that is not covered by
+  the Default index or Time Series index. Internally, MaxValue is an example of a user-defined index that
+  the adapter uses to manage the schema_migrations and index caching.
+
+  To create a user-defined index, you must define a module that implements the Indexer behaviour.
+
+  Please see Ecto.Adapters.FoundationDB.Indexer for more information, and Ecto.Adapters.FoundationDB.Indexer.MaxValue
+  for an example implementation.
+
+  ```elixir
 
   ## Transactions
 
