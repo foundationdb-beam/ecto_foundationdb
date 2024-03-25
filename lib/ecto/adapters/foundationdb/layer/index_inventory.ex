@@ -33,7 +33,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
 
   def create_index(
         db_or_tenant,
-        adapter_meta,
         source,
         index_name,
         index_fields,
@@ -46,7 +45,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
       # use this info to maintain the index
       :erlfdb.set(tx, inventory_key, Pack.to_fdb_value(idx))
 
-      Indexer.create(tx, idx, adapter_meta)
+      Indexer.create(tx, idx)
     end)
 
     :ok
@@ -158,10 +157,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
   end
 
   defp tx_idxs_get(tx, adapter_opts, source, {vsn, idxs}) do
-    max_version_key =
-      MaxValue.key(SchemaMigration.source(), @max_version_name)
-
-    max_version_future = :erlfdb.get(tx, max_version_key)
+    max_version_future = MaxValue.get(tx, SchemaMigration.source(), @max_version_name)
 
     case idxs do
       idxs when is_list(idxs) ->

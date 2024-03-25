@@ -53,7 +53,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   end
 
   @impl true
-  def create(tx, idx, %{opts: adapter_opts}) do
+  def create(tx, idx) do
     index_name = idx[:id]
     source = idx[:source]
     index_fields = idx[:fields]
@@ -71,7 +71,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
     |> Enum.each(fn {fdb_key, fdb_value} ->
       {index_key, index_object} =
         get_index_entry(
-          adapter_opts,
           {fdb_key, Pack.from_fdb_value(fdb_value)},
           index_fields,
           options,
@@ -86,14 +85,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   end
 
   @impl true
-  def set(tx, idx, adapter_meta, kv) do
+  def set(tx, idx, kv) do
     index_name = idx[:id]
     index_fields = idx[:fields]
     index_options = idx[:options]
 
     {index_key, index_object} =
       get_index_entry(
-        Map.get(adapter_meta, :opts, %{}),
         kv,
         index_fields,
         index_options,
@@ -106,14 +104,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   end
 
   @impl true
-  def clear(tx, idx, adapter_meta, kv) do
+  def clear(tx, idx, kv) do
     index_name = idx[:id]
     index_fields = idx[:fields]
     index_options = idx[:options]
 
     {index_key, _index_object} =
       get_index_entry(
-        Map.get(adapter_meta, :opts, %{}),
         kv,
         index_fields,
         index_options,
@@ -126,22 +123,22 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   end
 
   @impl true
-  def range(_idx, _adapter_meta, %QueryPlan.None{}, _options) do
+  def range(_idx, %QueryPlan.None{}, _options) do
     raise Unsupported, """
     FoundationDB Adapter does not support empty where clause on an index. In fact, this code path should not be reachable.
     """
   end
 
-  def range(idx, _adapter_meta, plan = %QueryPlan.Equal{}, options) do
+  def range(idx, plan = %QueryPlan.Equal{}, options) do
     index_values = for val <- [plan.param], do: indexkey_encoder(val, idx[:options])
     {start_key, end_key} = Pack.default_index_range(plan.source, idx[:id], index_values)
 
     start_key = options[:start_key] || start_key
 
-    {start_key, end_key}
+    {start_key, end_key, Pack.primary_mapper()}
   end
 
-  def range(idx, _adapter_meta, plan = %QueryPlan.Between{}, options) do
+  def range(idx, plan = %QueryPlan.Between{}, options) do
     index_options = idx[:options]
 
     case Keyword.get(index_options, :indexer, nil) do
@@ -162,9 +159,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   end
 
   @impl true
-  def unpack(idx, plan, fdb_kv) do
+  def unpack(idx, plan, fdb_kv = {_k, _v}) do
     kv = Indexer._unpack(idx, plan, fdb_kv)
     if include?(kv, plan), do: kv, else: nil
+  end
+
+  def unpack(idx, plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, [fdb_kv]}) do
+    unpack(idx, plan, fdb_kv)
   end
 
   defp include?(_kv, %QueryPlan.None{}) do
@@ -188,7 +189,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
 
   # Note: pk is always first. See insert and update paths
   defp get_index_entry(
-         _adapter_opts,
          {fdb_key, data_object = [{pk_field, pk_value} | _]},
          index_fields,
          index_options,
@@ -204,6 +204,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
 
     index_key = Pack.default_index_pack(source, index_name, index_values, pk_value)
 
-    {index_key, Indexer.pack({fdb_key, data_object})}
+    case Keyword.get(index_options, :indexer, nil) do
+      :timeseries ->
+        {index_key, Pack.to_fdb_value(data_object)}
+
+      _ ->
+        {index_key, fdb_key}
+    end
   end
 end

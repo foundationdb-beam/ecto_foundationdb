@@ -73,6 +73,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
     namespaced_range(source, @data_namespace, [])
   end
 
+  def primary_mapper() do
+    # prefix   source    namespace id        get_range
+    {"{V[0]}", "{V[1]}", "{V[2]}", "{V[3]}", "{...}"}
+  end
+
   @doc """
   We assume index_values are already encoded as binaries
 

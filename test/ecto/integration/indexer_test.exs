@@ -3,6 +3,7 @@ defmodule Ecto.Integration.IndexerTest do
 
   alias Ecto.Adapters.FoundationDB
   alias Ecto.Adapters.FoundationDB.Layer.Indexer
+  alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Migrator
   alias Ecto.Integration.TestRepo
 
@@ -42,23 +43,25 @@ defmodule Ecto.Integration.IndexerTest do
 
     # omitted for brevity. A complete Indexer must implement all functions
     @impl true
-    def create(_tx, _idx, _adapter_meta), do: nil
+    def create(_tx, _idx), do: nil
 
     @impl true
-    def clear(_tx, _idx, _adapter_meta, _kv), do: nil
+    def clear(_tx, _idx, _kv), do: nil
 
     @impl true
-    def set(tx, _idx, _adapter_meta, kv = {_, data}) do
+    def set(tx, _idx, {_, data}) do
       name = Keyword.get(data, :name)
 
       if not is_nil(name) and String.starts_with?(name, "J") do
         :erlfdb.add(tx, @count_key, 1)
-        :erlfdb.set(tx, @index_key <> data[:id], Indexer.pack(kv))
+
+        # For simplicity, we duplicate the data into the index key
+        :erlfdb.set(tx, @index_key <> data[:id], Pack.to_fdb_value(data))
       end
     end
 
     @impl true
-    def range(_idx, _adapter_meta, plan, _options) do
+    def range(_idx, plan, _options) do
       %QueryPlan.Equal{field: :name, param: "J"} = plan
       {@index_key, :erlfdb_key.strinc(@index_key)}
     end

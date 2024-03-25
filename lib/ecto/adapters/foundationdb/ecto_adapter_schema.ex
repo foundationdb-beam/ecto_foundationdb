@@ -40,7 +40,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     num_ins =
       IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs ->
-        Tx.insert_all(tx, adapter_meta, source, context, entries, idxs)
+        Tx.insert_all(tx, source, context, entries, idxs)
       end)
 
     {num_ins, nil}
@@ -87,7 +87,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     res =
       IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs ->
-        Tx.update_pks(tx, adapter_meta, source, context, pk_field, [pk], update_data, idxs)
+        Tx.update_pks(tx, source, context, pk_field, [pk], update_data, idxs)
       end)
 
     case res do
@@ -115,7 +115,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     res =
       IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs ->
-        Tx.delete_pks(tx, adapter_meta, source, [pk], idxs)
+        Tx.delete_pks(tx, source, [pk], idxs)
       end)
 
     case res do

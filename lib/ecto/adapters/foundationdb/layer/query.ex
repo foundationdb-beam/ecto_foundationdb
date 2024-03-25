@@ -22,7 +22,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   def all(db_or_tenant, adapter_meta, plan, options \\ []) do
     {plan, kvs} =
       IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx, idxs ->
-        plan = make_range(idxs, adapter_meta, plan, options)
+        plan = make_range(idxs, plan, options)
         {plan, tx_get_range(tx, plan, options)}
       end)
 
@@ -41,8 +41,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   """
   def update(db_or_tenant, adapter_meta, plan) do
     IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx, idxs ->
-      plan = make_range(idxs, adapter_meta, plan, [])
-      tx_update_range(tx, adapter_meta, plan, idxs)
+      plan = make_range(idxs, plan, [])
+      tx_update_range(tx, plan, idxs)
     end)
   end
 
@@ -56,18 +56,18 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
 
   def delete(db_or_tenant, adapter_meta, plan) do
     IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx, idxs ->
-      plan = make_range(idxs, adapter_meta, plan, [])
-      tx_delete_range(tx, adapter_meta, plan, idxs)
+      plan = make_range(idxs, plan, [])
+      tx_delete_range(tx, plan, idxs)
     end)
   end
 
-  defp make_range(idxs, adapter_meta, plan = %{layer_data: layer_data}, options) do
+  defp make_range(idxs, plan = %{layer_data: layer_data}, options) do
     if plan.is_pk? do
-      make_datakey_range(adapter_meta, plan, options)
+      make_datakey_range(plan, options)
     else
       case IndexInventory.select_index(idxs, [plan.field]) do
         {:ok, idx} ->
-          range = Indexer.range(idx, adapter_meta, plan, options)
+          range = Indexer.range(idx, plan, options)
 
           layer_data =
             layer_data
@@ -100,7 +100,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     :erlfdb.wait(:erlfdb.get_range(tx, start_key, end_key, get_options))
   end
 
-  defp tx_update_range(tx, adapter_meta, plan = %{updates: updates}, idxs) do
+  defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key, mapper}}}, options) do
+    get_options = Keyword.take(options, [:limit])
+    :erlfdb.wait(:erlfdb.get_mapped_range(tx, start_key, end_key, mapper, get_options))
+  end
+
+  defp tx_update_range(tx, plan = %{updates: updates}, idxs) do
     pk_field = Fields.get_pk_field!(plan.schema)
     write_primary = Schema.get_option(plan.context, :write_primary)
 
@@ -110,7 +115,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     |> Stream.map(
       &Tx.update_data_object(
         tx,
-        adapter_meta,
         pk_field,
         &1,
         updates,
@@ -122,11 +126,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     |> length()
   end
 
-  defp tx_delete_range(tx, adapter_meta, plan, idxs) do
+  defp tx_delete_range(tx, plan, idxs) do
     tx
     |> tx_get_range(plan, [])
     |> unpack_and_filter(plan)
-    |> Stream.map(&Tx.delete_data_object(tx, adapter_meta, &1, idxs))
+    |> Stream.map(&Tx.delete_data_object(tx, &1, idxs))
     |> Enum.to_list()
     |> length()
   end
@@ -145,7 +149,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   end
 
   defp make_datakey_range(
-         %{opts: _adapter_opts},
          plan = %QueryPlan.None{layer_data: layer_data},
          options
        ) do
@@ -155,7 +158,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   end
 
   defp make_datakey_range(
-         %{opts: _adapter_opts},
          plan = %QueryPlan.Equal{param: param, layer_data: layer_data},
          _options
        ) do
@@ -164,7 +166,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   end
 
   defp make_datakey_range(
-         %{opts: _adapter_opts},
          plan = %QueryPlan.Between{
            param_left: param_left,
            param_right: param_right,
@@ -182,7 +183,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     %QueryPlan.Between{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
-  defp make_datakey_range(_adapter_meta, _plan, _options) do
+  defp make_datakey_range(_plan, _options) do
     raise Unsupported, "Between query must have binary parameters"
   end
 
