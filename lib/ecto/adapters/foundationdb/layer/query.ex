@@ -49,7 +49,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   @doc """
   Executes a query for deleting data.
   """
-  def delete(db_or_tenant, adapter_meta, plan = %QueryPlan.None{}) do
+  def delete(db_or_tenant, adapter_meta, plan = %QueryPlan{constraints: [%QueryPlan.None{}]}) do
     # Special case, very efficient
     Tx.transactional(db_or_tenant, &Tx.clear_all(&1, adapter_meta, plan.source))
   end
@@ -61,27 +61,38 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     end)
   end
 
-  defp make_range(idxs, plan = %{layer_data: layer_data}, options) do
-    if plan.is_pk? do
-      make_datakey_range(plan, options)
-    else
-      case IndexInventory.select_index(idxs, [plan.field]) do
-        {:ok, idx} ->
-          range = Indexer.range(idx, plan, options)
+  defp make_range(
+         _idxs,
+         plan = %QueryPlan{constraints: [%{is_pk?: true}]},
+         options
+       ) do
+    make_datakey_range(plan, options)
+  end
 
-          layer_data =
-            layer_data
-            |> Map.put(:idx, idx)
-            |> Map.put(:range, range)
+  defp make_range(
+         idxs,
+         plan = %QueryPlan{constraints: constraints, layer_data: layer_data},
+         options
+       ) do
+    case IndexInventory.select_index(idxs, constraints) do
+      nil ->
+        raise Unsupported,
+              """
+              FoundationDB Adapter supports either a where clause that constraints on the primary key
+              or a where clause that constrains on a set of fields that is associated with an index.
+              """
 
-          %{plan | layer_data: layer_data}
+      idx ->
+        constraints = IndexInventory.arrange_constraints(constraints, idx)
+        plan = %QueryPlan{plan | constraints: constraints}
+        range = Indexer.range(idx, plan, options)
 
-        {:error, _} ->
-          raise Unsupported,
-                """
-                FoundationDB Adapter does not support a where clause constraining on a field other than the primary key or an index.
-                """
-      end
+        layer_data =
+          layer_data
+          |> Map.put(:idx, idx)
+          |> Map.put(:range, range)
+
+        %QueryPlan{plan | layer_data: layer_data}
     end
   end
 
@@ -105,7 +116,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     :erlfdb.wait(:erlfdb.get_mapped_range(tx, start_key, end_key, mapper, get_options))
   end
 
-  defp tx_update_range(tx, plan = %{updates: updates}, idxs) do
+  defp tx_update_range(tx, plan = %QueryPlan{updates: updates}, idxs) do
     pk_field = Fields.get_pk_field!(plan.schema)
     write_primary = Schema.get_option(plan.context, :write_primary)
 
@@ -115,6 +126,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     |> Stream.map(
       &Tx.update_data_object(
         tx,
+        plan.schema,
         pk_field,
         &1,
         updates,
@@ -130,7 +142,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     tx
     |> tx_get_range(plan, [])
     |> unpack_and_filter(plan)
-    |> Stream.map(&Tx.delete_data_object(tx, &1, idxs))
+    |> Stream.map(&Tx.delete_data_object(tx, plan.schema, &1, idxs))
     |> Enum.to_list()
     |> length()
   end
@@ -149,38 +161,45 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   end
 
   defp make_datakey_range(
-         plan = %QueryPlan.None{layer_data: layer_data},
+         plan = %QueryPlan{constraints: [%QueryPlan.None{}], layer_data: layer_data},
          options
        ) do
     {start_key, end_key} = Pack.primary_range(plan.source)
     start_key = options[:start_key] || start_key
-    %QueryPlan.None{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
+    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
   defp make_datakey_range(
-         plan = %QueryPlan.Equal{param: param, layer_data: layer_data},
+         plan = %QueryPlan{constraints: [%QueryPlan.Equal{param: param}], layer_data: layer_data},
          _options
        ) do
     fdb_key = Pack.primary_pack(plan.source, param)
-    %QueryPlan.Equal{plan | layer_data: Map.put(layer_data, :range, {fdb_key, nil})}
+    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {fdb_key, nil})}
   end
 
   defp make_datakey_range(
-         plan = %QueryPlan.Between{
-           param_left: param_left,
-           param_right: param_right,
+         plan = %QueryPlan{
+           constraints: [
+             between =
+               %QueryPlan.Between{
+                 param_left: param_left,
+                 param_right: param_right
+               }
+           ],
            layer_data: layer_data
          },
          options
        )
        when is_binary(param_left) and is_binary(param_right) do
-    param_left = if plan.inclusive_left?, do: param_left, else: :erlfdb_key.strinc(param_left)
-    param_right = if plan.inclusive_right?, do: :erlfdb_key.strinc(param_right), else: param_right
+    param_left = if between.inclusive_left?, do: param_left, else: :erlfdb_key.strinc(param_left)
+
+    param_right =
+      if between.inclusive_right?, do: :erlfdb_key.strinc(param_right), else: param_right
 
     start_key = Pack.primary_pack(plan.source, param_left)
     end_key = Pack.primary_pack(plan.source, param_right)
     start_key = options[:start_key] || start_key
-    %QueryPlan.Between{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
+    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
   defp make_datakey_range(_plan, _options) do

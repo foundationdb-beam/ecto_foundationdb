@@ -7,6 +7,19 @@ defmodule Ecto.Adapters.FoundationDB.Schema do
     context
   end
 
+  def get_source(schema) do
+    schema.__schema__(:source)
+  end
+
+  def field_types(schema) do
+    field_types(schema, schema.__schema__(:fields))
+  end
+
+  def field_types(schema, fields) do
+    for field <- fields,
+        do: {field, schema.__schema__(:type, field)}
+  end
+
   def get_option(context, :usetenant), do: get_option(context, :usetenant, false)
   def get_option(context, :write_primary), do: get_option(context, :write_primary, true)
 

@@ -1,10 +1,11 @@
 defmodule Ecto.Bench.CreateUser do
+  alias Ecto.Bench.User
   use Ecto.Adapters.FoundationDB.Migration
 
   def change do
     [
-      create(index(:users, [:name])),
-      create(index(:users, [:uuid]))
+      create(index(User, [:name])),
+      create(index(User, [:uuid]))
     ]
   end
 end

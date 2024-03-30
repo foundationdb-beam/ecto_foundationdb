@@ -40,7 +40,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
     [%User{id: "some-uuid", name: "John", department: "Engineering"}]
 
   Note: The Primary Write can be skipped by providing the `write_primary: false` option on the `@schema_context`.
-  See Time Series Index for more.
+  See below for more.
 
   ## Index Write and Read
 
@@ -53,7 +53,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
   defmodule MyApp.Migration do
     use Ecto.Adapters.FoundationDB.Migration
     def change() do
-      [create(index(:users, [:department]))]
+      [create(index(User, [:department]))]
     end
   end
   ```
@@ -64,49 +64,69 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
     iex> query = from(u in User, where: u.department == ^"Engineering")
     iex> Repo.all(query, prefix: tenant)
 
-  The index value can be any Elixir term.
+  The index value can be any Elixir term. All types support Equal queries. However, certain Ecto Schema types
+  support Between queries. For example, you can define an index on a naive_datetime_usec field to construct
+  an effective time series index.
 
-  Suggestion: Before you create an index, we suggest you test your workload without the index first. You may
-  be surprised by the efficiency in which `Repo.all(User, prefix: tenant)` can return data. Once you have
-  the data, you can do sophisticated filtering within Elixir itself.
+  iex> query = from(e in Event,
+  ...>   where: e.timestamp >= ^~N[2024-01-01 00:00:00] and e.timestamp < ^~N[2024-01-01 12:00:00]
+  ...> )
+  iex> Repo.all(query, prefix: tenant)
 
-  ## Time Series Index
+  ### Multiple index fields
 
-  This is a special kind of Default index that requires the indexed value to be `:naive_datetime_usec`. This
-  index allows a query to retrieve objects that have a datetime that exists in between two given endpoints
-  of a timespan.
-
-  ```elixir
-  defmodule EctoFoundationDB.Schemas.Event do
-    use Ecto.Schema
-    @schema_context usetenant: true, write_primary: false
-    schema "events" do
-      field(:timestamp, :naive_datetime_usec)
-      field(:data, :string)
-      timestamps()
-    end
-  end
-  ```
+  **Order matters!**: When you create an index using multiple fields, the FDB key that stores the index will be extended with
+  all the values in the order of your defined index fields. For example, you may want to have a time series index, but also
+  have the ability to easily drop all events on a certain date. You can achieve this by creating an index on `[:date, :user_id, :time]`.
+  The order of the fields determines the Between queries you can perform.
 
   ```elixir
-  defmodule EctoFoundationDB.Migration do
+  defmodule MyApp.Migration do
     use Ecto.Adapters.FoundationDB.Migration
     def change() do
-      [create(index(:events, [:timestamp], options: [indexer: :timeseries]))]
+      [create(index(Event, [:date, :user_id, :time]))]
     end
   end
+  ````
+
+  With this index, the following queries will be efficient:
+
+  ```elixir
+  iex> query = from(e in Event,
+  ...>   where: e.date == ^~D[2024-01-01] and
+                e.user_id == ^"user-id" and
+                e.time >= ^~T[12:00:00] and e.time < ^~T[13:00:00]
+  ...> )
+
+  iex> query = from(e in Event,
+  ...>   where: e.date >= ^~D[2024-01-01] and e.date < ^~D[2024-01-02]
+  ...> )
   ```
 
-  Take note of the option `indexer: :timeseries` on the index creation in the Migration module.
+  However, this query will raise a Runtime exception:
 
-  Also notice that in the Schema, we choose to use `write_primary: false`. This skips the Primary Write.
-  However, this means that the data can **only** be managed by providing a timespan query. It also means
-  that indexes cannot be created in the future, because indexes are always initialized from the Primary Write.
+  ```elixir
+  iex> query = from(e in Event,
+  ...>   where: e.date >= ^~D[2024-01-01] and e.date < ^~D[2024-01-02]
+                e.user_id == ^"user-id"
+  ...> )
+  ```
 
-    iex> query = from(e in Event,
-    ...>   where: e.timestamp >= ^~N[2024-01-01 00:00:00] and e.timestamp < ^~N[2024-01-01 12:00:00]
-    ...> )
-    iex> Repo.all(query, prefix: tenant)
+  There can be 0 or 1 Between clauses, and if one exists, it must correspond to the final constraint in the where clause when
+  compared against the order of the index fields.
+
+  ### Advanced Options: `write_primary: false`, `mapped?: false`, and `from: <index_name>`
+
+  If you choose to use `write_primary: false` on your schema, this skips the Primary Write. The consequence of this are as follows:
+
+   1. You'll want to make sure your index is created with an option `mapped?: false`. This ensures that the
+      struct data is written to the index keyspace.
+   2. Your index queries will now have performance characteristics similar to a primary key query. That is, you'll
+      be able to retrieve the struct data with a single `erlfdb:get_range/3`.
+   3. The data can **only** be managed by providing a query on the index. You will not be able to access the data
+      via the primary key.
+   4. If a later migration creates a new index, it must provide the `from: <index_name>` option to specify the
+      index to read the data from.
 
   ## User-defined Indexes
 

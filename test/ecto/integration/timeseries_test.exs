@@ -1,7 +1,12 @@
 defmodule Ecto.Integration.TimeSeriesTest do
-  use Ecto.Integration.Case, async: true
+  use Ecto.Integration.Case, async: false
+
+  alias EctoFoundationDB.Integration.TestMigrator2
 
   alias Ecto.Adapters.FoundationDB
+  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
+  alias Ecto.Adapters.FoundationDB.Migrator
+
   alias Ecto.Integration.TestRepo
 
   alias EctoFoundationDB.Schemas.Event
@@ -10,17 +15,63 @@ defmodule Ecto.Integration.TimeSeriesTest do
 
   @moduletag :integration
   describe "timeseries index" do
+    test "multiple fields in query", context do
+      tenant = context[:tenant]
+
+      query =
+        from(
+          e in Event,
+          where:
+            e.date >= ^~D[1970-01-01] and e.date < ^~D[2100-01-01] and
+              e.user_id == ^"foo" and
+              (e.time >= ^~T[00:00:00] and e.time <= ^~T[00:00:00])
+        )
+
+      {:ok, _} =
+        %Event{date: ~D[2070-01-01], user_id: "bar", time: ~T[00:00:00.000000]}
+        |> FoundationDB.usetenant(tenant)
+        |> TestRepo.insert()
+
+      {:ok, %Event{id: event_id}} =
+        %Event{date: ~D[2070-01-01], user_id: "foo", time: ~T[00:00:00.000000]}
+        |> FoundationDB.usetenant(tenant)
+        |> TestRepo.insert()
+
+      assert_raise Unsupported, ~r/Default Index query mismatch/, fn ->
+        TestRepo.all(query, prefix: tenant)
+      end
+
+      query =
+        from(
+          e in Event,
+          where:
+            e.date == ^~D[2070-01-01] and
+              e.user_id == ^"foo" and
+              (e.time >= ^~T[00:00:00] and e.time <= ^~T[00:00:00])
+        )
+
+      assert [%Event{id: ^event_id}] = TestRepo.all(query, prefix: tenant)
+
+      query =
+        from(
+          e in Event,
+          where: e.date >= ^~D[1970-01-01] and e.date <= ^~D[2100-01-01]
+        )
+
+      assert 2 == length(TestRepo.all(query, prefix: tenant))
+    end
+
     test "timeseries consistency", context do
       tenant = context[:tenant]
 
       # Insert
       {:ok, event = %Event{id: event_id}} =
-        %Event{timestamp: ~N[2070-01-01 00:00:00.000000]}
+        %Event{date: ~D[2070-01-01], user_id: "foo", time: ~T[00:00:00.000000]}
         |> FoundationDB.usetenant(tenant)
         |> TestRepo.insert()
 
       {:ok, _} =
-        %Event{timestamp: ~N[2777-01-01 00:00:00.000000]}
+        %Event{date: ~D[2777-01-01], user_id: "foo", time: ~T[00:00:00.000000]}
         |> FoundationDB.usetenant(tenant)
         |> TestRepo.insert()
 
@@ -30,9 +81,7 @@ defmodule Ecto.Integration.TimeSeriesTest do
       # All
       query =
         from(e in Event,
-          where:
-            e.timestamp > ^~N[1970-01-01 00:00:00] and
-              e.timestamp < ^~N[2100-01-01 00:00:00]
+          where: e.date > ^~D[1970-01-01] and e.date < ^~D[2100-01-01]
         )
 
       assert [%Event{}] = TestRepo.all(query, prefix: tenant)
@@ -46,6 +95,26 @@ defmodule Ecto.Integration.TimeSeriesTest do
       assert {1, _} = TestRepo.delete_all(query, prefix: tenant)
 
       assert [] == TestRepo.all(query, prefix: tenant)
+    end
+
+    test "index from index", context do
+      tenant = context[:tenant]
+
+      {:ok, %Event{id: event_id}} =
+        %Event{date: ~D[2070-01-01], user_id: "foo", time: ~T[00:00:00.000000]}
+        |> FoundationDB.usetenant(tenant)
+        |> TestRepo.insert()
+
+      query = from(e in Event, where: e.user_id == ^"foo")
+
+      assert_raise Unsupported,
+                   ~r/You must provide equals clauses for the first set of fields/,
+                   fn ->
+                     TestRepo.all(query, prefix: tenant)
+                   end
+
+      :ok = Migrator.up_all(TestRepo, migrator: TestMigrator2)
+      assert [%Event{id: ^event_id}] = TestRepo.all(query, prefix: tenant)
     end
   end
 end

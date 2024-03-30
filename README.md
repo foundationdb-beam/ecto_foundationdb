@@ -139,7 +139,7 @@ Roughly in order of priority.
 - [x] Benchmarking
 - [x] Index caching
 - [x] Mapped Range Indexes
-- [ ] Hierarchical multi index
+- [x] Hierarchical multi index
 - [ ] FDB Watches
 - [ ] Ecto Transactions
 - [ ] Logging for all Adapter behaviours

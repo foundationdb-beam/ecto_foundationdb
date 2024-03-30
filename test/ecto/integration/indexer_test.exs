@@ -30,7 +30,7 @@ defmodule Ecto.Integration.IndexerTest do
     use Ecto.Adapters.FoundationDB.Migration
 
     def change() do
-      [create(index(:users, [:name], options: [indexer: NameStartsWithJ]))]
+      [create(index(User, [:name], options: [indexer: NameStartsWithJ]))]
     end
   end
 
@@ -43,13 +43,13 @@ defmodule Ecto.Integration.IndexerTest do
 
     # omitted for brevity. A complete Indexer must implement all functions
     @impl true
-    def create(_tx, _idx), do: nil
+    def create(_tx, _idx, _schema), do: nil
 
     @impl true
-    def clear(_tx, _idx, _kv), do: nil
+    def clear(_tx, _idx, _schema, _kv), do: nil
 
     @impl true
-    def set(tx, _idx, {_, data}) do
+    def set(tx, _idx, _schema, {_, data}) do
       name = Keyword.get(data, :name)
 
       if not is_nil(name) and String.starts_with?(name, "J") do
@@ -62,7 +62,7 @@ defmodule Ecto.Integration.IndexerTest do
 
     @impl true
     def range(_idx, plan, _options) do
-      %QueryPlan.Equal{field: :name, param: "J"} = plan
+      %QueryPlan{constraints: [%QueryPlan.Equal{field: :name, param: "J"}]} = plan
       {@index_key, :erlfdb_key.strinc(@index_key)}
     end
 

@@ -13,7 +13,9 @@ defmodule EctoFoundationDB.Schemas.Event do
   @primary_key {:id, :binary_id, autogenerate: true}
 
   schema "events" do
-    field(:timestamp, :naive_datetime_usec)
+    field(:date, :date)
+    field(:user_id, :string)
+    field(:time, :time_usec)
     field(:data, :string)
 
     timestamps()
@@ -21,7 +23,7 @@ defmodule EctoFoundationDB.Schemas.Event do
 
   def changeset(struct, attrs) do
     struct
-    |> cast(attrs, [:timestamp])
-    |> validate_required([:timestamp])
+    |> cast(attrs, [:date, :user_id, :time])
+    |> validate_required([:date, :user_id, :time])
   end
 end

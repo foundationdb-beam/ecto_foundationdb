@@ -35,7 +35,7 @@ defmodule Ecto.Integration.MigrationsTest do
         |> TestRepo.all(prefix: tenant)
       end
 
-      assert_raise(Unsupported, ~r/field other than the primary key or an index/, query_fun)
+      assert_raise(Unsupported, ~r/FoundationDB Adapter supports either/, query_fun)
 
       # Ecto.Integration.MigrationsCase skips the migrations on purpose, so now we'll apply them manually.
       :ok = Migrator.up_all(TestRepo)

@@ -6,7 +6,6 @@ defmodule Ecto.Integration.IndexTest do
   alias EctoFoundationDB.Schemas.User
 
   alias Ecto.Adapters.FoundationDB
-  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
 
   import Ecto.Query
 
@@ -96,14 +95,13 @@ defmodule Ecto.Integration.IndexTest do
         |> FoundationDB.usetenant(tenant)
         |> TestRepo.insert()
 
-      assert_raise(Unsupported, ~r/does not support 'between' queries/, fn ->
-        from(u in User,
-          where:
-            u.name > ^"J" and
-              u.name < ^"K"
-        )
-        |> TestRepo.all(prefix: tenant)
-      end)
+      assert [] ==
+               from(u in User,
+                 where:
+                   u.name > "Ja" and
+                     u.name < "Jo"
+               )
+               |> TestRepo.all(prefix: tenant)
     end
   end
 end

@@ -4,6 +4,7 @@ defmodule Ecto.Adapters.FoundationDB.Migration do
   """
 
   alias Ecto.Adapters.FoundationDB.Migration.Index
+  alias Ecto.Adapters.FoundationDB.Schema
 
   @type adapter_meta :: Ecto.Adapter.adapter_meta()
 
@@ -43,7 +44,7 @@ defmodule Ecto.Adapters.FoundationDB.Migration do
 
     To define an index in a migration, see `Ecto.Migration.index/3`.
     """
-    defstruct table: nil,
+    defstruct schema: nil,
               prefix: nil,
               name: nil,
               columns: [],
@@ -58,7 +59,7 @@ defmodule Ecto.Adapters.FoundationDB.Migration do
               options: []
 
     @type t :: %__MODULE__{
-            table: String.t(),
+            schema: Ecto.Schema.t() | nil,
             prefix: atom,
             name: atom,
             columns: [atom | String.t()],
@@ -95,26 +96,22 @@ defmodule Ecto.Adapters.FoundationDB.Migration do
     {:create, index}
   end
 
-  def index(table, columns, opts \\ [])
+  def index(schema, columns, opts \\ [])
 
-  def index(table, columns, opts) when is_atom(table) do
-    index(Atom.to_string(table), columns, opts)
+  def index(schema, column, opts) when is_atom(schema) and is_atom(column) do
+    index(schema, [column], opts)
   end
 
-  def index(table, column, opts) when is_binary(table) and is_atom(column) do
-    index(table, [column], opts)
-  end
-
-  def index(table, columns, opts) when is_binary(table) and is_list(columns) and is_list(opts) do
+  def index(schema, columns, opts) when is_atom(schema) and is_list(columns) and is_list(opts) do
     validate_index_opts!(opts)
-    index = struct(%Index{table: table, columns: columns}, opts)
+    index = struct(%Index{schema: schema, columns: columns}, opts)
     %{index | name: index.name || default_index_name(index)}
   end
 
   defp validate_index_opts!(opts), do: Keyword.validate!(opts, [:options])
 
   defp default_index_name(index) do
-    [index.table, index.columns, "index"]
+    [Schema.get_source(index.schema), index.columns, "index"]
     |> List.flatten()
     |> Stream.map(&to_string(&1))
     |> Stream.map(&String.replace(&1, ~r"[^\w_]", "_"))

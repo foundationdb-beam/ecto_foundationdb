@@ -18,7 +18,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.MaxValue do
   def decode(:not_found), do: -1
   def decode(x), do: :binary.decode_unsigned(x, :little)
 
-  def create(tx, idx) do
+  def create(tx, idx, _schema) do
     index_name = idx[:id]
     source = idx[:source]
     [max_field] = idx[:fields]
@@ -35,7 +35,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.MaxValue do
     end)
   end
 
-  def set(tx, idx, {_, data}) do
+  def set(tx, idx, _schema, {_, data}) do
     index_name = idx[:id]
     source = idx[:source]
     [max_field] = idx[:fields]
@@ -43,7 +43,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.MaxValue do
     :erlfdb.max(tx, key(source, index_name), val)
   end
 
-  def clear(tx, idx, {_, data}) do
+  def clear(tx, idx, schema, {_, data}) do
     index_name = idx[:id]
     source = idx[:source]
     [max_field] = idx[:fields]
@@ -59,7 +59,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.MaxValue do
     if val == db_val do
       # expensive
       :erlfdb.clear(tx, key)
-      create(tx, idx)
+      create(tx, idx, schema)
     else
       # someone else is the max, so we are free to do nothing
       :ok

@@ -9,6 +9,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
   alias Ecto.Adapters.FoundationDB.Migration.Index
+  alias Ecto.Adapters.FoundationDB.Schema
 
   @impl true
   def supports_ddl_transaction?() do
@@ -22,21 +23,15 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterMigration do
         {:create,
          %Index{
            prefix: tenant,
-           table: source,
+           schema: schema,
            name: index_name,
            columns: index_fields,
            options: options
          }},
         _options
       ) do
-    :ok =
-      IndexInventory.create_index(
-        tenant,
-        source,
-        index_name,
-        index_fields,
-        options
-      )
+    source = Schema.get_source(schema)
+    :ok = IndexInventory.create_index(tenant, schema, source, index_name, index_fields, options)
 
     {:ok, []}
   end

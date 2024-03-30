@@ -166,8 +166,8 @@ defmodule Ecto.Adapters.FoundationDB do
     use Ecto.Adapters.FoundationDB.Migration
     def change() do
       [
-        create(index(:users, [:name]),
-        create(index(:posts, [:user_id]))
+        create(index(User, [:name]),
+        create(index(Post, [:user_id]))
       ]
     end
   end

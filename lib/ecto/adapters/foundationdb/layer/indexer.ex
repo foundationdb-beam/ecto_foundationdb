@@ -4,34 +4,34 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer do
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.QueryPlan
 
-  @callback create(:erlfdb.transaction(), Index.t()) :: :ok
-  @callback set(:erlfdb.transaction(), Index.t(), tuple()) :: :ok
-  @callback clear(:erlfdb.transaction(), Index.t(), tuple()) :: :ok
-  @callback update(:erlfdb.transaction(), Index.t(), tuple()) :: :ok
+  @callback create(:erlfdb.transaction(), Index.t(), Ecto.Schema.t()) :: :ok
+  @callback set(:erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
+  @callback clear(:erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
+  @callback update(:erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
   @callback range(Index.t(), QueryPlan.t(), Keyword.t()) :: tuple()
   @callback unpack(Index.t(), QueryPlan.t(), tuple()) :: tuple()
-  @optional_callbacks update: 3, unpack: 3
+  @optional_callbacks update: 4, unpack: 3
 
-  def create(tx, idx),
-    do: idx[:indexer].create(tx, idx)
+  def create(tx, idx, schema),
+    do: idx[:indexer].create(tx, idx, schema)
 
-  def set(tx, idxs, kv) do
+  def set(tx, idxs, schema, kv) do
     for idx <- idxs,
-        do: idx[:indexer].set(tx, idx, kv)
+        do: idx[:indexer].set(tx, idx, schema, kv)
   end
 
-  def clear(tx, idxs, kv) do
+  def clear(tx, idxs, schema, kv) do
     for idx <- idxs,
-        do: idx[:indexer].clear(tx, idx, kv)
+        do: idx[:indexer].clear(tx, idx, schema, kv)
   end
 
-  def update(tx, idxs, kv) do
+  def update(tx, idxs, schema, kv) do
     for idx <- idxs do
       apply(
         idx[:indexer],
         :update,
-        [tx, idx, kv],
-        &_update/3
+        [tx, idx, schema, kv],
+        &_update/4
       )
     end
   end
@@ -49,9 +49,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer do
   defp _unpack(idx, plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, [fdb_kv]}),
     do: _unpack(idx, plan, fdb_kv)
 
-  defp _update(tx, idx, kv) do
-    idx[:indexer].clear(tx, idx, kv)
-    idx[:indexer].set(tx, idx, kv)
+  defp _unpack(_idx, _plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, []}),
+    do: nil
+
+  defp _update(tx, idx, schema, kv) do
+    idx[:indexer].clear(tx, idx, schema, kv)
+    idx[:indexer].set(tx, idx, schema, kv)
   end
 
   defp apply(module, fun, args, default_fun) do

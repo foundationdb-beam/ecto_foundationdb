@@ -83,16 +83,21 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
 
   ## Examples
 
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.default_index_pack("my-source", "my-index", ["my-val"], "my-id")
+    iex> Ecto.Adapters.FoundationDB.Layer.Pack.default_index_pack("my-source", "my-index", 1, ["my-val"], "my-id")
     iex> |> :erlfdb_tuple.unpack()
     {"\\xFD", "my-source", "i", "my-index", 1, "my-val", <<131, 109, 0, 0, 0, 5, 109, 121, 45, 105, 100>>}
   """
-  def default_index_pack(source, index_name, index_values, id) do
+  def default_index_pack(source, index_name, idx_len, index_values, id) do
     vals =
-      ["#{index_name}", length(index_values)] ++
+      ["#{index_name}", idx_len] ++
         index_values ++ if(is_nil(id), do: [], else: [encode_pk_for_key(id)])
 
     namespaced_pack(source, @index_namespace, vals)
+  end
+
+  def default_index_range(source, index_name) do
+    vals = ["#{index_name}"]
+    namespaced_range(source, @index_namespace, vals)
   end
 
   @doc """
@@ -100,11 +105,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
 
   ## Examples
 
-    iex> Ecto.Adapters.FoundationDB.Layer.Pack.default_index_range("my-source", "my-index", ["my-val"])
+    iex> Ecto.Adapters.FoundationDB.Layer.Pack.default_index_range("my-source", "my-index", 1, ["my-val"])
     {"\\x01\\xFD\\0\\x01my-source\\0\\x01i\\0\\x01my-index\\0\\x15\\x01\\x01my-val\\0\\0", "\\x01\\xFD\\0\\x01my-source\\0\\x01i\\0\\x01my-index\\0\\x15\\x01\\x01my-val\\0\\xFF"}
   """
-  def default_index_range(source, index_name, index_values) do
-    vals = ["#{index_name}", length(index_values)] ++ index_values
+  def default_index_range(source, index_name, idx_len, index_values) do
+    vals = ["#{index_name}", idx_len] ++ index_values
     namespaced_range(source, @index_namespace, vals)
   end
 

@@ -8,6 +8,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Layer.Tx
   alias Ecto.Adapters.FoundationDB.Migration.SchemaMigration
+  alias Ecto.Adapters.FoundationDB.QueryPlan
 
   @index_inventory_source "\xFFindexes"
   @max_version_name "version"
@@ -31,13 +32,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
     }
   end
 
-  def create_index(
-        db_or_tenant,
-        source,
-        index_name,
-        index_fields,
-        options
-      ) do
+  def create_index(db_or_tenant, schema, source, index_name, index_fields, options) do
     {inventory_key, idx} = new_index(source, index_name, index_fields, options)
 
     Tx.transactional(db_or_tenant, fn tx ->
@@ -45,7 +40,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
       # use this info to maintain the index
       :erlfdb.set(tx, inventory_key, Pack.to_fdb_value(idx))
 
-      Indexer.create(tx, idx)
+      Indexer.create(tx, idx, schema)
     end)
 
     :ok
@@ -63,7 +58,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
 
   """
   def new_index(source, index_name, index_fields, options) do
-    inventory_key = Pack.namespaced_pack(source(), source, ["#{index_name}"])
+    inventory_key = inventory_key(source, index_name)
 
     idx = [
       id: index_name,
@@ -76,39 +71,131 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
     {inventory_key, idx}
   end
 
+  def inventory_key(source, index_name) do
+    Pack.namespaced_pack(source(), source, ["#{index_name}"])
+  end
+
   defp get_indexer(options) do
     case Keyword.get(options, :indexer) do
-      :timeseries -> Default
       nil -> Default
       module -> module
     end
   end
 
-  @doc """
-  Using a list of fields, usually given by an ecto where clause, select an index from those
-  that are available.
-
-  ## Examples
-
-    iex> Ecto.Adapters.FoundationDB.Layer.IndexInventory.select_index([[fields: [:name]]], [:name])
-    {:ok, [fields: [:name]]}
-
-    iex> Ecto.Adapters.FoundationDB.Layer.IndexInventory.select_index([[fields: [:name]]], [:department])
-    {:error, :no_valid_index}
-
-  """
-  def select_index([], _where_fields) do
-    {:error, :no_valid_index}
+  def select_index(idxs, constraints) do
+    case Enum.min(idxs, &choose_a_over_b_or_throw(&1, &2, constraints), fn -> nil end) do
+      nil -> nil
+      idx -> if(sufficient?(idx, constraints), do: idx, else: nil)
+    end
+  catch
+    {:best, idx} -> idx
   end
 
-  def select_index([idx | idxs], where_fields) do
-    case idx[:fields] do
-      ^where_fields ->
-        {:ok, idx}
+  def arrange_constraints(constraints, idx) do
+    constraints = for op <- constraints, do: {op.field, op}
 
-      _ ->
-        select_index(idxs, where_fields)
-    end
+    for(field <- idx[:fields], do: constraints[field])
+    |> Enum.filter(fn
+      nil -> false
+      _ -> true
+    end)
+  end
+
+  defp sufficient?(idx, constraints) when is_list(idx) and is_list(constraints) do
+    fields = idx[:fields] |> Enum.into(MapSet.new())
+    where_fields_list = for(op <- constraints, do: op.field)
+    where_fields = Enum.into(where_fields_list, MapSet.new())
+    sufficient?(fields, where_fields)
+  end
+
+  defp sufficient?(fields, where_fields) do
+    0 == MapSet.difference(where_fields, fields) |> MapSet.size()
+  end
+
+  defp choose_a_over_b_or_throw(idx_a, idx_b, constraints) do
+    fields_a = idx_a[:fields] |> Enum.into(MapSet.new())
+    fields_b = idx_b[:fields] |> Enum.into(MapSet.new())
+    where_fields_list = for(op <- constraints, do: op.field)
+    where_fields = Enum.into(where_fields_list, MapSet.new())
+
+    overlap_a = MapSet.intersection(where_fields, fields_a) |> MapSet.size()
+    overlap_b = MapSet.intersection(where_fields, fields_b) |> MapSet.size()
+
+    match_a? = overlap_a == MapSet.size(fields_a) and overlap_a == MapSet.size(where_fields)
+    match_b? = overlap_b == MapSet.size(fields_b) and overlap_b == MapSet.size(where_fields)
+
+    exact_match_short_circuit(match_a?, idx_a, match_b?, idx_b)
+
+    # Most indexes will be Default indexes, so we can optimize for that case. Default index allows 0 or 1
+    # Between ops, and it always must be the last field in the index.
+    between_fields = for %QueryPlan.Between{field: field} <- constraints, do: field
+
+    final_between_a? =
+      length(between_fields) <= 1 and
+        Enum.slice(idx_a[:fields], 0, length(where_fields_list)) ==
+          where_fields_list
+
+    final_between_b? =
+      length(between_fields) <= 1 and
+        Enum.slice(idx_b[:fields], 0, length(where_fields_list)) ==
+          where_fields_list
+
+    default_index_short_circuit(
+      match_a?,
+      final_between_a?,
+      idx_a,
+      match_b?,
+      final_between_b?,
+      idx_b
+    )
+
+    # index_sufficient is true when the where fields are a subset of the index fields
+    index_sufficient_a = sufficient?(fields_a, where_fields)
+    index_sufficient_b = sufficient?(fields_b, where_fields)
+
+    choose_a_over_b_partial(
+      index_sufficient_a,
+      final_between_a?,
+      overlap_a,
+      fields_a,
+      index_sufficient_b,
+      final_between_b?,
+      overlap_b,
+      fields_b
+    )
+  end
+
+  # match_a?, idx_a, match_b?, idx_b
+  defp exact_match_short_circuit(true, idx_a, false, _idx_b), do: throw({:best, idx_a})
+  defp exact_match_short_circuit(false, _idx_a, true, idx_b), do: throw({:best, idx_b})
+  defp exact_match_short_circuit(_, _idx_a, _, _idx_b), do: nil
+
+  # match_a?, final_between_a?, idx_a, match_b?, final_between_b?, idx_b
+  defp default_index_short_circuit(true, true, idx_a, true, false, _idx_b),
+    do: throw({:best, idx_a})
+
+  defp default_index_short_circuit(true, false, _idx_a, true, true, idx_b),
+    do: throw({:best, idx_b})
+
+  defp default_index_short_circuit(true, _, idx_a, true, _, _idx_b), do: throw({:best, idx_a})
+  defp default_index_short_circuit(_, _, _idx_a, _, _, _idx_b), do: nil
+
+  # index_sufficient_a, final_between_a?, overlap_a, fields_a, index_sufficient_b, final_between_b?, overlap_b, fields_b
+  defp choose_a_over_b_partial(true, _, _, _, false, _, _, _), do: true
+  defp choose_a_over_b_partial(false, _, _, _, true, _, _, _), do: false
+
+  # Then, check to see if the final field is a between constraint. This
+  # optimizes for Default indexes
+  defp choose_a_over_b_partial(_, true, _, _, _, false, _, _), do: true
+  defp choose_a_over_b_partial(_, false, _, _, _, true, _, _), do: false
+
+  # Finally, check for the best partial matches
+  defp choose_a_over_b_partial(_, _, overlap_a, fields_a, _, _, overlap_b, fields_b) do
+    constraints_partially_determined_a = overlap_a / MapSet.size(fields_a)
+
+    constraints_partially_determined_b = overlap_b / MapSet.size(fields_b)
+
+    constraints_partially_determined_a > constraints_partially_determined_b
   end
 
   @doc """
@@ -156,6 +243,15 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
     end
   end
 
+  #  defp tx_idx_get(tx, source, index_name) do
+  #    key = inventory_key(source, index_name)
+  #
+  #    tx
+  #    |> :erlfdb.get(key)
+  #    |> :erlfdb.wait()
+  #    |> Pack.from_fdb_value()
+  #  end
+
   defp tx_idxs_get(tx, adapter_opts, source, {vsn, idxs}) do
     max_version_future = MaxValue.get(tx, SchemaMigration.source(), @max_version_name)
 
@@ -194,6 +290,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
       |> :erlfdb.get_range(start_key, end_key)
       |> :erlfdb.wait()
       |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
+      # high priority first
+      |> Enum.sort(&(Keyword.get(&1, :priority, 0) > Keyword.get(&2, :priority, 0)))
 
     max_version =
       max_version_future
