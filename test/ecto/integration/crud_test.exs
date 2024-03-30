@@ -79,18 +79,17 @@ defmodule Ecto.Integration.CrudTest do
 
       # Crossing a struct into another tenant is not allowed when using a transaction.
       assert_raise(IncorrectTenancy, ~r/original transaction context .* did not match/, fn ->
-        FoundationDB.transactional(
-          other_tenant,
+        TestRepo.transaction(
           fn ->
             TestRepo.insert(user)
-          end
+          end,
+          prefix: other_tenant
         )
       end)
 
       # Here are 2 ways to force a struct into a different tenant's transaction
       assert :ok =
-               FoundationDB.transactional(
-                 other_tenant,
+               TestRepo.transaction(
                  fn ->
                    # Specify the equivalent tenant
                    %User{user | id: nil}
@@ -103,7 +102,8 @@ defmodule Ecto.Integration.CrudTest do
                    |> TestRepo.insert()
 
                    :ok
-                 end
+                 end,
+                 prefix: other_tenant
                )
     end
 
@@ -201,8 +201,7 @@ defmodule Ecto.Integration.CrudTest do
       # Operations inside a FoundationDB Adapater Transaction have the tenant applied
       # automatically.
       user =
-        FoundationDB.transactional(
-          tenant,
+        TestRepo.transaction(
           fn ->
             {:ok, jesse} =
               %User{name: "Jesse"}
@@ -213,7 +212,8 @@ defmodule Ecto.Integration.CrudTest do
               |> TestRepo.insert()
 
             TestRepo.get(User, jesse.id)
-          end
+          end,
+          prefix: tenant
         )
 
       assert user.name == "Jesse"
@@ -224,13 +224,13 @@ defmodule Ecto.Integration.CrudTest do
 
       names = ~w/John James Jesse Sarah Bob Steve/
 
-      FoundationDB.transactional(
-        tenant,
+      TestRepo.transaction(
         fn ->
           for n <- names do
             TestRepo.insert(%User{name: n})
           end
-        end
+        end,
+        prefix: tenant
       )
 
       # Each chunk of the stream is retrieved in a separate FDB transaction

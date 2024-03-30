@@ -155,10 +155,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
     ...>   Repo.insert!(%User{name: "John"})
     ...>   Repo.insert!(%Event{timestamp: ~N[2024-02-18 12:34:56], data: "Welcome John"})
     ...> end
-    iex> FoundationDB.transactional(tenant, fun)
-
-  For now, this Transaction lives separate from Ecto's own Transaction, so please be mindful when using
-  this feature to use `Ecto.Adapters.FoundationDB.transactional`.
+    iex> Repo.transaction(fun, prefix: tenant)
 
   """
 end

@@ -112,20 +112,35 @@ defmodule Ecto.Adapters.FoundationDB do
 
   ### Transactions
 
-  `ecto_foundationdb` implements its own transaction API. This was decided early on
-  to make sure we can support tenants and custom indexes. A transaction always
-  executes on a single tenant, and so individual Repo calls inside your
-  transaction do not need to specify a `:prefix`.
+  `ecto_foundationdb` exposes the Ecto.Repo transaction function, and it also exposes
+  a FoundationDB-specific transaction. Typically you will use the Ecto.Repo transaction.
+
+  ```elixir
+  TestRepo.transaction(fn ->
+      # Ecto work
+    end, prefix: tenant)
+  ```
+
+  ```elixir
+  FoundationDB.transactional(tenant,
+    fn tx ->
+      # :erlfdb work
+    end)
+  ```
 
   ### Migrations
 
   At first glance, `:ecto_foundationdb` migrations may look similar to that of `:ecto_sql`,
   but the actual execution of migrations and how your app must be configured are very
-  differently, so please read this section in full.
+  different, so please read this section in full.
 
   If your app uses indexes on any of your schemas, you must define a `:migrator`
   option on your repo that is a module implementing the `Ecto.Adapters.FoundationDB.Migrator`
   behaviour.
+
+  Migrations are only used for index management. There are no tables to add, drop, or modify.
+  When you add a field to your Schema, any read requests on old objects will return `nil` in
+  that field. Right now there is no way to rename a field.
 
   As tenants are opened during your application runtime, migrations will be executed
   automatically. This distributes the migration across a potentially long period of time,
@@ -204,6 +219,7 @@ defmodule Ecto.Adapters.FoundationDB do
   @behaviour Ecto.Adapter.Storage
   @behaviour Ecto.Adapter.Schema
   @behaviour Ecto.Adapter.Queryable
+  @behaviour Ecto.Adapter.Transaction
   @behaviour Ecto.Adapters.FoundationDB.Migration
 
   alias Ecto.Adapters.FoundationDB.Database
@@ -212,6 +228,7 @@ defmodule Ecto.Adapters.FoundationDB do
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
   alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
+  alias Ecto.Adapters.FoundationDB.EctoAdapterTransaction
   alias Ecto.Adapters.FoundationDB.Layer.Tx
   alias Ecto.Adapters.FoundationDB.Options
   alias Ecto.Adapters.FoundationDB.Tenant
@@ -324,6 +341,15 @@ defmodule Ecto.Adapters.FoundationDB do
   @impl Ecto.Adapter.Queryable
   defdelegate stream(adapter_meta, query_meta, query_cache, params, options),
     to: EctoAdapterQueryable
+
+  @impl Ecto.Adapter.Transaction
+  defdelegate transaction(adapter_meta, options, function), to: EctoAdapterTransaction
+
+  @impl Ecto.Adapter.Transaction
+  defdelegate in_transaction?(adapter_meta), to: EctoAdapterTransaction
+
+  @impl Ecto.Adapter.Transaction
+  defdelegate rollback(adapter_meta, value), to: EctoAdapterTransaction
 
   @impl Ecto.Adapters.FoundationDB.Migration
   defdelegate supports_ddl_transaction?(), to: EctoAdapterMigration

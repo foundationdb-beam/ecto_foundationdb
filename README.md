@@ -140,7 +140,6 @@ Roughly in order of priority.
 - [x] Index caching
 - [x] Mapped Range Indexes
 - [x] Hierarchical multi index
+- [x] Ecto Transactions
 - [ ] FDB Watches
-- [ ] Ecto Transactions
 - [ ] Logging for all Adapter behaviours
-- [ ] Composite primary key

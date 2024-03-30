@@ -106,9 +106,7 @@ defmodule Ecto.Adapters.FoundationDB.Migrator do
       opts
       |> Keyword.put(:log, migrator_log(opts))
 
-    FoundationDB.transactional(tenant, fn ->
-      tx_do_up(repo, config, version, module, opts)
-    end)
+    repo.transaction(fn -> tx_do_up(repo, config, version, module, opts) end, prefix: tenant)
   end
 
   def tx_do_up(repo, config, version, module, opts) do
