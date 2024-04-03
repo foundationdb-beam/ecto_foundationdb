@@ -2,12 +2,12 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
   @moduledoc """
   This is an internal module that manages index creation and metadata.
   """
-  alias Ecto.Adapters.FoundationDB.Layer.Indexer
   alias Ecto.Adapters.FoundationDB.Layer.Indexer.Default
   alias Ecto.Adapters.FoundationDB.Layer.Indexer.MaxValue
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Layer.Tx
   alias Ecto.Adapters.FoundationDB.Migration.SchemaMigration
+  alias Ecto.Adapters.FoundationDB.MigrationsPJ
   alias Ecto.Adapters.FoundationDB.QueryPlan
 
   @index_inventory_source "\xFFindexes"
@@ -30,20 +30,6 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
         ]
       ]
     }
-  end
-
-  def create_index(db_or_tenant, schema, source, index_name, index_fields, options) do
-    {inventory_key, idx} = new_index(source, index_name, index_fields, options)
-
-    Tx.transactional(db_or_tenant, fn tx ->
-      # Write a key that indicates the index exists. All other operations will
-      # use this info to maintain the index
-      :erlfdb.set(tx, inventory_key, Pack.to_fdb_value(idx))
-
-      Indexer.create(tx, idx, schema)
-    end)
-
-    :ok
   end
 
   @doc """
@@ -73,6 +59,10 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
 
   def inventory_key(source, index_name) do
     Pack.namespaced_pack(source(), source, ["#{index_name}"])
+  end
+
+  def special_key(name) do
+    Pack.namespaced_pack(source(), name, [])
   end
 
   defp get_indexer(options) do
@@ -243,46 +233,38 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
     end
   end
 
-  #  defp tx_idx_get(tx, source, index_name) do
-  #    key = inventory_key(source, index_name)
-  #
-  #    tx
-  #    |> :erlfdb.get(key)
-  #    |> :erlfdb.wait()
-  #    |> Pack.from_fdb_value()
-  #  end
-
   defp tx_idxs_get(tx, adapter_opts, source, {vsn, idxs}) do
     max_version_future = MaxValue.get(tx, SchemaMigration.source(), @max_version_name)
+    claim_future = :erlfdb.get(tx, MigrationsPJ.claim_key())
 
     case idxs do
       idxs when is_list(idxs) ->
-        tx_idxs_try_cache({vsn, idxs}, max_version_future)
+        tx_idxs_try_cache({vsn, idxs}, max_version_future, claim_future)
 
       _idxs ->
-        tx_idxs_get_wait(tx, adapter_opts, source, max_version_future)
+        tx_idxs_get_wait(tx, adapter_opts, source, max_version_future, claim_future)
     end
   end
 
-  defp tx_idxs_try_cache({vsn, idxs}, max_version_future) do
+  defp tx_idxs_try_cache({vsn, idxs}, max_version_future, claim_future) do
     # This validator function will return false if the cached vsn is out of date.
     # We defer its execution via this anonymous function so that the
     # important 'gets' can be waited on first, and this one can be checked
     # at the very end. In this way, we are optimistic that the version
     # will change very infrequently.
     vsn_validator = fn ->
-      max_version =
-        max_version_future
-        |> :erlfdb.wait()
-        |> MaxValue.decode()
+      [max_version, claim] =
+        [max_version_future, claim_future]
+        |> :erlfdb.wait_for_all()
 
-      max_version <= vsn
+      MaxValue.decode(max_version) <= vsn and
+        :not_found == claim
     end
 
     {vsn, idxs, vsn_validator}
   end
 
-  defp tx_idxs_get_wait(tx, _adapter_opts, source, max_version_future) do
+  defp tx_idxs_get_wait(tx, _adapter_opts, source, max_version_future, claim_future) do
     {start_key, end_key} = Pack.namespaced_range(source(), source, [])
 
     idxs =
@@ -293,12 +275,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
       # high priority first
       |> Enum.sort(&(Keyword.get(&1, :priority, 0) > Keyword.get(&2, :priority, 0)))
 
-    max_version =
-      max_version_future
-      |> :erlfdb.wait()
-      |> MaxValue.decode()
+    max_version = :erlfdb.wait(max_version_future)
 
-    {max_version, idxs, fn -> true end}
+    {MaxValue.decode(max_version), idxs,
+     fn ->
+       claim = :erlfdb.wait(claim_future)
+       :not_found == claim
+     end}
   end
 
   defp cache_lookup(cache?, cache, cache_key, now) do

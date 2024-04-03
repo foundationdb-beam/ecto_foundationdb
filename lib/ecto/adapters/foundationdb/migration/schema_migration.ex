@@ -20,52 +20,17 @@ defmodule Ecto.Adapters.FoundationDB.Migration.SchemaMigration do
     timestamps(updated_at: false)
   end
 
-  # The migration flag is used to signal to the repository
-  # we are in a migration operation.
-  @default_opts [
-    timeout: :infinity,
-    log: false,
-    schema_migration: true,
-    telemetry_options: [schema_migration: true]
-  ]
-
-  def versions(repo, config, prefix) do
-    {repo, _source} = get_repo_and_source(repo, config)
-    from_opts = [prefix: prefix] ++ @default_opts
-
-    query =
-      if Keyword.get(config, :migration_cast_version_column, false) do
-        from(m in SchemaMigration, select: type(m.version, :integer))
-      else
-        from(m in SchemaMigration, select: m.version)
-      end
-
-    {repo, query, from_opts}
+  def versions() do
+    from(m in SchemaMigration, select: m.version)
   end
 
-  def up(repo, config, version, opts) do
-    {repo, _source} = get_repo_and_source(repo, config)
-
+  def up(repo, version, opts \\ []) do
     %__MODULE__{version: version}
-    |> repo.insert(default_opts(opts))
+    |> repo.insert(opts)
   end
 
-  def down(repo, config, version, opts) do
-    {repo, _source} = get_repo_and_source(repo, config)
-
+  def down(repo, version, opts) do
     from(m in SchemaMigration, where: m.version == type(^version, :integer))
-    |> repo.delete_all(default_opts(opts))
-  end
-
-  def get_repo_and_source(repo, config) do
-    {Keyword.get(config, :migration_repo, repo), @schema_migrations_source}
-  end
-
-  defp default_opts(opts) do
-    Keyword.merge(
-      @default_opts,
-      prefix: opts[:prefix],
-      log: Keyword.get(opts, :log_adapter, false)
-    )
+    |> repo.delete_all(opts)
   end
 end

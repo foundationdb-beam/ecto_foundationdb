@@ -4,7 +4,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer do
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.QueryPlan
 
-  @callback create(:erlfdb.transaction(), Index.t(), Ecto.Schema.t()) :: :ok
+  @callback create_range(Index.t()) :: {:erlfdb.key(), :erlfdb.key()}
+  @callback create(:erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple(), integer()) ::
+              {integer(), {:erlfdb.key(), :erlfdb.key()}}
   @callback set(:erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
   @callback clear(:erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
   @callback update(:erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
@@ -12,8 +14,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer do
   @callback unpack(Index.t(), QueryPlan.t(), tuple()) :: tuple()
   @optional_callbacks update: 4, unpack: 3
 
-  def create(tx, idx, schema),
-    do: idx[:indexer].create(tx, idx, schema)
+  def create_range(idx),
+    do: idx[:indexer].create_range(idx)
+
+  def create(tx, idx, schema, range, limit),
+    do: idx[:indexer].create(tx, idx, schema, range, limit)
 
   def set(tx, idxs, schema, kv) do
     for idx <- idxs,

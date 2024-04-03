@@ -104,35 +104,34 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   def allows_between?(_), do: false
 
   @impl true
-  def create(tx, idx, schema) do
+  def create_range(idx) do
     source = idx[:source]
-
     options = idx[:options]
 
-    {key_start, key_end} =
-      case options[:from] do
-        nil ->
-          Pack.primary_range(source)
+    case options[:from] do
+      nil ->
+        Pack.primary_range(source)
 
-        from ->
-          Pack.default_index_range(source, from)
-      end
+      from ->
+        Pack.default_index_range(source, from)
+    end
+  end
 
-    # Write the actual index for any existing data in this tenant
-    #
-    # If this is a large amount of data, then this transaction will surpass the 5
-    # second limit.
-    tx
-    |> :erlfdb.get_range(key_start, key_end)
-    |> :erlfdb.wait()
-    |> Enum.each(fn {fdb_key, fdb_value} ->
-      {index_key, index_object} =
-        get_index_entry(idx, schema, {fdb_key, Pack.from_fdb_value(fdb_value)})
+  @impl true
+  def create(tx, idx, schema, {start_key, end_key}, limit) do
+    keys =
+      tx
+      |> :erlfdb.get_range(start_key, end_key, limit: limit)
+      |> :erlfdb.wait()
+      |> Enum.map(fn {fdb_key, fdb_value} ->
+        {index_key, index_object} =
+          get_index_entry(idx, schema, {fdb_key, Pack.from_fdb_value(fdb_value)})
 
-      :erlfdb.set(tx, index_key, index_object)
-    end)
+        :erlfdb.set(tx, index_key, index_object)
+        fdb_key
+      end)
 
-    :ok
+    {length(keys), {List.last(keys), end_key}}
   end
 
   @impl true

@@ -19,9 +19,6 @@ defmodule Ecto.Integration.IndexerTest do
     @behaviour Ecto.Adapters.FoundationDB.Migrator
 
     @impl true
-    def options(), do: [log: false]
-
-    @impl true
     def migrations(), do: [{0, TestMigration}]
   end
 
@@ -43,7 +40,10 @@ defmodule Ecto.Integration.IndexerTest do
 
     # omitted for brevity. A complete Indexer must implement all functions
     @impl true
-    def create(_tx, _idx, _schema), do: nil
+    def create_range(_idx), do: {"", "\xFF"}
+
+    @impl true
+    def create(_tx, _idx, _schema, _range, _limit), do: {0, {"\xFF", "\xFF"}}
 
     @impl true
     def clear(_tx, _idx, _schema, _kv), do: nil

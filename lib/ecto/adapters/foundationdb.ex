@@ -102,10 +102,9 @@ defmodule Ecto.Adapters.FoundationDB do
     3. Indexes are managed within transactions, so that they will always be
        consistent.
 
-    4. Upon index creation, each tenant's data will be indexed in a transaction,
-       and because of FoundationDB's 5-second transaction limit, this means that
-       it may be impossible to create an index on a very large dataset using
-       purely `ecto_foundationdb`.
+    4. Upon index creation, each tenant's data will be indexed in a stream of FDB
+       transactions. This stream maintains transactional isolation for each tenant
+       as they migrate. See `ProgressiveJob` for more.
 
     5. Migrations must be executed on a per tenant basis, and they can be
        run in parallel. Migrations are managed automatically by this adapater.
@@ -220,11 +219,9 @@ defmodule Ecto.Adapters.FoundationDB do
   @behaviour Ecto.Adapter.Schema
   @behaviour Ecto.Adapter.Queryable
   @behaviour Ecto.Adapter.Transaction
-  @behaviour Ecto.Adapters.FoundationDB.Migration
 
   alias Ecto.Adapters.FoundationDB.Database
   alias Ecto.Adapters.FoundationDB.EctoAdapter
-  alias Ecto.Adapters.FoundationDB.EctoAdapterMigration
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
   alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
@@ -350,10 +347,4 @@ defmodule Ecto.Adapters.FoundationDB do
 
   @impl Ecto.Adapter.Transaction
   defdelegate rollback(adapter_meta, value), to: EctoAdapterTransaction
-
-  @impl Ecto.Adapters.FoundationDB.Migration
-  defdelegate supports_ddl_transaction?(), to: EctoAdapterMigration
-
-  @impl Ecto.Adapters.FoundationDB.Migration
-  defdelegate execute_ddl(adapter_meta, command, option), to: EctoAdapterMigration
 end
