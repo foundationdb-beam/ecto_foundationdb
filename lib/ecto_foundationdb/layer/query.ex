@@ -82,7 +82,7 @@ defmodule EctoFoundationDB.Layer.Query do
       nil ->
         raise Unsupported,
               """
-              FoundationDB Adapter supports either a where clause that constraints on the primary key
+              FoundationDB Adapter supports either a where clause that constrains on the primary key
               or a where clause that constrains on a set of fields that is associated with an index.
               """
 

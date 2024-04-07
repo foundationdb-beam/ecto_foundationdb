@@ -65,10 +65,11 @@ defmodule EctoFoundationDB.Migrator do
   def up(repo, tenant, options) do
     migrator = Options.get(options, :migrator)
     migrator = if is_nil(migrator), do: repo, else: migrator
-    limit = Options.get(options, :migration_step)
+    {:module, _} = Code.ensure_loaded(migrator)
     migrations? = Kernel.function_exported?(migrator, :migrations, 0)
 
     if migrations? do
+      limit = Options.get(options, :migration_step)
       MigrationsPJ.transactional(repo, tenant, migrator, limit)
     else
       :ok
