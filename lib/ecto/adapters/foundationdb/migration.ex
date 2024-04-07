@@ -1,7 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.Migration do
-  @moduledoc """
-  Specifies the adapter migrations API.
-  """
+  @moduledoc false
 
   alias Ecto.Adapters.FoundationDB.Migration.Index
   alias Ecto.Adapters.FoundationDB.Schema

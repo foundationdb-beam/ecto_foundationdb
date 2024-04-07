@@ -1,4 +1,6 @@
 defmodule Ecto.Adapters.FoundationDB.Database do
-  @moduledoc false
+  @moduledoc """
+  See `Ecto.Adapters.FoundationDB`.
+  """
   @type t() :: :erlfdb.database()
 end

@@ -1,8 +1,6 @@
 defmodule Ecto.Adapters.FoundationDB.Migrator do
   @moduledoc """
-  Ecto FoundationDB is configured by default to manage database migrations
-  triggered by actions taken on Tenants (See `Tenant.open/2`). This module contains
-  the operations to manage those migrations.
+  Implement this behaviour to define migrations for `Ecto.Adapters.FoundationDB`
   """
 
   require Logger
@@ -14,6 +12,9 @@ defmodule Ecto.Adapters.FoundationDB.Migrator do
   alias Ecto.Adapters.FoundationDB.Options
   alias Ecto.Adapters.FoundationDB.Tenant
 
+  @doc """
+
+  """
   @spec up_all(Ecto.Repo.t(), Options.t()) :: :ok
   def up_all(repo, options \\ []) do
     options = Keyword.merge(repo.config(), options)

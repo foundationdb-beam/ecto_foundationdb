@@ -4,6 +4,29 @@ defmodule Ecto.Adapters.FoundationDB do
 
   It uses `:erlfdb` for communicating to the database.
 
+  ## Installation
+
+  Install the latest stable release of FoundationDB from the
+  [official FoundationDB Releases](https://github.com/apple/foundationdb/releases).
+
+  You will only need to install the `foundationdb-server` package if you're
+  running an instance of the FoundationDB Server. For example, it's common to
+  run the `foundationdb-server` on your development machine and on managed
+  instances running a FoundationDB cluster, but not for your stateless Elixir
+  application server in production.
+
+  `foundationdb-clients` is always required.
+
+  Include `:ecto_foundationdb` in your list of dependencies in `mix.exs`:
+
+  ```elixir
+  defp deps do
+    [
+      {:ecto_foundationdb, git: "https://github.com/foundationdb-beam/ecto_foundationdb.git", branch: "main"}
+    ]
+  end
+  ```
+
   ## Standard Options
 
     * `:cluster_file` - The path to the fdb.cluster file. The default is
@@ -24,26 +47,164 @@ defmodule Ecto.Adapters.FoundationDB do
     * `:migration_step` - The maximum number of keys to process in a single transaction
       when running migrations. Defaults to `1000`. If you use a number that is
       too large, the FDB transactions run by the Migrator will fail.
+    * `:idx_cache` - When set to `:enabled`, the Ecto ets cache is used to store the
+      available indexes per tenant. This speeds up all database operations.
+      Defaults to `:enabled`.
 
-  ## Limitations and caveats
+  ## Usage
 
-  There are some limitations when using Ecto with FoundationDB.
+  Define these modules in your `MyApp` application:
 
-  ### Tenants
+  ```elixir
+  defmodule MyApp.Repo do
+    use Ecto.Repo, otp_app: :my_app, adapter: Ecto.Adapters.FoundationDB
+  end
 
-  As discussed in the README, we require the use of tenants. When a struct is retrieved
-  from a tenant (using `:prefix`), that's struct's metadata holds onto the tenant
-  reference. This helps to protect your application from a struct accidentally
-  crossing tenant boundaries due to some unforeseen bug.
+  defmodule MyApp.Migrator do
+    @behaviour Ecto.Adapters.FoundationDB.Migrator
+    @impl true
+    def migrations(), do: []
+  end
+  ```
 
-  ### Data Types
+  Edit your `config.exs` file to include the following:
 
-  `ecto_foundationdb` stores your struct's data using `:erlang.term_to_binary/1`, and
+  ```elixir
+  config :my_app,
+    ecto_repos: [MyApp.Repo]
+
+  config :my_app, MyApp.Repo,
+    cluster_file: "/etc/foundationdb/fdb.cluster",
+    migrator: MyApp.Migrator
+  ```
+
+  ## Tenants
+
+  `:ecto_foundationdb` requires the use of [FoundationDB Tenants](https://apple.github.io/foundationdb/tenants.html).
+
+  Each tenant you create has a separate keyspace from all others, and a given FoundationDB
+  Transaction is guaranteed to be isolated to a particular tenant's keyspace.
+
+  You'll use the Ecto `:prefix` option to specify the relevant tenant for each Ecto operation
+  in your application.
+
+  When a struct is retrieved from a tenant (using `:prefix`), that's struct's metadata
+  holds onto the tenant reference. This helps to protect your application from a
+  struct accidentally crossing tenant boundaries due to some unforeseen bug.
+
+  Creating a schema to be used in a tenant.
+
+  ```elixir
+  defmodule User do
+    use Ecto.Schema
+    @schema_context usetenant: true
+    @primary_key {:id, :binary_id, autogenerate: true}
+    schema "users" do
+      field(:name, :string)
+      field(:department, :string)
+      timestamps()
+    end
+    # ...
+  end
+  ```
+
+  Setting up a tenant.
+
+  ```elixir
+  alias Ecto.Adapters.FoundationDB.Tenant
+
+  tenant = Tenant.open!(MyApp.Repo, "some-org")
+  ```
+
+  Inserting a new struct.
+
+  ```elixir
+  user = %User{name: "John", department: "Engineering"}
+         |> FoundationDB.usetenant(tenant)
+
+  user = MyApp.Repo.insert!(user)
+  ```
+
+  Querying for a struct using the primary key.
+
+  ```elixir
+  MyApp.Repo.get!(User, user.id, prefix: tenant)
+  ```
+
+  ## Migrations
+
+  At first glance, `:ecto_foundationdb` migrations may look similar to that of `:ecto_sql`,
+  but the actual execution of migrations and how your app must be configured are very
+  different, so please read this section in full.
+
+  If your app uses indexes on any of your schemas, you must define a `:migrator`
+  option on your repo that is a module implementing the `Ecto.Adapters.FoundationDB.Migrator`
+  behaviour.
+
+  Migrations are only used for index management. There are no tables to add, drop, or modify.
+  When you add a field to your Schema, any read requests on old objects will return `nil` in
+  that field.
+
+  As tenants are opened during your application runtime, migrations will be executed
+  automatically. This distributes the migration across a potentially long period of time,
+  as migrations will not be executed unless the tenant is opened.
+
+  The `:migrator` is a module in your application runtime that provides the full list of
+  ordered migrations. These are the migrations that will be executed when a tenant is opened.
+  If you leave out a migration from the list, it will not be applied.
+
+  The module `MyApp.Migrator` will change over time to include new migrations, like so:
+
+  ```elixir
+  defmodule MyApp.Migrator do
+    @behaviour Ecto.Adapters.FoundationDB.Migrator
+
+    @impl true
+    def migrations() do
+      [
+        {0, MyApp.IndexUserByDepartment}
+        # At a later date, we my add a new index with a corresponding addition
+        # tho the migrations list:
+        #    {1, MyApp.IndexUserByRole}
+      ]
+    end
+  end
+  ```
+
+  Each migration is contained in a separate module, much like EctoSQL's. However, the operations
+  to be carried out **must be returned as a list.** For example, the creation an index
+  may look like this:
+
+  ```elixir
+  defmodule MyApp.IndexUserByDepartment do
+    use Ecto.Adapters.FoundationDB.Migration
+    def change() do
+      [
+        create index(User, [:department])
+      ]
+    end
+  end
+  ```
+
+  Your `MyApp.Migrator` and `MyApp.<Migration>` modules are part of your codebase. They must be
+  included in your application release.
+
+  Migrations can be completed in full at any time with a call to
+  `Ecto.Adapters.FoundationDB.Migrator.up_all/1`. Depending on how many tenants you have in
+  your database, and the size of the data for each tenant, this operation might take a long
+  time and make heavy use of system resources. It is safe to interrupt this operation, as
+  migrations are performed transactionally. However, if you interrupt a migration, the next
+  attempt for that tenant may have a brief delay (~5 sec); the migrator must ensure that the
+  previous migration has indeed stopped executing.
+
+  ## Data Types
+
+  `:ecto_foundationdb` stores your struct's data using `:erlang.term_to_binary/1`, and
   retrieves it with `:erlang.binary_to_term/1`. As such, there is no data type
   conversion between Elixir types and Database Types. Any term you put in your
   struct will be stored and later retrieved.
 
-  Data types are used by `ecto_foundationdb` for the creation and querying of indexes.
+  Data types are used by `:ecto_foundationdb` for the creation and querying of indexes.
   Certain Ecto types are encoded into the FDB key, which allows you to formulate
   Between queries on indexes of these types:
 
@@ -64,82 +225,93 @@ defmodule Ecto.Adapters.FoundationDB do
 
   See Queries for more information.
 
-  ### Key and Value Size
+  ## Indexes
 
-  FoundationDB imposes strict limits on the size of keys and the size of values. Please
-  be aware of these limitations as you develop. `ecto_foundationdb` doesn't make
-  any explicit attempt to protect you from these errors.
+  The implication of the [FoundationDB Layer Concept](https://apple.github.io/foundationdb/layer-concept.html)
+  is that the manner in which data can be stored and accessed is the responsibility of the client
+  application. To achieve some general purpose data storage and access patterns commonly desired
+  in web applications, `:ecto_foundationdb` provides some support for indexes out of the box, and
+  also allows your application to define custom indexes.
 
-  ### Layer
+  When you define a migration that calls `create index(User, [:department])`, a `Default` index is
+  created on the `:department` field. The following two indexes are equivalent:
 
-  `ecto_foundationdb` implements a specific Layer on the FoundationDB
-  key-value store. This Layer is intended to be generally useful, but you
-  may not find it suitable for your workloads. The Layer is documented in
-  detail at `Ecto.Adapters.FoundationDB.Layer`. This project does not support
-  plugging in other Layers.
+  ```elixir
+  # ...
+    create index(User, [:department])
+  # is equivalent to
+    create index(User, [:department], options: [indexer: Ecto.Adapters.FoundationDB.Layer.Indexer.Default]))]
+  # ...
+  ```
 
-  ### Queries
+  A Default index on several fields is supported:
 
-  The Layer implemenation affords us a limited set of query types. Any queries
-  beyond these will raise an exception. If you require more complex queries,
-  we suggest that you first extract all the data that you need using a supported
-  query and then constrain, aggregate, and group as needed with Elixir functions.
+  ```elixir
+    create index(User, [:inserted_at])
+    create index(User, [:birthyear, :department, :birthdate])
+  ```
 
-  In other words, you will be writing less SQL and more Elixir.
+  The index value can be any Elixir term. All types support Equal queries. However, certain Ecto Schema types
+  support Between queries. When an index is created on timestasmp-like fields, it is
+  an effective time series index. See the query examples below.
 
-    * `Repo.get` using primary key
-    * `Repo.all` using no constraint. This will return all such structs for
-      the tenant.
-    * `Repo.all` using an Equal constraint on an index field. This will return
-      matching structs for the tenant.
+  ### Index Queries
 
-      ```elixir
-      from(u in User, where: u.name == ^"John")
-      ```
-    * `Repo.all` using a Between constraint on a compatible index field. This will
-      return structs in the tenant that have a timestamp between the given timespan
-      in the query.
+  Retrieve all users in the Engineering department (with an Equal constraint):
 
-      ```elixir
-      from(e in Event,
-        where:
-          e.timestamp > ^~N[1970-01-01 00:00:00] and
-            e.timestamp < ^~N[2100-01-01 00:00:00]
-      )
-      ```
+  ```elixir
+      iex> query = from(u in User, where: u.department == ^"Engineering")
+      iex> Repo.all(query, prefix: tenant)
+  ```
 
-  ### Indexes
+  Retrieve all users with a birthyear from 1992 to 1994 (with a Between constraint):
 
-  Simple indexes and time series indexes are supported out of the box. They are
-  similar to Ecto SQL indexes in some ways, but critically different in others.
+  ```elixir
+  iex> query = from(u in User,
+  ...>   where: u.birthyear >= ^1992 and u.birthyear <= ^1994
+  ...> )
+  iex> Repo.all(query, prefix: tenant)
+  ```
 
-  The out of the box indexes are called Default indexes, corresponding to the module
-  by the same name.
+  Retrieve all Engineers born in August 1992:
 
-    1. An index is created via a migration file, as it is with Ecto SQL. However,
-       this is the only supported purpose of migration files so far. And this is
-       where the similarities with Ecto SQL end.
+  ```elixir
+  iex> query = from(u in User,
+  ...>   where: u.birthyear == ^1992 and
+  ...>          u.department == ^"Engineering" and
+  ...>          u.birthdate >= ^~D[1992-08-01] and u.birthdate < ^~D[1992-09-01]
+  ...> )
+  iex> Repo.all(query, prefix: tenant)
+  ```
 
-    2. Indexes are managed within transactions, so that they will always be
-       consistent.
+  **Order matters!**: When you create an index using multiple fields, the FDB key that stores the index will be extended with
+  all the values in the order of your defined index fields. Because FoundationDB stores keys in a well-defined order,
+  the order of the fields in your index determines the Between queries you can perform.
 
-    3. Upon index creation, each tenant's data will be indexed in a stream of FDB
-       transactions. This stream maintains transactional isolation for each tenant
-       as they migrate. See `ProgressiveJob` for more.
+  There can be 0 or 1 Between clauses, and if one exists, it must correspond to the final constraint in the where clause when
+  compared against the order of the index fields.
 
-    4. Migrations must be executed on a per tenant basis, and they can be
-       run in parallel. Migrations are managed automatically by this adapater.
+  ### Custom Indexes
 
-  ### Transactions
+  As data is inserted, updated, deleted, and queried, the Indexer callbacks (via behaviour `Ecto.Adapters.FoundationDB.Indexer`)
+  are executed. Your Indexer module does all the work necessary to maintain the index within the transaction
+  that the data itself is being manipulated. Many different types of indexes are possible. You are in control!
 
-  `ecto_foundationdb` exposes the Ecto.Repo transaction function, and it also exposes
-  a FoundationDB-specific transaction.
+  For an example, please see the [MaxValue implementation](https://github.com/foundationdb-beam/ecto_foundationdb/blob/main/lib/ecto/adapters/foundationdb/layer/indexer/max_value.ex)
+  which is used internally by `:ecto_foundatiomdb` to keep track of the maximum value of a field in a Schema.
+
+  ## Transactions
+
+  The Repo functions will automatically use FoundationDB transactions behind the scenes. `:ecto_foundationdb` also
+  exposes the Ecto.Repo transaction function, allowing you to group operations together with transactional isolation:
 
   ```elixir
   TestRepo.transaction(fn ->
       # Ecto work
     end, prefix: tenant)
   ```
+
+  It also exposes a FoundationDB-specific transaction:
 
   ```elixir
   FoundationDB.transactional(tenant,
@@ -148,12 +320,12 @@ defmodule Ecto.Adapters.FoundationDB do
     end)
   ```
 
-  Both of these calling convetions create a transaction on FDB. Typically you will use
+  Both of these calling conventions create a transaction on FDB. Typically you will use
   `Repo.transaction/1` when operating on your Ecto.Schema structs. If you wish
-  to do anything using the lower-level `:erlfdb` API, you will use
+  to do anything using the lower-level `:erlfdb` API (rare), you will use
   `FoundationDB.transactional/2`.
 
-  Please visit the (FoundationDB Developer Guid on transactions)[https://apple.github.io/foundationdb/developer-guide.html#transaction-basics]
+  Please read the [FoundationDB Developer Guid on transactions](https://apple.github.io/foundationdb/developer-guide.html#transaction-basics)
   for more information about how to develop with transactions.
 
   It's important to remember that even though the database gives ACID guarantees about the
@@ -171,7 +343,9 @@ defmodule Ecto.Adapters.FoundationDB do
     ...
     Phoenix.PubSub.broadcast("my_topic", "new_user") # Not safe! :(
   end, prefix: tenant)
+  ```
 
+  ```elixir
   # Instead, do this:
   TestRepo.transaction(fn ->
     TestRepo.insert(%User{name: "John"})
@@ -180,96 +354,66 @@ defmodule Ecto.Adapters.FoundationDB do
   Phoenix.PubSub.broadcast("my_topic", "new_user") # Safe :)
   ```
 
+  ## Limitations and Caveats
+
+  ### FoundationDB
+
+  Please read [FoundationDB Known Limitations](https://apple.github.io/foundationdb/known-limitations.html).
+
+  ### Layer
+
+  `ecto_foundationdb` implements a specific Layer on the FoundationDB
+  key-value store. This Layer is intended to be generally useful, but you
+  may not find it suitable for your workloads. The Layer is documented in
+  detail at `Ecto.Adapters.FoundationDB.Layer`. This project does not support
+  plugging in other Layers.
+
+  ### Tenants
+
+   * The use of a tenant implies an ownership relationship between the tenant and the data.
+     It's up to you how you use this relationship in your application.
+
+   * Failure to specify a tenant will result in a raised exception at runtime.
+
   ### Migrations
 
-  At first glance, `:ecto_foundationdb` migrations may look similar to that of `:ecto_sql`,
-  but the actual execution of migrations and how your app must be configured are very
-  different, so please read this section in full.
+  The following are not supported:
 
-  If your app uses indexes on any of your schemas, you must define a `:migrator`
-  option on your repo that is a module implementing the `Ecto.Adapters.FoundationDB.Migrator`
-  behaviour.
+  * Renaming a table
+  * Renaming a field
+  * Dropping an index
+  * Moving down in migration bersions (rollback)
 
-  Migrations are only used for index management. There are no tables to add, drop, or modify.
-  When you add a field to your Schema, any read requests on old objects will return `nil` in
-  that field. Right now there is no way to rename a field.
-
-  As tenants are opened during your application runtime, migrations will be executed
-  automatically. This distributes the migration across a potentially long period of time,
-  as migrations will not be executed unless the tenant is opened.
-
-  Migrations can be completed in full with a call to
-  `Ecto.Adapters.FoundationDB.Migrator.up_all/1`. Depending on how many tenants you have in
-  your database, and the size of the data for each tenant, this operation might take a long
-  time and make heavy use of system resources. It is safe to interrupt this operation, as
-  migrations are performed transactionally. However, if you interrupt a migration, the next
-  attempt for that tenant may have a brief delay (~5 sec); the migrator must ensure that the
-  previous migration has indeed stopped executing.
-
-  The `:migrator` is a module in your application runtime that provides the full list of
-  ordered migrations. These are the migrations that will be executed when a tenant is opened.
-  If you leave out a migration from the list, it will not be applied.
-
-  For example, your migrator might look like this:
-
-  ```elixir
-  defmodule MyApp.Migrator do
-    @behaviour Ecto.Adapters.FoundationDB.Migrator
-
-    @impl true
-    def migrations(MyApp.Repo) do
-      [
-        {0, MyApp.AMigrationForIndexCreation},
-        {1, MyApp.AnIndexWeAddedLaterOn}
-      ]
-    end
-  end
-  ```
-
-  As each tenant is opened at runtime, it will advance version-by-version in
-  FDB transactions until it reaches the latest version.
-
-  Each migration is contained in a separate module, much like EctoSQL's. However, the operations
-  to be carried out **must be returned as a list.** For example, the creation of 2 indexes
-  may look like this:
-
-  ```elixir
-  defmodule MyApp.AMigrationForIndexCreation do
-    use Ecto.Adapters.FoundationDB.Migration
-    def change() do
-      [
-        create(index(User, [:name]),
-        create(index(Post, [:user_id]))
-      ]
-    end
-  end
-  ```
-
-  Note: The following are yet to be implemented.
-
-  1. Dropping an index
-  2. Moving down in migration versions (i.e. rollback)
-
-  Finally, the Mix tasks regarding ecto migrations are not supported.
+  Finally, the Ecto Mix tasks are known to be unsupported:
 
   ```elixir
   # These commands are not supported. Do not use them with :ecto_foundationdb!
+  #    mix ecto.create
+  #    mix ecto.drop
   #    mix ecto.migrate
   #    mix ecto.gen.migration
   #    mix ecto.rollback
   #    mix ecto.migrations
   ```
 
+  ### Key and Value Size
+
+  [FoundationDB has limits on key and value size](https://apple.github.io/foundationdb/known-limitations.html#large-keys-and-values)
+  Please be aware of these limitations as you develop. `:ecto_foundationdb` doesn't make
+  any attempt to protect you from these errors.
+
   ### Other Ecto Features
 
   Many of Ecto's features probably do not work with `ecto_foundationdb`. Please
   see the integration tests for a collection of use cases that is known to work.
 
-  Certainly, you'll find that most queries fail with an Ecto.Adapaters.FoundationDB.Exception.Unsupported
-  exception. The FoundationDB Layer concept precludes complex queries from being executed
-  within the database. Therefore, it only makes sense to implement a limited set of query types --
-  specifically those that do have optimized database query semantics. All other filtering, aggregation,
-  and grouping must be done by your Elixir code.
+  Certainly, you'll find that most queries outside of those detailed in the documentation fail with
+  an `Ecto.Adapaters.FoundationDB.Exception.Unsupported` exception. The FoundationDB Layer concept
+  precludes complex queries from being executed within the database. Therefore, it only makes sense
+  to implement a limited set of query types -- specifically those that do have optimized database
+  query semantics. All other filtering, aggregation, and grouping must be done by your Elixir code.
+
+  In other words, you'll be writing less SQL, and more Elixir.
   """
 
   @behaviour Ecto.Adapter

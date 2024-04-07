@@ -1,7 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
-  @moduledoc """
-  This internal module handles the execution of `:erlfdb` operations within transactions.
-  """
+  @moduledoc false
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Fields

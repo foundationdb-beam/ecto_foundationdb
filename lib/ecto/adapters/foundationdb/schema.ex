@@ -1,7 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.Schema do
-  @moduledoc """
-  This internal module deals with options on the Ecto Schema.
-  """
+  @moduledoc false
   def get_context!(_source, schema) do
     %{__meta__: _meta = %{context: context}} = Kernel.struct!(schema)
     context

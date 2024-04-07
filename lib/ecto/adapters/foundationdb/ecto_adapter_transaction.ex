@@ -1,7 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterTransaction do
-  @moduledoc """
-  Implemenation of Ecto.Adapter.Transaction
-  """
+  @moduledoc false
   alias Ecto.Adapters.FoundationDB
   alias Ecto.Adapters.FoundationDB.Layer.Tx
   @behaviour Ecto.Adapter.Transaction

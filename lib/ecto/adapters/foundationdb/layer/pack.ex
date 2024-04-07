@@ -1,16 +1,15 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Pack do
-  @moduledoc """
-  This internal module creates binaries to be used as FDB keys and values.
+  @moduledoc false
+  # This internal module creates binaries to be used as FDB keys and values.
 
-  Primary writes are stored in
-      {@adapter_prefix, source, @data_namespace, id}
+  # Primary writes are stored in
+  #     {@adapter_prefix, source, @data_namespace, id}
 
-  Default indexes are stored in
-      {@adapter_prefix, source, @index_namespace, index_name, length(index_values), [...index_values...], id}
+  # Default indexes are stored in
+  #     {@adapter_prefix, source, @index_namespace, index_name, length(index_values), [...index_values...], id}
 
-  Schema migrations are stored as primary writes and default indexes with
-      {@migration_prefix, source, ...}
-  """
+  # Schema migrations are stored as primary writes and default indexes with
+  #     {@migration_prefix, source, ...}
 
   @adapter_prefix <<0xFD>>
   @migration_prefix <<0xFE>>

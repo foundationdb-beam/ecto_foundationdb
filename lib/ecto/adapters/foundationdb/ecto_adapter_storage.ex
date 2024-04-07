@@ -1,7 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
-  @moduledoc """
-  Implemenation of Ecto.Adapter.Storage
-  """
+  @moduledoc false
   @behaviour Ecto.Adapter.Storage
 
   alias Ecto.Adapters.FoundationDB.Layer.Pack

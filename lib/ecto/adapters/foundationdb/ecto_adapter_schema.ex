@@ -1,7 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
-  @moduledoc """
-  Implemenation of Ecto.Adapter.Schema
-  """
+  @moduledoc false
   @behaviour Ecto.Adapter.Schema
 
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy

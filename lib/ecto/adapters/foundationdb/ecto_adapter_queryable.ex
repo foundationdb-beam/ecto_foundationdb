@@ -1,7 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
-  @moduledoc """
-  Implemenation of Ecto.Adapter.Queryable
-  """
+  @moduledoc false
   @behaviour Ecto.Adapter.Queryable
 
   alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy

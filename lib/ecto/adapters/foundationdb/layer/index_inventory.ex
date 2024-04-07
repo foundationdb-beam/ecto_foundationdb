@@ -1,7 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.IndexInventory do
-  @moduledoc """
-  This is an internal module that manages index creation and metadata.
-  """
+  @moduledoc false
   alias Ecto.Adapters.FoundationDB.Layer.Indexer.Default
   alias Ecto.Adapters.FoundationDB.Layer.Indexer.MaxValue
   alias Ecto.Adapters.FoundationDB.Layer.Pack

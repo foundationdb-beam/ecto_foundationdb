@@ -1,9 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.QueryPlan do
-  @moduledoc """
-  This internal module parses Ecto Query into simpler constructs.
-
-  The FoundationDB Adapter does not support the full Query API.
-  """
+  @moduledoc false
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Fields
   alias Ecto.Adapters.FoundationDB.QueryPlan.Between

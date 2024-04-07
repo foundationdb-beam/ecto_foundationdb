@@ -1,14 +1,12 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.MaxValue do
-  @moduledoc """
-  From a specified field on a schema, stores the max value.
+  @moduledoc false
+  # From a specified field on a schema, stores the max value.
 
-  This has optimal performance for values where the max is increasing.
-  If the max decreases, then the full schema must be scanned to compute
-  the new max.
+  # This index assumes:
+  #   * the field value is an unsigned integer
+  #   * the max is monotonically non-decreasing
 
-  It is also written to assume that any value is an unsigned integer. A
-  value of -1 is returned if there are no values.
-  """
+  # A value of -1 is returned if there are no values.
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Indexer
   alias Ecto.Adapters.FoundationDB.Layer.Pack

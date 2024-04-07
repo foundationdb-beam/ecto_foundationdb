@@ -1,7 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapter do
-  @moduledoc """
-  Implemenation of Ecto.Adapter
-  """
+  @moduledoc false
   @behaviour Ecto.Adapter
 
   @impl Ecto.Adapter

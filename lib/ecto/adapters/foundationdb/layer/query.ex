@@ -1,7 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Query do
-  @moduledoc """
-  This internal module handles execution of Ecto Query requests.
-  """
+  @moduledoc false
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
   alias Ecto.Adapters.FoundationDB.Layer.Fields
   alias Ecto.Adapters.FoundationDB.Layer.Indexer

@@ -1,6 +1,8 @@
 defmodule EctoFoundationdb.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+
   def project do
     [
       app: :ecto_foundationdb,
@@ -12,7 +14,21 @@ defmodule EctoFoundationdb.MixProject do
       aliases: aliases(),
       dialyzer: [
         ignore_warnings: ".dialyzer_ignore.exs"
-      ]
+      ],
+
+      # Docs
+      name: "Ecto.Adapters.FoundationDB",
+      docs: docs()
+    ]
+  end
+
+  defp docs do
+    [
+      main: "Ecto.Adapters.FoundationDB",
+      source_ref: "v#{@version}",
+      source_url: "https://github.com/foundationdb-beam/ecto_foundationdb",
+      filter_modules:
+        ~r/^Elixir.Ecto.Adapters.FoundationDB(.Layer|.Sandbox|.Migrator|.Database|.Tenant|.Options|.Exception.Unsupported|.Exception.IncorrectTenancy)?$/
     ]
   end
 
@@ -29,14 +45,12 @@ defmodule EctoFoundationdb.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      # {:dep_from_hexpm, "~> 0.3.0"},
       {:erlfdb, git: "https://github.com/foundationdb-beam/erlfdb.git", branch: "main"},
       {:ecto, "~> 3.10"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.6", only: [:dev, :test, :docs]},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-
-      # Benchmarks
+      {:ex_doc, "~> 0.16", only: :dev, runtime: false},
       {:benchee, "~> 1.0", only: :dev}
     ]
   end

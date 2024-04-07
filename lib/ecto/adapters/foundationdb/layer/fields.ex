@@ -1,9 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.Layer.Fields do
-  @moduledoc """
-  Some functions to assist with managing the fields in an object as it is written to FDB storage.
-
-  The object is stored as a Keyword.
-  """
+  @moduledoc false
 
   @doc """
   Ecto provides a compiled set of 'select's. We simply pull the field names out

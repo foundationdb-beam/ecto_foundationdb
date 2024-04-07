@@ -1,8 +1,5 @@
 defmodule Ecto.Adapters.FoundationDB.Supervisor do
-  @moduledoc """
-  This is a top-level supervisor for the FoundationDB Adapter under which
-  children may be added in the future.
-  """
+  @moduledoc false
   use Supervisor
 
   def start_link(init_arg) do

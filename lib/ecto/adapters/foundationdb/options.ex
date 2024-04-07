@@ -1,6 +1,6 @@
 defmodule Ecto.Adapters.FoundationDB.Options do
   @moduledoc """
-  This internal module handles the options that are available to the application developer.
+  Options for `Ecto.Adapters.FoundationDB`.
   """
 
   @type option() ::
