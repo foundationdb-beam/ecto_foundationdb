@@ -5,6 +5,7 @@ defmodule EctoFoundationdb.MixProject do
     [
       app: :ecto_foundationdb,
       version: "0.1.0",
+      description: "FoundationDB adapter for Ecto",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -13,10 +14,20 @@ defmodule EctoFoundationdb.MixProject do
       dialyzer: [
         ignore_warnings: ".dialyzer_ignore.exs"
       ],
+      package: package(),
 
       # Docs
       name: "Ecto.Adapters.FoundationDB",
       docs: docs()
+    ]
+  end
+
+  defp package() do
+    [
+      licenses: ["Apache-2.0"],
+      links: %{
+        "GitHub" => "https://github.com/foundationdb-beam/ecto_foundationdb"
+      }
     ]
   end
 
@@ -42,7 +53,7 @@ defmodule EctoFoundationdb.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:erlfdb, git: "https://github.com/foundationdb-beam/erlfdb.git", branch: "main"},
+      {:erlfdb, "~> 0.1.0"},
       {:ecto, "~> 3.10"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.6", only: [:dev, :test, :docs]},
