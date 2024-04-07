@@ -39,8 +39,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       end)
 
     num_ins =
-      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs ->
-        Tx.insert_all(tx, schema, source, context, entries, idxs)
+      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
+        Tx.insert_all(tx, {schema, source, context}, entries, idxs, partial_idxs)
       end)
 
     {num_ins, nil}
@@ -79,8 +79,16 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     pk = filters[pk_field]
 
     res =
-      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs ->
-        Tx.update_pks(tx, schema, source, context, pk_field, [pk], update_data, idxs)
+      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
+        Tx.update_pks(
+          tx,
+          {schema, source, context},
+          pk_field,
+          [pk],
+          update_data,
+          idxs,
+          partial_idxs
+        )
       end)
 
     case res do
@@ -100,15 +108,15 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _returning,
         _options
       ) do
-    %{source: source, schema: schema, prefix: tenant} =
+    %{source: source, schema: schema, prefix: tenant, context: context} =
       assert_tenancy!(adapter_opts, schema_meta)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
     res =
-      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs ->
-        Tx.delete_pks(tx, schema, source, [pk], idxs)
+      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
+        Tx.delete_pks(tx, {schema, source, context}, [pk], idxs, partial_idxs)
       end)
 
     case res do

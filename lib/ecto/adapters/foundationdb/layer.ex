@@ -115,7 +115,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
   There can be 0 or 1 Between clauses, and if one exists, it must correspond to the final constraint in the where clause when
   compared against the order of the index fields.
 
-  ### Advanced Options: `write_primary: false`, `mapped?: false`, and `from: <index_name>`
+  ### Advanced Options: `write_primary: false`, `mapped?: false`
 
   If you choose to use `write_primary: false` on your schema, this skips the Primary Write. The consequence of this are as follows:
 
@@ -125,8 +125,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer do
       be able to retrieve the struct data with a single `erlfdb:get_range/3`.
    3. The data can **only** be managed by providing a query on the index. You will not be able to access the data
       via the primary key.
-   4. If a later migration creates a new index, it must provide the `from: <index_name>` option to specify the
-      index to read the data from.
+   4. If `write_primary: false`, then only one index can be created.
 
   ## User-defined Indexes
 

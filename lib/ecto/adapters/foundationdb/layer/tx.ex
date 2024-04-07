@@ -80,7 +80,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     end
   end
 
-  def insert_all(tx, schema, source, context, entries, idxs) do
+  def insert_all(tx, {schema, source, context}, entries, idxs, partial_idxs) do
     entries =
       entries
       |> Enum.map(fn {{pk_field, pk}, data_object} ->
@@ -99,7 +99,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         fdb_value = Pack.to_fdb_value(data_object)
 
         if write_primary, do: do_set(tx, fdb_key, fdb_value)
-        Indexer.set(tx, idxs, schema, {fdb_key, data_object})
+        Indexer.set(tx, idxs, partial_idxs, schema, {fdb_key, data_object})
         count + 1
 
       _tx, {key, _}, _result, _acc ->
@@ -109,7 +109,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     pipeline(tx, entries, get_stage, 0, set_stage)
   end
 
-  def update_pks(tx, schema, source, context, pk_field, pks, set_data, idxs) do
+  def update_pks(tx, {schema, source, context}, pk_field, pks, set_data, idxs, partial_idxs) do
     keys = for pk <- pks, do: Pack.primary_pack(source, pk)
 
     write_primary = Schema.get_option(context, :write_primary)
@@ -130,6 +130,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
           {fdb_key, data_object},
           [set: set_data],
           idxs,
+          partial_idxs,
           write_primary
         )
 
@@ -146,6 +147,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         {fdb_key, data_object},
         updates,
         idxs,
+        partial_idxs,
         write_primary
       ) do
     set_data = Keyword.get(updates, :set, [])
@@ -156,10 +158,10 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
       |> Fields.to_front(pk_field)
 
     if write_primary, do: do_set(tx, fdb_key, Pack.to_fdb_value(data_object))
-    Indexer.update(tx, idxs, schema, {fdb_key, data_object})
+    Indexer.update(tx, idxs, partial_idxs, schema, {fdb_key, data_object})
   end
 
-  def delete_pks(tx, schema, source, pks, idxs) do
+  def delete_pks(tx, {schema, source, _context}, pks, idxs, partial_idxs) do
     keys = for pk <- pks, do: Pack.primary_pack(source, pk)
 
     get_stage = &:erlfdb.get/2
@@ -169,7 +171,13 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
         acc
 
       tx, fdb_key, fdb_value, acc ->
-        delete_data_object(tx, schema, {fdb_key, Pack.from_fdb_value(fdb_value)}, idxs)
+        delete_data_object(
+          tx,
+          schema,
+          {fdb_key, Pack.from_fdb_value(fdb_value)},
+          idxs,
+          partial_idxs
+        )
 
         acc + 1
     end
@@ -177,10 +185,10 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Tx do
     pipeline(tx, keys, get_stage, 0, clear_stage)
   end
 
-  def delete_data_object(tx, schema, kv = {fdb_key, _}, idxs) do
+  def delete_data_object(tx, schema, kv = {fdb_key, _}, idxs, partial_idxs) do
     :erlfdb.clear(tx, fdb_key)
 
-    Indexer.clear(tx, idxs, schema, kv)
+    Indexer.clear(tx, idxs, partial_idxs, schema, kv)
   end
 
   def clear_all(tx, %{opts: _adapter_opts}, source) do

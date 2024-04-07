@@ -19,15 +19,3 @@ defmodule EctoFoundationDB.Integration.Migration.EventIndex do
     ]
   end
 end
-
-defmodule EctoFoundationDB.Integration.Migration.IndexFromEventIndex do
-  @moduledoc false
-  alias EctoFoundationDB.Schemas.Event
-  use Ecto.Adapters.FoundationDB.Migration
-
-  def change() do
-    [
-      create(index(Event, [:user_id], options: [from: :events_date_user_id_time_index]))
-    ]
-  end
-end

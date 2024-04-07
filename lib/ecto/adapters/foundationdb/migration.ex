@@ -49,7 +49,7 @@ defmodule Ecto.Adapters.FoundationDB.Migration do
               name: nil,
               columns: [],
               unique: false,
-              concurrently: false,
+              concurrently: true,
               using: nil,
               include: [],
               only: false,

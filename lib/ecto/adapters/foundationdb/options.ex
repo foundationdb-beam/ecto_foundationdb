@@ -9,6 +9,7 @@ defmodule Ecto.Adapters.FoundationDB.Options do
           | {:open_tenant_callback, function()}
           | {:migrator, module()}
           | {:cluster_file, :erlfdb.cluster_filename()}
+          | {:migration_step, integer()}
 
   @type t() :: [option()]
 
@@ -26,6 +27,12 @@ defmodule Ecto.Adapters.FoundationDB.Options do
 
   def get(options, :migrator),
     do: Keyword.get(options, :migrator, nil)
+
+  def get(options, :migration_step),
+    do: Keyword.get(options, :migration_step, 1000)
+
+  def get(options, :idx_cache),
+    do: Keyword.get(options, :idx_cache, :enabled)
 
   def get(options, key),
     do:

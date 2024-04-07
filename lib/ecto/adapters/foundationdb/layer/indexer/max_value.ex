@@ -18,23 +18,33 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.MaxValue do
   def decode(:not_found), do: -1
   def decode(x), do: :binary.decode_unsigned(x, :little)
 
-  def create(tx, idx, _schema) do
+  @impl true
+  def create_range(idx) do
+    source = idx[:source]
+    Pack.primary_range(source)
+  end
+
+  @impl true
+  def create(tx, idx, _schema, {start_key, end_key}, limit) do
     index_name = idx[:id]
     source = idx[:source]
     [max_field] = idx[:fields]
 
-    {key_start, key_end} = Pack.primary_range(source)
+    keys =
+      tx
+      |> :erlfdb.get_range(start_key, end_key, limit: limit)
+      |> :erlfdb.wait()
+      |> Enum.map(fn {fdb_key, fdb_value} ->
+        data = Pack.from_fdb_value(fdb_value)
+        val = data[max_field]
+        :erlfdb.max(tx, key(source, index_name), val)
+        fdb_key
+      end)
 
-    tx
-    |> :erlfdb.get_range(key_start, key_end)
-    |> :erlfdb.wait()
-    |> Enum.each(fn {_fdb_key, fdb_value} ->
-      data = Pack.from_fdb_value(fdb_value)
-      val = data[max_field]
-      :erlfdb.max(tx, key(source, index_name), val)
-    end)
+    {length(keys), {List.last(keys), end_key}}
   end
 
+  @impl true
   def set(tx, idx, _schema, {_, data}) do
     index_name = idx[:id]
     source = idx[:source]
@@ -43,7 +53,8 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.MaxValue do
     :erlfdb.max(tx, key(source, index_name), val)
   end
 
-  def clear(tx, idx, schema, {_, data}) do
+  @impl true
+  def clear(tx, idx, _schema, {_, data}) do
     index_name = idx[:id]
     source = idx[:source]
     [max_field] = idx[:fields]
@@ -58,14 +69,16 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.MaxValue do
 
     if val == db_val do
       # expensive
-      :erlfdb.clear(tx, key)
-      create(tx, idx, schema)
+      raise Unsupported, """
+      MaxValue decrease not supported.
+      """
     else
       # someone else is the max, so we are free to do nothing
       :ok
     end
   end
 
+  @impl true
   def range(_idx, _plan, _options) do
     raise Unsupported, """
     Using an Ecto Query on an index created with #{__MODULE__} isn't supported.

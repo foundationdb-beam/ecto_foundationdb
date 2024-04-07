@@ -38,9 +38,13 @@ Benchee.run(
     "idx_cache disabled" => :disabled
   },
   before_scenario: fn input ->
-    Application.put_env(:ecto_foundationdb, :idx_cache, input)
+    try do
+      FDBRepo.stop()
+    catch _, _ -> :ok end
+    {:ok, _pid} = FDBRepo.start_link(log: false, idx_cache: input)
     {input, :ok}
   end
 )
 
+{:ok, _pid} = FDBRepo.start_link(log: false)
 FDBRepo.delete_all(User, prefix: tenant)

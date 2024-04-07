@@ -1,11 +1,8 @@
 defmodule Ecto.Integration.TimeSeriesTest do
   use Ecto.Integration.Case, async: false
 
-  alias EctoFoundationDB.Integration.TestMigrator2
-
   alias Ecto.Adapters.FoundationDB
   alias Ecto.Adapters.FoundationDB.Exception.Unsupported
-  alias Ecto.Adapters.FoundationDB.Migrator
 
   alias Ecto.Integration.TestRepo
 
@@ -95,26 +92,6 @@ defmodule Ecto.Integration.TimeSeriesTest do
       assert {1, _} = TestRepo.delete_all(query, prefix: tenant)
 
       assert [] == TestRepo.all(query, prefix: tenant)
-    end
-
-    test "index from index", context do
-      tenant = context[:tenant]
-
-      {:ok, %Event{id: event_id}} =
-        %Event{date: ~D[2070-01-01], user_id: "foo", time: ~T[00:00:00.000000]}
-        |> FoundationDB.usetenant(tenant)
-        |> TestRepo.insert()
-
-      query = from(e in Event, where: e.user_id == ^"foo")
-
-      assert_raise Unsupported,
-                   ~r/You must provide equals clauses for the first set of fields/,
-                   fn ->
-                     TestRepo.all(query, prefix: tenant)
-                   end
-
-      :ok = Migrator.up_all(TestRepo, migrator: TestMigrator2)
-      assert [%Event{id: ^event_id}] = TestRepo.all(query, prefix: tenant)
     end
   end
 end
