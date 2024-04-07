@@ -3,13 +3,13 @@ Logger.configure(level: :info)
 alias Ecto.Integration.TestRepo
 
 Application.put_env(:ecto_foundationdb, TestRepo,
-  open_db: &Ecto.Adapters.FoundationDB.Sandbox.open_db/0,
-  storage_id: Ecto.Adapters.FoundationDB.Sandbox,
+  open_db: &EctoFoundationDB.Sandbox.open_db/0,
+  storage_id: EctoFoundationDB.Sandbox,
   migrator: EctoFoundationDB.Integration.TestMigrator
 )
 
 defmodule TenantsForCase do
-  alias Ecto.Adapters.FoundationDB.Sandbox
+  alias EctoFoundationDB.Sandbox
 
   def setup(options) do
     tenant1 = Ecto.UUID.autogenerate()

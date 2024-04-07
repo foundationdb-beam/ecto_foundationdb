@@ -9,8 +9,9 @@ defmodule Ecto.Integration.CrudTest do
   alias EctoFoundationDB.Schemas.User
 
   alias Ecto.Adapters.FoundationDB
-  alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
-  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
+
+  alias EctoFoundationDB.Exception.IncorrectTenancy
+  alias EctoFoundationDB.Exception.Unsupported
 
   import Ecto.Query
 

@@ -1,10 +1,10 @@
 Code.require_file("../support/setup.exs", __DIR__)
 
-alias Ecto.Adapters.FoundationDB.Tenant
+alias EctoFoundationDB.Tenant
 alias Ecto.Bench.FDBRepo
 alias Ecto.Bench.User
 
-tenant = Tenant.open_empty!(FDBRepo, "Ecto.Adapters.FoundationDB.Bench")
+tenant = Tenant.open_empty!(FDBRepo, "EctoFoundationDB.Bench")
 
 limit = 1_000
 

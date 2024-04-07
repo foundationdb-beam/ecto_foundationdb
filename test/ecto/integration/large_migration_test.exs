@@ -3,7 +3,8 @@ defmodule Ecto.Integration.LargeMigrationTest do
 
   alias Ecto.Integration.TestRepo
 
-  alias Ecto.Adapters.FoundationDB.Tenant
+  alias EctoFoundationDB.Tenant
+
   alias EctoFoundationDB.Integration.TestMigrator
   alias EctoFoundationDB.Schemas.User
 

@@ -6,8 +6,9 @@ defmodule Ecto.Integration.MigrationsTest do
   alias EctoFoundationDB.Schemas.User
 
   alias Ecto.Adapters.FoundationDB
-  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
-  alias Ecto.Adapters.FoundationDB.Migrator
+
+  alias EctoFoundationDB.Exception.Unsupported
+  alias EctoFoundationDB.Migrator
 
   import Ecto.Query
 

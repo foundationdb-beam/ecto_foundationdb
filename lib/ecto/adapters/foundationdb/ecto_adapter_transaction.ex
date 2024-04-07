@@ -1,7 +1,7 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterTransaction do
   @moduledoc false
   alias Ecto.Adapters.FoundationDB
-  alias Ecto.Adapters.FoundationDB.Layer.Tx
+  alias EctoFoundationDB.Layer.Tx
   @behaviour Ecto.Adapter.Transaction
 
   @rollback :__ectofdbtxrollback__

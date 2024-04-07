@@ -2,7 +2,7 @@ defmodule Ecto.Integration.TestRepo do
   @moduledoc """
   This is the Ecto Repo module under which all integration tests run.
 
-  The integration tests use `Ecto.Adapters.FoundationDB.Sandbox' for managing
+  The integration tests use `EctoFoundationDB.Sandbox' for managing
   a standalone FoundationDB cluster.
   """
 

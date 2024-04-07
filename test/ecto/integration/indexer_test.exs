@@ -2,9 +2,11 @@ defmodule Ecto.Integration.IndexerTest do
   use Ecto.Integration.MigrationsCase, async: true
 
   alias Ecto.Adapters.FoundationDB
-  alias Ecto.Adapters.FoundationDB.Layer.Indexer
-  alias Ecto.Adapters.FoundationDB.Layer.Pack
-  alias Ecto.Adapters.FoundationDB.Migrator
+
+  alias EctoFoundationDB.Indexer
+  alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Migrator
+
   alias Ecto.Integration.TestRepo
 
   alias EctoFoundationDB.Schemas.User
@@ -16,15 +18,14 @@ defmodule Ecto.Integration.IndexerTest do
   defmodule TestMigrator do
     @moduledoc false
 
-    @behaviour Ecto.Adapters.FoundationDB.Migrator
+    use EctoFoundationDB.Migrator
 
-    @impl true
     def migrations(), do: [{0, TestMigration}]
   end
 
   defmodule TestMigration do
     @moduledoc false
-    use Ecto.Adapters.FoundationDB.Migration
+    use EctoFoundationDB.Migration
 
     def change() do
       [create(index(User, [:name], options: [indexer: NameStartsWithJ]))]
@@ -34,7 +35,7 @@ defmodule Ecto.Integration.IndexerTest do
   defmodule NameStartsWithJ do
     @behaviour Indexer
 
-    alias Ecto.Adapters.FoundationDB.QueryPlan
+    alias EctoFoundationDB.QueryPlan
     @count_key "name_starts_with_J_count"
     @index_key "name_starts_with_J_index/"
 

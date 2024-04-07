@@ -1,12 +1,12 @@
 Code.require_file("../support/setup.exs", __DIR__)
 
-alias Ecto.Adapters.FoundationDB.Tenant
+alias EctoFoundationDB.Tenant
 alias Ecto.Bench.FDBRepo
 alias Ecto.Bench.User
 
-{:ok, _pid} = FDBRepo.start_link(log: false)
+FDBRepo.start_link(log: false)
 
-tenant = Tenant.open_empty!(FDBRepo, "Ecto.Adapters.FoundationDB.Bench", [])
+tenant = Tenant.open_empty!(FDBRepo, "EctoFoundationDB.Bench", [])
 
 inputs = %{
   "Struct" => fn -> struct(User, User.sample_data()) end,

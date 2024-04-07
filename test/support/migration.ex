@@ -1,7 +1,7 @@
 defmodule EctoFoundationDB.Integration.Migration.UserIndex do
   @moduledoc false
   alias EctoFoundationDB.Schemas.User
-  use Ecto.Adapters.FoundationDB.Migration
+  use EctoFoundationDB.Migration
 
   def change() do
     [create(index(User, [:name]))]
@@ -11,7 +11,7 @@ end
 defmodule EctoFoundationDB.Integration.Migration.EventIndex do
   @moduledoc false
   alias EctoFoundationDB.Schemas.Event
-  use Ecto.Adapters.FoundationDB.Migration
+  use EctoFoundationDB.Migration
 
   def change() do
     [

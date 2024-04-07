@@ -1,8 +1,6 @@
 defmodule EctoFoundationdb.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
-
   def project do
     [
       app: :ecto_foundationdb,
@@ -25,10 +23,9 @@ defmodule EctoFoundationdb.MixProject do
   defp docs do
     [
       main: "Ecto.Adapters.FoundationDB",
-      source_ref: "v#{@version}",
       source_url: "https://github.com/foundationdb-beam/ecto_foundationdb",
       filter_modules:
-        ~r/^Elixir.Ecto.Adapters.FoundationDB(.Layer|.Sandbox|.Migrator|.Database|.Tenant|.Options|.Exception.Unsupported|.Exception.IncorrectTenancy)?$/
+        ~r/^Elixir.Ecto.Adapters.FoundationDB|EctoFoundationDB(.Database|.Exception.Unsupported|.Exception.IncorrectTenancy|.Index|.Indexer|.Layer|.Migrator|.Options|.QueryPlan|.Sandbox|.Tenant)?$/
     ]
   end
 

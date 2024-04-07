@@ -4,9 +4,7 @@ Code.require_file("schemas.exs", __DIR__)
 
 alias Ecto.Bench.FDBRepo
 
-Application.put_env(:ecto_foundationdb, FDBRepo,
-  migrator: Ecto.Bench.Migrator
-)
+Application.put_env(:ecto_foundationdb, FDBRepo, [])
 
 {:ok, _} = Ecto.Adapters.FoundationDB.ensure_all_started(FDBRepo.config(), :temporary)
 

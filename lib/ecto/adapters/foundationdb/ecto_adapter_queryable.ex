@@ -2,14 +2,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   @moduledoc false
   @behaviour Ecto.Adapter.Queryable
 
-  alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
-  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
-  alias Ecto.Adapters.FoundationDB.Layer.Fields
-  alias Ecto.Adapters.FoundationDB.Layer.Ordering
-  alias Ecto.Adapters.FoundationDB.Layer.Query
-  alias Ecto.Adapters.FoundationDB.Layer.Tx
-  alias Ecto.Adapters.FoundationDB.QueryPlan
-  alias Ecto.Adapters.FoundationDB.Schema
+  alias EctoFoundationDB.Exception.IncorrectTenancy
+  alias EctoFoundationDB.Exception.Unsupported
+  alias EctoFoundationDB.Layer.Fields
+  alias EctoFoundationDB.Layer.Ordering
+  alias EctoFoundationDB.Layer.Query
+  alias EctoFoundationDB.Layer.Tx
+  alias EctoFoundationDB.QueryPlan
+  alias EctoFoundationDB.Schema
 
   @impl Ecto.Adapter.Queryable
   def prepare(

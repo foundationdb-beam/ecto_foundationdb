@@ -1,9 +1,11 @@
-defmodule EctoAdaptersFoundationDBProgressiveJobTest.TestJob do
+defmodule EctoFoundationDBProgressiveJobTest.TestJob do
   @moduledoc false
   alias Ecto.Adapters.FoundationDB
-  alias Ecto.Adapters.FoundationDB.Layer.Pack
-  alias Ecto.Adapters.FoundationDB.ProgressiveJob
-  @behaviour Ecto.Adapters.FoundationDB.ProgressiveJob
+
+  alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.ProgressiveJob
+
+  @behaviour EctoFoundationDB.ProgressiveJob
 
   @done_key "test_job_done"
   @claim_key "test_job"
@@ -81,11 +83,13 @@ defmodule EctoAdaptersFoundationDBProgressiveJobTest.TestJob do
   end
 end
 
-defmodule EctoAdaptersFoundationDBProgressiveJobTest do
-  alias EctoAdaptersFoundationDBProgressiveJobTest.TestJob
+defmodule EctoFoundationDBProgressiveJobTest do
+  alias EctoFoundationDBProgressiveJobTest.TestJob
 
   alias Ecto.Adapters.FoundationDB
-  alias Ecto.Adapters.FoundationDB.Layer.Pack
+
+  alias EctoFoundationDB.Layer.Pack
+
   use Ecto.Integration.MigrationsCase
 
   @n_seed 1000

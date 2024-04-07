@@ -1,9 +1,8 @@
 defmodule EctoFoundationDB.Integration.TestMigrator do
   @moduledoc false
 
-  @behaviour Ecto.Adapters.FoundationDB.Migrator
+  use EctoFoundationDB.Migrator
 
-  @impl true
   def migrations() do
     [
       {0, EctoFoundationDB.Integration.Migration.UserIndex},

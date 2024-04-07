@@ -2,12 +2,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   @moduledoc false
   @behaviour Ecto.Adapter.Schema
 
-  alias Ecto.Adapters.FoundationDB.Exception.IncorrectTenancy
-  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
-  alias Ecto.Adapters.FoundationDB.Layer.Fields
-  alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
-  alias Ecto.Adapters.FoundationDB.Layer.Tx
-  alias Ecto.Adapters.FoundationDB.Schema
+  alias EctoFoundationDB.Exception.IncorrectTenancy
+  alias EctoFoundationDB.Exception.Unsupported
+  alias EctoFoundationDB.Layer.Fields
+  alias EctoFoundationDB.Layer.IndexInventory
+  alias EctoFoundationDB.Layer.Tx
+  alias EctoFoundationDB.Schema
 
   @impl Ecto.Adapter.Schema
   def autogenerate(:binary_id), do: Ecto.UUID.generate()

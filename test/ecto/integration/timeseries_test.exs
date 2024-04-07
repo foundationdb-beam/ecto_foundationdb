@@ -2,7 +2,8 @@ defmodule Ecto.Integration.TimeSeriesTest do
   use Ecto.Integration.Case, async: false
 
   alias Ecto.Adapters.FoundationDB
-  alias Ecto.Adapters.FoundationDB.Exception.Unsupported
+
+  alias EctoFoundationDB.Exception.Unsupported
 
   alias Ecto.Integration.TestRepo
 

@@ -2,8 +2,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterStorage do
   @moduledoc false
   @behaviour Ecto.Adapter.Storage
 
-  alias Ecto.Adapters.FoundationDB.Layer.Pack
-  alias Ecto.Adapters.FoundationDB.Options
+  alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Options
 
   @all_data_start_key ""
   @all_data_end_key <<0xFF>>
