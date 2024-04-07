@@ -20,17 +20,23 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer do
   def create(tx, idx, schema, range, limit),
     do: idx[:indexer].create(tx, idx, schema, range, limit)
 
-  def set(tx, idxs, schema, kv) do
+  def set(tx, idxs, partial_idxs, schema, kv) do
+    idxs = idxs ++ filter_partials(partial_idxs, kv, [])
+
     for idx <- idxs,
         do: idx[:indexer].set(tx, idx, schema, kv)
   end
 
-  def clear(tx, idxs, schema, kv) do
+  def clear(tx, idxs, partial_idxs, schema, kv) do
+    idxs = idxs ++ filter_partials(partial_idxs, kv, [])
+
     for idx <- idxs,
         do: idx[:indexer].clear(tx, idx, schema, kv)
   end
 
-  def update(tx, idxs, schema, kv) do
+  def update(tx, idxs, partial_idxs, schema, kv) do
+    idxs = idxs ++ filter_partials(partial_idxs, kv, [])
+
     for idx <- idxs do
       apply(
         idx[:indexer],
@@ -67,6 +73,22 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer do
       apply(module, fun, args)
     else
       apply(default_fun, args)
+    end
+  end
+
+  defp filter_partials([], _kv, acc) do
+    Enum.reverse(acc)
+  end
+
+  defp filter_partials(
+         [{partial_idx, {start_key, cursor_key, _end_key}} | partial_idxs],
+         kv = {fdb_key, _fdb_value},
+         acc
+       ) do
+    if fdb_key >= start_key and fdb_key < cursor_key do
+      filter_partials(partial_idxs, kv, [partial_idx | acc])
+    else
+      filter_partials(partial_idxs, kv, acc)
     end
   end
 end

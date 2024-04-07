@@ -106,15 +106,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
   @impl true
   def create_range(idx) do
     source = idx[:source]
-    options = idx[:options]
-
-    case options[:from] do
-      nil ->
-        Pack.primary_range(source)
-
-      from ->
-        Pack.default_index_range(source, from)
-    end
+    Pack.primary_range(source)
   end
 
   @impl true
@@ -243,4 +235,22 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Indexer.Default do
     all fields must match the Equals clauses.
     """
   end
+
+  # Future development notes:
+  # This is the beginning of supporting creation of indexes from other indexes
+  # (`write_primary: false` and `mapped?: false`). But the rest of the implementation
+  # is not straightforward.
+  #   1. For example when a `set/4` comes in, if the next index is mapped, then we
+  #      need to compute the key for the `:from` index, but we don't have the infomation
+  #      to do so.
+  #   2. During migrations, partial_idxs are managed in the Indexer and they suffer the
+  #       same problem as above.
+  #
+  # case options[:from] do
+  #   nil ->
+  #     Pack.primary_range(source)
+
+  #   from ->
+  #     Pack.default_index_range(source, from)
+  # end
 end

@@ -16,10 +16,11 @@ defmodule Ecto.Adapters.FoundationDB.ProgressiveJob do
 
     It should return a tuple with the following elements:
 
-    `{:ok, claim_key, cursor, state}`
+    `{:ok, claim_keys, cursor, state}`
 
-    The `claim_key` is a key that will be written to FDB and used by `ProgressiveJob` to maintain
-    transactional isolation. It will be cleared after the successful execution of the job.
+    `claim_keys` is a list of keys that will be written to FDB and used by `ProgressiveJob` to maintain
+    transactional isolation. They will will be cleared after the successful execution of the job.
+    Note: `IndexInventory` uses these keys to manage concurrent index creation for each `source`.
 
     The `cursor` terms define the range of terms that will be processed. Each iteration of the job
     must change the cursor to ensure that observers of the job can see progress.
@@ -73,7 +74,7 @@ defmodule Ecto.Adapters.FoundationDB.ProgressiveJob do
 
   defstruct tenant: nil,
             ref: nil,
-            claim_key: nil,
+            claim_keys: [],
             cursor: nil,
             module: nil,
             init_args: nil,
@@ -121,10 +122,10 @@ defmodule Ecto.Adapters.FoundationDB.ProgressiveJob do
     # may follow a different code path. So, any log messages you add are not true evidence
     # of any writes being made to the database. In other words, logs are side effects.
     case module.init(init_args) do
-      {:ok, claim_key, cursor, state} ->
+      {:ok, claim_keys, cursor, state} ->
         job = %__MODULE__{
           job
-          | claim_key: claim_key,
+          | claim_keys: claim_keys,
             cursor: cursor,
             state: state
         }
@@ -149,12 +150,13 @@ defmodule Ecto.Adapters.FoundationDB.ProgressiveJob do
 
       {claimed?, claimed_by, cursor} = claimed?(job, tx)
 
-      if claimed? do
-        if done? do
-          :erlfdb.clear(tx, job.claim_key)
-        else
-          :erlfdb.set(tx, job.claim_key, Pack.to_fdb_value({ref, cursor}))
-        end
+      if claimed? and done? do
+        for claim_key <- job.claim_keys, do: :erlfdb.clear(tx, claim_key)
+      end
+
+      if claimed? and not done? do
+        for claim_key <- job.claim_keys,
+            do: :erlfdb.set(tx, claim_key, Pack.to_fdb_value({ref, cursor}))
       end
 
       %__MODULE__{
@@ -168,7 +170,7 @@ defmodule Ecto.Adapters.FoundationDB.ProgressiveJob do
     end)
   end
 
-  defp tx_stream_next(%__MODULE__{done?: true} = job), do: {:halt, job}
+  defp tx_stream_next(job = %__MODULE__{done?: true}), do: {:halt, job}
 
   defp tx_stream_next(job = %__MODULE__{tenant: tenant}) do
     case FoundationDB.transactional(tenant, &in_tx_stream_next(job, &1)) do
@@ -221,13 +223,15 @@ defmodule Ecto.Adapters.FoundationDB.ProgressiveJob do
 
   # claimed? and done?
   defp in_tx_stream_finish_iteration({emit, job}, tx, _now, true, true, _) do
-    :erlfdb.clear(tx, job.claim_key)
+    for claim_key <- job.claim_keys, do: :erlfdb.clear(tx, claim_key)
     {emit, job}
   end
 
   # claimed? and not done?
   defp in_tx_stream_finish_iteration({emit, job}, tx, _now, true, false, _) do
-    :erlfdb.set(tx, job.claim_key, Pack.to_fdb_value({job.ref, job.cursor}))
+    for claim_key <- job.claim_keys,
+        do: :erlfdb.set(tx, claim_key, Pack.to_fdb_value({job.ref, job.cursor}))
+
     {emit, job}
   end
 
@@ -238,35 +242,43 @@ defmodule Ecto.Adapters.FoundationDB.ProgressiveJob do
 
   # not claimed? and not done? and claim_age > claim_stale_msec()
   defp in_tx_stream_finish_iteration({_emit, job}, tx, now, false, false, true) do
-    :erlfdb.set(tx, job.claim_key, Pack.to_fdb_value({job.ref, job.cursor}))
+    for claim_key <- job.claim_keys,
+        do: :erlfdb.set(tx, claim_key, Pack.to_fdb_value({job.ref, job.cursor}))
+
     in_tx_stream_next(%__MODULE__{job | claim_updated_at: now}, tx)
   end
 
   # not claimed? and not done? and claim_age <= claim_stale_msec()
   defp in_tx_stream_finish_iteration({emit, job}, tx, _now, false, false, false) do
     # Using a watch avoids busy-looping on workers that do not have a claim
-    wclaim = :erlfdb.watch(tx, job.claim_key)
-    after_tx = fn -> await_watched_claim(wclaim) end
+    wclaims = for claim_key <- job.claim_keys, do: :erlfdb.watch(tx, claim_key)
+    after_tx = fn -> await_watched_claims(wclaims) end
     {after_tx, emit, job}
   end
 
-  defp await_watched_claim(wclaim) do
-    try do
-      :erlfdb.wait(wclaim, timeout: claim_watch_timeout())
-    catch
-      :error, {:timeout, _} ->
-        :ok
-    end
+  defp await_watched_claims(wclaims) do
+    :erlfdb.wait_for_any(wclaims, timeout: claim_watch_timeout())
+  catch
+    :error, {:timeout, _} ->
+      :ok
   end
 
-  defp claimed?(%__MODULE__{ref: ref, claim_key: claim_key, cursor: cursor}, tx) do
-    res = :erlfdb.wait(:erlfdb.get(tx, claim_key))
+  defp claimed?(%__MODULE__{ref: ref, claim_keys: claim_keys, cursor: cursor}, tx) do
+    futures = for claim_key <- claim_keys, do: :erlfdb.get(tx, claim_key)
 
-    if res == :not_found do
-      {true, nil, cursor}
-    else
-      {claim_ref, claim_cursor} = Pack.from_fdb_value(res)
-      {claim_ref == ref, claim_ref, claim_cursor}
+    # All values should be equivalent, so we can uniq them
+    res =
+      futures
+      |> :erlfdb.wait_for_all(futures)
+      |> Enum.uniq()
+
+    case res do
+      [:not_found] ->
+        {true, nil, cursor}
+
+      [claim_obj] ->
+        {claim_ref, claim_cursor} = Pack.from_fdb_value(claim_obj)
+        {claim_ref == ref, claim_ref, claim_cursor}
     end
   end
 

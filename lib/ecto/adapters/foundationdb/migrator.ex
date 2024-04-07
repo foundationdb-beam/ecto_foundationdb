@@ -10,12 +10,9 @@ defmodule Ecto.Adapters.FoundationDB.Migrator do
   @callback migrations() :: [{non_neg_integer(), module()}]
 
   alias Ecto.Adapters.FoundationDB
+  alias Ecto.Adapters.FoundationDB.MigrationsPJ
   alias Ecto.Adapters.FoundationDB.Options
   alias Ecto.Adapters.FoundationDB.Tenant
-  alias Ecto.Adapters.FoundationDB.MigrationsPJ
-
-  # todo
-  @limit 1000
 
   @spec up_all(Ecto.Repo.t(), Options.t()) :: :ok
   def up_all(repo, options \\ []) do
@@ -49,11 +46,12 @@ defmodule Ecto.Adapters.FoundationDB.Migrator do
 
   def up(repo, tenant, options) do
     migrator = Options.get(options, :migrator)
+    limit = Options.get(options, :migration_step)
 
     if is_nil(migrator) do
       :ok
     else
-      MigrationsPJ.transactional(repo, tenant, migrator, @limit)
+      MigrationsPJ.transactional(repo, tenant, migrator, limit)
     end
 
     :ok

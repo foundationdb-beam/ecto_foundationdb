@@ -4,6 +4,8 @@ alias Ecto.Adapters.FoundationDB.Tenant
 alias Ecto.Bench.FDBRepo
 alias Ecto.Bench.User
 
+{:ok, _pid} = FDBRepo.start_link(log: false)
+
 tenant = Tenant.open_empty!(FDBRepo, "Ecto.Adapters.FoundationDB.Bench", [])
 
 inputs = %{

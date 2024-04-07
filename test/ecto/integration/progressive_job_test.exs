@@ -33,7 +33,7 @@ defmodule EctoAdaptersFoundationDBProgressiveJobTest.TestJob do
   @impl true
   def init(args) do
     state = args |> Map.put(:count, 0)
-    {:ok, @claim_key, {"", "\xFF"}, state}
+    {:ok, [@claim_key], {"", "\xFF"}, state}
   end
 
   @impl true
@@ -56,7 +56,7 @@ defmodule EctoAdaptersFoundationDBProgressiveJobTest.TestJob do
       |> :erlfdb.wait()
 
     # Pretend that we're writing to a bunch of keys, as we would be doing for index creation
-    Enum.map(kvs, fn {k, _} -> :erlfdb.add_write_conflict_key(tx, "test_" <> k) end)
+    Enum.each(kvs, fn {k, _} -> :erlfdb.add_write_conflict_key(tx, "test_" <> k) end)
 
     emit =
       if length(kvs) < @limit do
@@ -82,8 +82,9 @@ defmodule EctoAdaptersFoundationDBProgressiveJobTest.TestJob do
 end
 
 defmodule EctoAdaptersFoundationDBProgressiveJobTest do
-  alias Ecto.Adapters.FoundationDB
   alias EctoAdaptersFoundationDBProgressiveJobTest.TestJob
+
+  alias Ecto.Adapters.FoundationDB
   alias Ecto.Adapters.FoundationDB.Layer.Pack
   use Ecto.Integration.MigrationsCase
 

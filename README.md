@@ -101,8 +101,7 @@ of the underlying data store.
 
 The layer implemented in `ecto_foundationdb` shares some features with the official
 [Record Layer](https://github.com/FoundationDB/fdb-record-layer); however, we have not yet
-endeavored to implement it. A mechanism to introduce pluggable Layers into this adapter is on the
-roadmap.
+endeavored to implement it. A mechanism to introduce pluggable Layers into this adapter is not on the roadmap.
 
 The `ecto_foundationdb` Layer supports the following data access patterns.
 

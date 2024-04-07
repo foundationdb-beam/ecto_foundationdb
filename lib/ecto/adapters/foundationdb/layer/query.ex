@@ -21,7 +21,9 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   """
   def all(db_or_tenant, adapter_meta, plan, options \\ []) do
     {plan, kvs} =
-      IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx, idxs ->
+      IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx,
+                                                                               idxs,
+                                                                               _partial_idxs ->
         plan = make_range(idxs, plan, options)
         {plan, tx_get_range(tx, plan, options)}
       end)
@@ -40,9 +42,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   Executes a query for updating data.
   """
   def update(db_or_tenant, adapter_meta, plan) do
-    IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx, idxs ->
+    IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx,
+                                                                             idxs,
+                                                                             partial_idxs ->
       plan = make_range(idxs, plan, [])
-      tx_update_range(tx, plan, idxs)
+      tx_update_range(tx, plan, idxs, partial_idxs)
     end)
   end
 
@@ -55,9 +59,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
   end
 
   def delete(db_or_tenant, adapter_meta, plan) do
-    IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx, idxs ->
+    IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx,
+                                                                             idxs,
+                                                                             partial_idxs ->
       plan = make_range(idxs, plan, [])
-      tx_delete_range(tx, plan, idxs)
+      tx_delete_range(tx, plan, idxs, partial_idxs)
     end)
   end
 
@@ -116,7 +122,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     :erlfdb.wait(:erlfdb.get_mapped_range(tx, start_key, end_key, mapper, get_options))
   end
 
-  defp tx_update_range(tx, plan = %QueryPlan{updates: updates}, idxs) do
+  defp tx_update_range(tx, plan = %QueryPlan{updates: updates}, idxs, partial_idxs) do
     pk_field = Fields.get_pk_field!(plan.schema)
     write_primary = Schema.get_option(plan.context, :write_primary)
 
@@ -131,6 +137,7 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
         &1,
         updates,
         idxs,
+        partial_idxs,
         write_primary
       )
     )
@@ -138,11 +145,11 @@ defmodule Ecto.Adapters.FoundationDB.Layer.Query do
     |> length()
   end
 
-  defp tx_delete_range(tx, plan, idxs) do
+  defp tx_delete_range(tx, plan, idxs, partial_idxs) do
     tx
     |> tx_get_range(plan, [])
     |> unpack_and_filter(plan)
-    |> Stream.map(&Tx.delete_data_object(tx, plan.schema, &1, idxs))
+    |> Stream.map(&Tx.delete_data_object(tx, plan.schema, &1, idxs, partial_idxs))
     |> Enum.to_list()
     |> length()
   end

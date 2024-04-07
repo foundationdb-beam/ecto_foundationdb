@@ -21,6 +21,9 @@ defmodule Ecto.Adapters.FoundationDB do
        FoundationDB cluster. Defaults to `:erlfdb.open(cluster_file)`. When
        using `Ecto.Adapters.FoundationDB.Sandbox`, you should consider setting
        this option to `Sandbox.open_db/0`.
+    * `:migration_step` - The maximum number of keys to process in a single transaction
+      when running migrations. Defaults to `1000`. If you use a number that is
+      too large, the FDB transactions run by the Migrator will fail.
 
   ## Limitations and caveats
 
@@ -39,6 +42,27 @@ defmodule Ecto.Adapters.FoundationDB do
   retrieves it with `:erlang.binary_to_term/1`. As such, there is no data type
   conversion between Elixir types and Database Types. Any term you put in your
   struct will be stored and later retrieved.
+
+  Data types are used by `ecto_foundationdb` for the creation and querying of indexes.
+  Certain Ecto types are encoded into the FDB key, which allows you to formulate
+  Between queries on indexes of these types:
+
+   - `:id`
+   - `:binary_id`
+   - `:integer`
+   - `:float`
+   - `:boolean`
+   - `:string`
+   - `:binary`
+   - `:date`
+   - `:time`
+   - `:time_usec`
+   - `:naive_datetime`
+   - `:naive_datetime_usec`
+   - `:utc_datetime`
+   - `:utc_datetime_usec`
+
+  See Queries for more information.
 
   ### Key and Value Size
 
@@ -61,16 +85,18 @@ defmodule Ecto.Adapters.FoundationDB do
   we suggest that you first extract all the data that you need using a supported
   query and then constrain, aggregate, and group as needed with Elixir functions.
 
+  In other words, you will be writing less SQL and more Elixir.
+
     * `Repo.get` using primary key
     * `Repo.all` using no constraint. This will return all such structs for
       the tenant.
-    * `Repo.all` using an 'equal' constraint on an index field. This will return
+    * `Repo.all` using an Equal constraint on an index field. This will return
       matching structs for the tenant.
 
       ```elixir
       from(u in User, where: u.name == ^"John")
       ```
-    * `Repo.all` using a 'between' contraint on a time series index field. This will
+    * `Repo.all` using a Between constraint on a compatible index field. This will
       return structs in the tenant that have a timestamp between the given timespan
       in the query.
 
@@ -81,8 +107,6 @@ defmodule Ecto.Adapters.FoundationDB do
             e.timestamp < ^~N[2100-01-01 00:00:00]
       )
       ```
-
-    More on indexes below.
 
   ### Indexes
 
@@ -96,23 +120,20 @@ defmodule Ecto.Adapters.FoundationDB do
        this is the only supported purpose of migration files so far. And this is
        where the similarities with Ecto SQL end.
 
-    2. Each Default index roughly doubles the size of data in your database for the
-       schema on which it's created.
-
-    3. Indexes are managed within transactions, so that they will always be
+    2. Indexes are managed within transactions, so that they will always be
        consistent.
 
-    4. Upon index creation, each tenant's data will be indexed in a stream of FDB
+    3. Upon index creation, each tenant's data will be indexed in a stream of FDB
        transactions. This stream maintains transactional isolation for each tenant
        as they migrate. See `ProgressiveJob` for more.
 
-    5. Migrations must be executed on a per tenant basis, and they can be
+    4. Migrations must be executed on a per tenant basis, and they can be
        run in parallel. Migrations are managed automatically by this adapater.
 
   ### Transactions
 
   `ecto_foundationdb` exposes the Ecto.Repo transaction function, and it also exposes
-  a FoundationDB-specific transaction. Typically you will use the Ecto.Repo transaction.
+  a FoundationDB-specific transaction.
 
   ```elixir
   TestRepo.transaction(fn ->
@@ -125,6 +146,38 @@ defmodule Ecto.Adapters.FoundationDB do
     fn tx ->
       # :erlfdb work
     end)
+  ```
+
+  Both of these calling convetions create a transaction on FDB. Typically you will use
+  `Repo.transaction/1` when operating on your Ecto.Schema structs. If you wish
+  to do anything using the lower-level `:erlfdb` API, you will use
+  `FoundationDB.transactional/2`.
+
+  Please visit the (FoundationDB Developer Guid on transactions)[https://apple.github.io/foundationdb/developer-guide.html#transaction-basics]
+  for more information about how to develop with transactions.
+
+  It's important to remember that even though the database gives ACID guarantees about the
+  keys updated in a transaction, the Elixir function passed into `Repo.transaction/1` or
+  `FoundationDB.transactional/2` will be executed more than once when any conflicts
+  are encountered. For this reason, your function must not have any side effects other than
+  the database operations. For example, do not publish any messages to other processes
+  (such as `Phoenix.PubSub`) from within the transaction unless you are willing to receive
+  early or duplicate messages.
+
+  ```elixir
+  # Do not do this!
+  TestRepo.transaction(fn ->
+    TestRepo.insert(%User{name: "John"})
+    ...
+    Phoenix.PubSub.broadcast("my_topic", "new_user") # Not safe! :(
+  end, prefix: tenant)
+
+  # Instead, do this:
+  TestRepo.transaction(fn ->
+    TestRepo.insert(%User{name: "John"})
+    ...
+  end, prefix: tenant)
+  Phoenix.PubSub.broadcast("my_topic", "new_user") # Safe :)
   ```
 
   ### Migrations
@@ -146,7 +199,12 @@ defmodule Ecto.Adapters.FoundationDB do
   as migrations will not be executed unless the tenant is opened.
 
   Migrations can be completed in full with a call to
-  `Ecto.Adapters.FoundationDB.Migrator.up_all/1`
+  `Ecto.Adapters.FoundationDB.Migrator.up_all/1`. Depending on how many tenants you have in
+  your database, and the size of the data for each tenant, this operation might take a long
+  time and make heavy use of system resources. It is safe to interrupt this operation, as
+  migrations are performed transactionally. However, if you interrupt a migration, the next
+  attempt for that tenant may have a brief delay (~5 sec); the migrator must ensure that the
+  previous migration has indeed stopped executing.
 
   The `:migrator` is a module in your application runtime that provides the full list of
   ordered migrations. These are the migrations that will be executed when a tenant is opened.
@@ -168,7 +226,7 @@ defmodule Ecto.Adapters.FoundationDB do
   end
   ```
 
-  As each tenant is opened at runtime, it will advance version-by-version in individual
+  As each tenant is opened at runtime, it will advance version-by-version in
   FDB transactions until it reaches the latest version.
 
   Each migration is contained in a separate module, much like EctoSQL's. However, the operations

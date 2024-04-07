@@ -1,21 +1,29 @@
 defmodule Ecto.Adapters.FoundationDB.MigrationsPJ do
   @moduledoc false
-  alias Ecto.Adapters.FoundationDB.Schema
-  alias Ecto.Adapters.FoundationDB.Layer.Pack
-  alias Ecto.Adapters.FoundationDB.ProgressiveJob
   alias Ecto.Adapters.FoundationDB.Layer.Indexer
   alias Ecto.Adapters.FoundationDB.Layer.IndexInventory
+  alias Ecto.Adapters.FoundationDB.Layer.Pack
   alias Ecto.Adapters.FoundationDB.Migration.Index
   alias Ecto.Adapters.FoundationDB.Migration.SchemaMigration
+  alias Ecto.Adapters.FoundationDB.ProgressiveJob
+  alias Ecto.Adapters.FoundationDB.Schema
+
   @behaviour Ecto.Adapters.FoundationDB.ProgressiveJob
 
   defmodule State do
+    @moduledoc false
     defstruct [:repo, :final_version, :limit]
   end
 
   alias __MODULE__.State
 
-  def claim_key(), do: Pack.namespaced_pack(SchemaMigration.source(), "claim", [])
+  def claim_keys(new_migrations) do
+    sources = get_sources(new_migrations, [])
+    for source <- sources, do: claim_key(source)
+  end
+
+  def claim_key(source),
+    do: Pack.namespaced_pack(SchemaMigration.source(), "claim", ["#{source}"])
 
   def transactional(repo, tenant, migrator, limit) do
     active_versions = repo.all(SchemaMigration.versions(), prefix: tenant)
@@ -54,7 +62,7 @@ defmodule Ecto.Adapters.FoundationDB.MigrationsPJ do
     if final_version == latest_active_version do
       :ignore
     else
-      {:ok, claim_key(), new_migrations,
+      {:ok, claim_keys(new_migrations), new_migrations,
        %State{repo: repo, final_version: final_version, limit: limit}}
     end
   end
@@ -66,6 +74,10 @@ defmodule Ecto.Adapters.FoundationDB.MigrationsPJ do
   end
 
   @impl true
+  def next(state, _tx, []) do
+    {[], [], state}
+  end
+
   def next(state, _tx, [{vsn, []} | new_migrations]) do
     {:ok, _} = SchemaMigration.up(state.repo, vsn)
     {[vsn], new_migrations, state}
@@ -90,28 +102,58 @@ defmodule Ecto.Adapters.FoundationDB.MigrationsPJ do
               schema: schema,
               name: index_name,
               columns: index_fields,
+              concurrently: concurrently,
               options: index_options
             }}
        ) do
+    index_options = Keyword.merge(index_options, concurrently: concurrently)
+
     {inventory_key, idx} =
       IndexInventory.new_index(Schema.get_source(schema), index_name, index_fields, index_options)
 
     command_kv = {command, {inventory_key, idx}}
-    {command_kv, Indexer.create_range(idx)}
+    {start_key, end_key} = Indexer.create_range(idx)
+    {command_kv, {start_key, start_key, end_key}}
   end
 
   defp exec_command_next(
          %State{limit: limit},
          tx,
          {_command = {:create, %Index{schema: schema}}, {_ck, idx}},
-         command_cursor
+         {start_key, cursor_key, end_key}
        ) do
-    case Indexer.create(tx, idx, schema, command_cursor, limit) do
-      {^limit, next_command_cursor} ->
-        {:more, next_command_cursor}
+    case Indexer.create(tx, idx, schema, {cursor_key, end_key}, limit) do
+      {^limit, {next_cursor_key, ^end_key}} ->
+        {:more, {start_key, next_cursor_key, end_key}}
 
-      {_, next_command_cursor} ->
-        {:done, next_command_cursor}
+      {_, {next_cursor_key, ^end_key}} ->
+        {:done, {start_key, next_cursor_key, end_key}}
     end
+  end
+
+  def get_sources([], acc) do
+    acc
+  end
+
+  def get_sources([{_vsn, commands} | new_migrations], acc) do
+    sources =
+      for {command_kv, _} <- commands do
+        {_command = {:create, %Index{}}, {_ck, idx}} = command_kv
+        idx[:source]
+      end
+
+    get_sources(new_migrations, acc ++ sources)
+  end
+
+  def get_idx_being_created(
+        {_claim_ref, [{_vsn, [{command_kv, command_cursor} | _commands]} | _new_migrations]}
+      ) do
+    {_command = {:create, %Index{}}, {_ck, idx}} = command_kv
+    {start_key, cursor_key, end_key} = command_cursor
+    {idx, {start_key, cursor_key, end_key}}
+  end
+
+  def get_idx_being_created(_) do
+    nil
   end
 end
