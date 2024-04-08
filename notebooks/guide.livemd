@@ -1,0 +1,218 @@
+# EctoFoundationDB Guide
+
+```elixir
+Mix.install([
+  {:ecto_foundationdb, "~> 0.1.0"}
+])
+```
+
+## Setup
+
+Hello! This guide simulates what your experience might be when developing an application with EctoFoundationDB. Specifically, it focuses on the mechanism that EctoFoundationDB uses to create and manage indexes.
+
+It assumes the reader is familiar with general Ecto features.
+
+Before we get started, a couple of important points about executing these commands on your system.
+
+> If you received an error on the `Mix.install` setup, please make sure you have both `foundationdb-server` and `foundationdb-clients` packages installed on your system.
+
+> This LiveBook expects your system to have a running instance of FoundationDB, and it writes and deletes data from it. If your system's `/etc/foundationdb/fdb.cluster` is pointing to a real database, do not execute these commands!
+
+With that out of the way, we'll start off with creating your Repo module.
+
+```elixir
+defmodule MyApp.Repo do
+  use Ecto.Repo, otp_app: :my_app, adapter: Ecto.Adapters.FoundationDB
+
+  use EctoFoundationDB.Migrator
+
+  def migrations() do
+    [
+      # {0, IndexesMigration}
+    ]
+  end
+end
+```
+
+Notice that the line with `IndexesMigration` is commented out. We'll come back to this later.
+
+## Developing your app
+
+This next step simulates your app's startup. Normally, you would have a project defining `:my_app` and the Repo would be included in your supervision tree. In this Guide, we're starting the Repo as an isolated resource.
+
+```elixir
+{:ok, _} = Ecto.Adapters.FoundationDB.ensure_all_started(MyApp.Repo.config(), :temporary)
+MyApp.Repo.start_link(log: false)
+```
+
+Next, we define an `Ecto.Schema` for events that are coming from a temperature sensor. This is a pretty standard Schema module, but notice the `usetenant: true` option on `@schema_context`. This ensures that our `TemperatureEvent`s will be written to a Tenant in the database.
+
+```elixir
+defmodule TemperatureEvent do
+  use Ecto.Schema
+
+  @schema_context usetenant: true
+  @primary_key {:id, :binary_id, autogenerate: true}
+
+  schema "temperature_events" do
+    field(:recorded_at, :naive_datetime_usec)
+    field(:kelvin, :float)
+    field(:site, :string)
+    timestamps()
+  end
+end
+```
+
+We're going to create a module that will help us insert some `TemperatureEvents`.
+
+```elixir
+defmodule Sensor do
+  alias Ecto.Adapters.FoundationDB
+
+  def record(n, tenant) do
+    MyApp.Repo.transaction(
+      fn ->
+        for _ <- 1..n, do: record(nil)
+      end,
+      prefix: tenant
+    )
+  end
+
+  def record(tenant) do
+    %TemperatureEvent{
+      site: "surface",
+      kelvin: 373.15 + :rand.normal(0, 5),
+      recorded_at: NaiveDateTime.utc_now()
+    }
+    |> FoundationDB.usetenant(tenant)
+    |> MyApp.Repo.insert!()
+  end
+end
+```
+
+Now, we create and open a new Tenant to store our `TemperatureEvents`.
+
+```elixir
+alias EctoFoundationDB.Tenant
+
+tenant = Tenant.open!(MyApp.Repo, "experiment-42c")
+```
+
+We're ready to record an event from our temperature sensor! Feel free to Reevaluate this block several times. You'll record 4 new events each time.
+
+```elixir
+for _ <- 1..4, do: Sensor.record(tenant)
+```
+
+We can list all the events from the Tenant. This uses a single FoundationDB Transaction.
+
+```elixir
+MyApp.Repo.all(TemperatureEvent, prefix: tenant)
+```
+
+If there's a large number of events, you can stream them instead of reading them all at once. This uses multiple FoundationDB Transactions.
+
+```elixir
+MyApp.Repo.stream(TemperatureEvent, prefix: tenant)
+|> Enum.to_list()
+|> length()
+```
+
+Next, we'd like to read all events from `"surface"`. If you're executing this LiveBook in order, you'll receive an exception on this step.
+
+```elixir
+import Ecto.Query
+
+query = from(e in TemperatureEvent, where: e.site == ^"surface")
+MyApp.Repo.all(query, prefix: tenant)
+```
+
+Did you get an exception? If so, scroll back up to the `defmodule MyApp.Repo` block in the Setup section, un-comment the line with `IndexesMigration`, and Reevaluate that block. Then come back and continue from here. You don't need to Reevaluate other blocks above this text.
+
+👋
+
+Welcome back! You've instructed the Repo to load a migration next time we open a Tenant. But we still need to define that Migration. The block below defines two indexes.
+
+```elixir
+defmodule IndexesMigration do
+  use EctoFoundationDB.Migration
+
+  def change() do
+    [
+      create(index(TemperatureEvent, [:site])),
+      create(index(TemperatureEvent, [:recorded_at]))
+    ]
+  end
+end
+```
+
+Now, we re-open the Tenant. **Something very important happens here.**
+
+This block simulates you restarting your app, and your client reconnecting. We'll just simply call `open!/2` again.
+
+```elixir
+tenant = Tenant.open!(MyApp.Repo, "experiment-42c")
+```
+
+Great! If you made it to this step, then the Migration has executed automatically, and the indexes are ready to be used.
+
+## Querying your data
+
+This next block has the same query as the one that threw an exception earlier. This time, you should retrieve the expected events.
+
+```elixir
+import Ecto.Query
+query = from(e in TemperatureEvent, where: e.site == ^"surface")
+MyApp.Repo.all(query, prefix: tenant)
+```
+
+We can also use the timestamp index that we created in a new query.
+
+```elixir
+now = NaiveDateTime.utc_now()
+past = NaiveDateTime.add(now, -1200, :second)
+
+query =
+  from(e in TemperatureEvent,
+    where: e.recorded_at >= ^past and e.recorded_at < ^now
+  )
+
+MyApp.Repo.all(query, prefix: tenant)
+```
+
+Finally, just for fun, let's insert 10,000 `TemperatureEvent`s!
+
+```elixir
+num = 10000
+batch = 100
+
+{t, :ok} =
+  :timer.tc(fn ->
+    Stream.duplicate(batch, div(num, batch))
+    |> Task.async_stream(
+      Sensor,
+      :record,
+      [tenant],
+      max_concurrency: System.schedulers_online() * 8,
+      ordered: false,
+      timeout: 30000
+    )
+    |> Stream.run()
+  end)
+
+IO.puts("Done in #{t / 1000} msec")
+```
+
+## Cleaning up
+
+And if you'd like to tidy up, you can easily delete all the data.
+
+```elixir
+# Note: destructive!
+MyApp.Repo.delete_all(TemperatureEvent, prefix: tenant)
+```
+
+```elixir
+# Note: destructive!
+Tenant.clear_delete!(MyApp.Repo, "experiment-42c")
+```
