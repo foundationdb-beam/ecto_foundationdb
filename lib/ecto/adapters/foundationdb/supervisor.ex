@@ -3,7 +3,7 @@ defmodule Ecto.Adapters.FoundationDB.Supervisor do
   use Supervisor
 
   def start_link(init_arg) do
-    Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
+    Supervisor.start_link(__MODULE__, init_arg)
   end
 
   @impl true
