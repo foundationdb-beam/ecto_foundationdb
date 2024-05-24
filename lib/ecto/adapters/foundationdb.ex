@@ -46,11 +46,20 @@ defmodule Ecto.Adapters.FoundationDB do
   Edit your `config.exs` file to include the following:
 
   ```elixir
-  config :my_app,
-    ecto_repos: [MyApp.Repo]
-
   config :my_app, MyApp.Repo,
     cluster_file: "/etc/foundationdb/fdb.cluster"
+  ```
+
+  In your app's supervisor, you can start the repo as follows:
+
+  ```elixir
+  children = [
+    ...
+    MyApp.Repo,
+    ...
+  ]
+
+  Supervisor.start_link(...)
   ```
 
   ## Tenants
