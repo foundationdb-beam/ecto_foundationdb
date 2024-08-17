@@ -27,7 +27,7 @@ defmodule Ecto.Integration.LargeMigrationTest do
   end
 
   defp do_insert_chunk(tenant, tag, i, sleep, reverse?) do
-    seq = if reverse?, do: @chunk_size..1, else: 1..@chunk_size
+    seq = if reverse?, do: @chunk_size..1//-1, else: 1..@chunk_size
 
     for j <- seq do
       if sleep > 0, do: :timer.sleep(sleep)
