@@ -69,7 +69,7 @@ defmodule Ecto.Adapters.FoundationDB do
   Each tenant you create has a separate keyspace from all others, and a given FoundationDB
   Transaction is guaranteed to be isolated to a particular tenant's keyspace.
 
-  You'll use the Ecto `:prefix` option to specify the relevant tenant for each Ecto operation
+  You'll use the Ecto `:context` option to specify the relevant tenant for each Ecto operation
   in your application.
 
   Creating a schema to be used in a tenant.
@@ -108,10 +108,10 @@ defmodule Ecto.Adapters.FoundationDB do
   Querying for a struct using the primary key.
 
   ```elixir
-  MyApp.Repo.get!(User, user.id, prefix: tenant)
+  MyApp.Repo.get!(User, user.id, context: tenant)
   ```
 
-  When a struct is retrieved from a tenant (using `:prefix`), that struct's metadata
+  When a struct is retrieved from a tenant (using `:context`), that struct's metadata
   holds onto the tenant reference. This helps to protect your application from a
   struct accidentally crossing tenant boundaries due to some unforeseen bug.
 
@@ -155,7 +155,7 @@ defmodule Ecto.Adapters.FoundationDB do
 
   ```elixir
   iex> query = from(u in User, where: u.department == ^"Engineering")
-  iex> MyApp.Repo.all(query, prefix: tenant)
+  iex> MyApp.Repo.all(query, context: tenant)
   ```
 
   Retrieve all users with a birthyear from 1992 to 1994 (with a Between constraint):
@@ -164,7 +164,7 @@ defmodule Ecto.Adapters.FoundationDB do
   iex> query = from(u in User,
   ...>   where: u.birthyear >= ^1992 and u.birthyear <= ^1994
   ...> )
-  iex> MyApp.Repo.all(query, prefix: tenant)
+  iex> MyApp.Repo.all(query, context: tenant)
   ```
 
   Retrieve all Engineers born in August 1992:
@@ -175,7 +175,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ...>          u.department == ^"Engineering" and
   ...>          u.birthdate >= ^~D[1992-08-01] and u.birthdate < ^~D[1992-09-01]
   ...> )
-  iex> MyApp.Repo.all(query, prefix: tenant)
+  iex> MyApp.Repo.all(query, context: tenant)
   ```
 
   **Order matters!**: When you create an index using multiple fields, the FDB key that stores the index will be extended with
@@ -202,7 +202,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ```elixir
   MyApp.Repo.transaction(fn ->
       # Ecto work
-    end, prefix: tenant)
+    end, context: tenant)
   ```
 
   It also exposes a FoundationDB-specific transaction:
@@ -237,7 +237,7 @@ defmodule Ecto.Adapters.FoundationDB do
     MyApp.Repo.insert(%User{name: "John"})
     ...
     Phoenix.PubSub.broadcast("my_topic", "new_user") # Not safe! :(
-  end, prefix: tenant)
+  end, context: tenant)
   ```
 
   ```elixir
@@ -245,7 +245,7 @@ defmodule Ecto.Adapters.FoundationDB do
   MyApp.Repo.transaction(fn ->
     MyApp.Repo.insert(%User{name: "John"})
     ...
-  end, prefix: tenant)
+  end, context: tenant)
   Phoenix.PubSub.broadcast("my_topic", "new_user") # Safe :)
   ```
 
@@ -477,7 +477,7 @@ defmodule Ecto.Adapters.FoundationDB do
 
   @spec usetenant(Ecto.Schema.schema(), any()) :: Ecto.Schema.schema()
   def usetenant(struct, tenant) do
-    Ecto.put_meta(struct, prefix: tenant)
+    Ecto.put_meta(struct, context: tenant)
   end
 
   @doc """

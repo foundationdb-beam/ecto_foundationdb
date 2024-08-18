@@ -6,7 +6,7 @@ defmodule EctoFoundationDB.Schemas.Global do
   import Ecto.Changeset
 
   # 'Global' schema exists to test paths where usetenant is false
-  # @schema_context usetenant: false
+  @schema_context usetenant: false
 
   @primary_key {:id, :binary_id, autogenerate: true}
 

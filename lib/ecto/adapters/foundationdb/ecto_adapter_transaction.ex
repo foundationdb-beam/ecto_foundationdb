@@ -15,7 +15,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterTransaction do
   """
   @impl true
   def transaction(_adapter_meta, options, function) when is_function(function, 0) do
-    FoundationDB.transactional(options[:prefix], fn ->
+    FoundationDB.transactional(options[:context], fn ->
       function.()
     end)
   catch
@@ -23,7 +23,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterTransaction do
   end
 
   def transaction(_adapter_meta, options, function) when is_function(function, 1) do
-    FoundationDB.transactional(options[:prefix], fn repo ->
+    FoundationDB.transactional(options[:context], fn repo ->
       function.(repo)
     end)
   catch

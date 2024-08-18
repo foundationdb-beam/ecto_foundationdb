@@ -32,14 +32,14 @@ defmodule Ecto.Integration.IndexTest do
 
       assert [%User{name: "John"}, %User{name: "John"}] =
                from(u in User, where: u.name == ^"John")
-               |> TestRepo.all(prefix: tenant)
+               |> TestRepo.all(context: tenant)
 
       # Delete consistency
       TestRepo.delete!(user3)
 
       assert [%User{name: "John"}] =
                from(u in User, where: u.name == ^"John")
-               |> TestRepo.all(prefix: tenant)
+               |> TestRepo.all(context: tenant)
 
       # Update consistency
       user2
@@ -48,7 +48,7 @@ defmodule Ecto.Integration.IndexTest do
 
       assert [%User{name: "John"}, %User{name: "John"}] =
                from(u in User, where: u.name == ^"John")
-               |> TestRepo.all(prefix: tenant)
+               |> TestRepo.all(context: tenant)
     end
 
     test "update_all via index", context do
@@ -61,10 +61,10 @@ defmodule Ecto.Integration.IndexTest do
 
       assert {1, _} =
                from(u in User, where: u.name == ^"John")
-               |> TestRepo.update_all([set: [name: "Jane"]], prefix: tenant)
+               |> TestRepo.update_all([set: [name: "Jane"]], context: tenant)
 
       user_id = user.id
-      assert %User{id: ^user_id, name: "Jane"} = TestRepo.get!(User, user_id, prefix: tenant)
+      assert %User{id: ^user_id, name: "Jane"} = TestRepo.get!(User, user_id, context: tenant)
     end
 
     test "delete_all via index", context do
@@ -77,9 +77,9 @@ defmodule Ecto.Integration.IndexTest do
 
       assert {1, _} =
                from(u in User, where: u.name == ^"John")
-               |> TestRepo.delete_all(prefix: tenant)
+               |> TestRepo.delete_all(context: tenant)
 
-      assert nil == TestRepo.get(User, user.id, prefix: tenant)
+      assert nil == TestRepo.get(User, user.id, context: tenant)
     end
 
     test "between query fails on value index", context do
@@ -101,7 +101,7 @@ defmodule Ecto.Integration.IndexTest do
                    u.name > "Ja" and
                      u.name < "Jo"
                )
-               |> TestRepo.all(prefix: tenant)
+               |> TestRepo.all(context: tenant)
     end
   end
 end

@@ -57,28 +57,28 @@ defmodule EctoFoundationDB.Layer.Tx do
     end
   end
 
-  def transactional(context, fun) do
+  def transactional(tx_context, fun) do
     case Process.get(@db_or_tenant, nil) do
       nil ->
-        :erlfdb.transactional(context, fun)
+        :erlfdb.transactional(tx_context, fun)
 
-      ^context ->
+      ^tx_context ->
         tx = Process.get(@tx, nil)
         fun.(tx)
 
       orig ->
         raise IncorrectTenancy, """
         FoundationDB Adapter encountered a transaction where the original transaction context \
-        #{inspect(orig)} did not match the prefix on a struct or query within the transaction: \
-        #{inspect(context)}.
+        #{inspect(orig)} did not match the context on a struct or query within the transaction: \
+        #{inspect(tx_context)}.
 
         This can be encountered when a struct read from one tenant is provided to a transaction from \
-        another. In these cases, the prefix must explicitly be removed from the struct metadata.
+        another. In these cases, the context must explicitly be removed from the struct metadata.
         """
     end
   end
 
-  def insert_all(tx, {schema, source, context}, entries, idxs, partial_idxs) do
+  def insert_all(tx, {schema, source, schema_context}, entries, idxs, partial_idxs) do
     entries =
       entries
       |> Enum.map(fn {{pk_field, pk}, data_object} ->
@@ -88,7 +88,7 @@ defmodule EctoFoundationDB.Layer.Tx do
         {key, data_object}
       end)
 
-    write_primary = Schema.get_option(context, :write_primary)
+    write_primary = Schema.get_option(schema_context, :write_primary)
 
     get_stage = fn tx, {key, _data_object} -> :erlfdb.get(tx, key) end
 
@@ -107,10 +107,18 @@ defmodule EctoFoundationDB.Layer.Tx do
     pipeline(tx, entries, get_stage, 0, set_stage)
   end
 
-  def update_pks(tx, {schema, source, context}, pk_field, pks, set_data, idxs, partial_idxs) do
+  def update_pks(
+        tx,
+        {schema, source, schema_context},
+        pk_field,
+        pks,
+        set_data,
+        idxs,
+        partial_idxs
+      ) do
     keys = for pk <- pks, do: Pack.primary_pack(source, pk)
 
-    write_primary = Schema.get_option(context, :write_primary)
+    write_primary = Schema.get_option(schema_context, :write_primary)
 
     get_stage = &:erlfdb.get/2
 
@@ -159,7 +167,7 @@ defmodule EctoFoundationDB.Layer.Tx do
     Indexer.update(tx, idxs, partial_idxs, schema, {fdb_key, data_object})
   end
 
-  def delete_pks(tx, {schema, source, _context}, pks, idxs, partial_idxs) do
+  def delete_pks(tx, {schema, source, _schema_context}, pks, idxs, partial_idxs) do
     keys = for pk <- pks, do: Pack.primary_pack(source, pk)
 
     get_stage = &:erlfdb.get/2

@@ -51,3 +51,8 @@ To run the integration tests, use the following.
 ```sh
 mix test
 ```
+
+## Contributing
+
+PRs are welcome. Each PR undergoes a check of `mix test` and
+`mix lint`.

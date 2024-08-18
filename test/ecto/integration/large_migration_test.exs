@@ -22,7 +22,7 @@ defmodule Ecto.Integration.LargeMigrationTest do
 
     {:ok, _user1} =
       TestRepo.insert(%User{id: "id-#{j}-#{i}-#{tag}", name: "name-#{j}-#{i}-#{tag}"},
-        prefix: tenant
+        context: tenant
       )
   end
 
@@ -54,7 +54,7 @@ defmodule Ecto.Integration.LargeMigrationTest do
             {_, users} = Enum.unzip(do_insert_chunk(tenant, "user-a", i, 0, false))
             users
           end,
-          prefix: tenant
+          context: tenant
         )
       end)
 
@@ -109,13 +109,13 @@ defmodule Ecto.Integration.LargeMigrationTest do
 
     assert((@num_chunks + 1) * @chunk_size == length(all_users))
 
-    assert(length(all_users) == length(TestRepo.all(User, prefix: tenant)))
+    assert(length(all_users) == length(TestRepo.all(User, context: tenant)))
 
     assert(
       length(all_users) ==
         length(
           TestRepo.all(from(u in User, where: u.name > ^"\x00" and u.name < ^"\xF0"),
-            prefix: tenant
+            context: tenant
           )
         )
     )

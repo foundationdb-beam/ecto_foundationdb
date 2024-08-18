@@ -26,19 +26,21 @@ defmodule Ecto.Integration.CrudTest do
         |> TestRepo.insert()
 
       assert user1
+      assert ^tenant = Ecto.get_meta(user1, :context)
 
       {:ok, user2} =
         %User{name: "James"}
-        |> FoundationDB.usetenant(tenant)
-        |> TestRepo.insert()
+        |> TestRepo.insert(context: tenant)
 
       assert user2
+      assert ^tenant = Ecto.get_meta(user2, :context)
 
       assert user1.id != user2.id
 
-      user = TestRepo.get(User, user1.id, prefix: tenant)
+      user = TestRepo.get(User, user1.id, context: tenant)
 
       assert user.name == "John"
+      assert ^tenant = Ecto.get_meta(user, :context)
     end
 
     test "double insert", context do
@@ -53,14 +55,14 @@ defmodule Ecto.Integration.CrudTest do
     end
 
     test "insert fail, missing tenancy" do
-      assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
+      assert_raise(IncorrectTenancy, ~r/nil context was provided/, fn ->
         TestRepo.insert(%User{name: "George"})
       end)
     end
 
     test "insert fail, unused tenancy", context do
-      assert_raise(IncorrectTenancy, ~r/non-nil prefix was provided/, fn ->
-        TestRepo.insert(%Global{name: "failure"}, prefix: context[:tenant])
+      assert_raise(IncorrectTenancy, ~r/non-nil context was provided/, fn ->
+        TestRepo.insert(%Global{name: "failure"}, context: context[:tenant])
       end)
     end
 
@@ -73,10 +75,10 @@ defmodule Ecto.Integration.CrudTest do
     test "insert fail, cross tenancy transaction", context do
       tenant = context[:tenant]
       other_tenant = context[:other_tenant]
-      {:ok, user} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
+      {:ok, user} = TestRepo.insert(%User{name: "John"}, context: tenant)
 
       # Crossing a struct into another tenant is allowed when using Repo functions.
-      assert {:ok, _} = TestRepo.insert(user, prefix: other_tenant)
+      assert {:ok, _} = TestRepo.insert(user, context: other_tenant)
 
       # Crossing a struct into another tenant is not allowed when using a transaction.
       assert_raise(IncorrectTenancy, ~r/original transaction context .* did not match/, fn ->
@@ -84,7 +86,7 @@ defmodule Ecto.Integration.CrudTest do
           fn ->
             TestRepo.insert(user)
           end,
-          prefix: other_tenant
+          context: other_tenant
         )
       end)
 
@@ -104,7 +106,7 @@ defmodule Ecto.Integration.CrudTest do
 
                    :ok
                  end,
-                 prefix: other_tenant
+                 context: other_tenant
                )
     end
 
@@ -124,7 +126,7 @@ defmodule Ecto.Integration.CrudTest do
         |> FoundationDB.usetenant(tenant)
         |> TestRepo.insert()
 
-      found = TestRepo.get(Product, product.id, prefix: tenant)
+      found = TestRepo.get(Product, product.id, context: tenant)
       assert found.id == product.id
       assert found.approved_at == nil
       assert found.description == nil
@@ -133,14 +135,14 @@ defmodule Ecto.Integration.CrudTest do
     end
 
     test "get fail, missing tenancy" do
-      assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
+      assert_raise(IncorrectTenancy, ~r/nil context was provided/, fn ->
         TestRepo.get(Product, "abc123")
       end)
     end
 
     test "get fail, unused tenancy", context do
-      assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
-        TestRepo.get(Global, "abc123", prefix: context[:tenant])
+      assert_raise(IncorrectTenancy, ~r/nil context was provided/, fn ->
+        TestRepo.get(Global, "abc123", context: context[:tenant])
       end)
     end
 
@@ -155,7 +157,7 @@ defmodule Ecto.Integration.CrudTest do
 
       assert_raise(Unsupported, ~r/FoundationDB Adapter supports either/, fn ->
         query = from(u in User, where: u.inserted_at == ^~N[2999-01-01 00:00:00])
-        TestRepo.all(query, prefix: tenant)
+        TestRepo.all(query, context: tenant)
       end)
     end
 
@@ -167,7 +169,7 @@ defmodule Ecto.Integration.CrudTest do
         ~r/FoundationDB Adapter has not implemented support for your query/,
         fn ->
           query = from(u in User, where: u.id != ^"foo")
-          TestRepo.all(query, prefix: tenant)
+          TestRepo.all(query, context: tenant)
         end
       )
     end
@@ -189,11 +191,11 @@ defmodule Ecto.Integration.CrudTest do
         updated_at: timestamp
       }
 
-      {2, nil} = TestRepo.insert_all(Account, [account2, account1], prefix: tenant)
+      {2, nil} = TestRepo.insert_all(Account, [account2, account1], context: tenant)
 
       [%{name: "Jane" <> _}, %{name: "John" <> _}] =
         from(Account, order_by: :name)
-        |> TestRepo.all(prefix: tenant)
+        |> TestRepo.all(context: tenant)
     end
 
     test "tx_insert", context do
@@ -214,7 +216,7 @@ defmodule Ecto.Integration.CrudTest do
 
             TestRepo.get(User, jesse.id)
           end,
-          prefix: tenant
+          context: tenant
         )
 
       assert user.name == "Jesse"
@@ -231,11 +233,11 @@ defmodule Ecto.Integration.CrudTest do
             TestRepo.insert(%User{name: n})
           end
         end,
-        prefix: tenant
+        context: tenant
       )
 
       # Each chunk of the stream is retrieved in a separate FDB transaction
-      stream = TestRepo.stream(User, prefix: tenant, max_rows: 2)
+      stream = TestRepo.stream(User, context: tenant, max_rows: 2)
       all_users = Enum.to_list(stream)
       assert length(all_users) == length(names)
     end
@@ -244,42 +246,42 @@ defmodule Ecto.Integration.CrudTest do
   describe "delete" do
     test "deletes users", context do
       tenant = context[:tenant]
-      {:ok, user} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
+      {:ok, user} = TestRepo.insert(%User{name: "John"}, context: tenant)
       {:ok, _} = TestRepo.delete(user)
-      assert TestRepo.get(User, user.id, prefix: tenant) == nil
+      assert TestRepo.get(User, user.id, context: tenant) == nil
     end
 
     test "delete something that doesn't exist", context do
       tenant = context[:tenant]
 
       assert_raise(Ecto.StaleEntryError, fn ->
-        TestRepo.delete(%User{id: "doesnotexist"}, prefix: tenant)
+        TestRepo.delete(%User{id: "doesnotexist"}, context: tenant)
       end)
     end
 
     test "delete_all users", context do
       tenant = context[:tenant]
-      {:ok, _user1} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
-      {:ok, _user2} = TestRepo.insert(%User{name: "James"}, prefix: tenant)
-      assert {total, _} = TestRepo.delete_all(User, prefix: tenant)
+      {:ok, _user1} = TestRepo.insert(%User{name: "John"}, context: tenant)
+      {:ok, _user2} = TestRepo.insert(%User{name: "James"}, context: tenant)
+      assert {total, _} = TestRepo.delete_all(User, context: tenant)
       assert total >= 2
     end
 
     test "delete_all fail, missing tenancy" do
-      assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
+      assert_raise(IncorrectTenancy, ~r/nil context was provided/, fn ->
         TestRepo.delete_all(User)
       end)
     end
 
     test "delete fail, missing tenancy" do
-      assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
+      assert_raise(IncorrectTenancy, ~r/nil context was provided/, fn ->
         TestRepo.delete(%User{id: "something", name: "George"})
       end)
     end
 
     test "delete fail, unused tenancy", context do
-      assert_raise(IncorrectTenancy, ~r/non-nil prefix was provided/, fn ->
-        TestRepo.delete(%Global{id: "something", name: "failure"}, prefix: context[:tenant])
+      assert_raise(IncorrectTenancy, ~r/non-nil context was provided/, fn ->
+        TestRepo.delete(%Global{id: "something", name: "failure"}, context: context[:tenant])
       end)
     end
 
@@ -293,11 +295,13 @@ defmodule Ecto.Integration.CrudTest do
   describe "update" do
     test "updates user", context do
       tenant = context[:tenant]
-      {:ok, user} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
+      {:ok, user} = TestRepo.insert(%User{name: "John"}, context: tenant)
+      assert ^tenant = Ecto.get_meta(user, :context)
       changeset = User.changeset(user, %{name: "Bob"})
       {:ok, changed} = TestRepo.update(changeset)
 
       assert changed.name == "Bob"
+      assert ^tenant = Ecto.get_meta(changed, :context)
     end
 
     test "update fail, dne", context do
@@ -312,7 +316,7 @@ defmodule Ecto.Integration.CrudTest do
     end
 
     test "update fail, missing tenancy" do
-      assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
+      assert_raise(IncorrectTenancy, ~r/nil context was provided/, fn ->
         %User{id: "something", name: "George"}
         |> User.changeset(%{name: "Bob"})
         |> TestRepo.update()
@@ -320,10 +324,10 @@ defmodule Ecto.Integration.CrudTest do
     end
 
     test "update fail, unused tenancy", context do
-      assert_raise(IncorrectTenancy, ~r/non-nil prefix was provided/, fn ->
+      assert_raise(IncorrectTenancy, ~r/non-nil context was provided/, fn ->
         %Global{id: "something", name: "failure"}
         |> Global.changeset(%{name: "update failure"})
-        |> TestRepo.update(prefix: context[:tenant])
+        |> TestRepo.update(context: context[:tenant])
       end)
     end
 

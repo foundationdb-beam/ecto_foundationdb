@@ -33,7 +33,7 @@ defmodule Ecto.Integration.MigrationsTest do
 
       query_fun = fn ->
         from(u in User, where: u.name == ^"John")
-        |> TestRepo.all(prefix: tenant)
+        |> TestRepo.all(context: tenant)
       end
 
       assert_raise(Unsupported, ~r/FoundationDB Adapter supports either/, query_fun)

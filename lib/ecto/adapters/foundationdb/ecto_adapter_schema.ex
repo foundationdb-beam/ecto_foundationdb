@@ -24,10 +24,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _on_conflict,
         _returning,
         _placeholders,
-        _options
+        options
       ) do
-    %{source: source, schema: schema, prefix: tenant, context: context} =
-      assert_tenancy!(adapter_opts, schema_meta)
+    %{source: source, schema: schema, context: tenant, schema_context: schema_context} =
+      assert_tenancy!(adapter_opts, schema_meta, options)
 
     entries =
       Enum.map(entries, fn data_object ->
@@ -38,7 +38,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     num_ins =
       IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
-        Tx.insert_all(tx, {schema, source, context}, entries, idxs, partial_idxs)
+        Tx.insert_all(tx, {schema, source, schema_context}, entries, idxs, partial_idxs)
       end)
 
     {num_ins, nil}
@@ -68,10 +68,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         update_data,
         filters,
         _returning,
-        _options
+        options
       ) do
-    %{source: source, schema: schema, prefix: tenant, context: context} =
-      assert_tenancy!(adapter_opts, schema_meta)
+    %{source: source, schema: schema, context: tenant, schema_context: schema_context} =
+      assert_tenancy!(adapter_opts, schema_meta, options)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
@@ -80,7 +80,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
         Tx.update_pks(
           tx,
-          {schema, source, context},
+          {schema, source, schema_context},
           pk_field,
           [pk],
           update_data,
@@ -104,17 +104,17 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         schema_meta,
         filters,
         _returning,
-        _options
+        options
       ) do
-    %{source: source, schema: schema, prefix: tenant, context: context} =
-      assert_tenancy!(adapter_opts, schema_meta)
+    %{source: source, schema: schema, context: tenant, schema_context: schema_context} =
+      assert_tenancy!(adapter_opts, schema_meta, options)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
 
     res =
       IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
-        Tx.delete_pks(tx, {schema, source, context}, [pk], idxs, partial_idxs)
+        Tx.delete_pks(tx, {schema, source, schema_context}, [pk], idxs, partial_idxs)
       end)
 
     case res do
@@ -128,22 +128,44 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   defp assert_tenancy!(
          _adapter_opts,
-         schema_meta = %{source: source, schema: schema}
+         schema_meta = %{source: source, schema: schema},
+         options
        ) do
+    # If Ecto decided to put in the schema_context, then we want to remove it here,
+    # and the adapter will try to recover the tenant from the transactional context.
     schema_meta =
-      %{schema: schema, prefix: tenant, context: context} =
-      Map.put(schema_meta, :context, Schema.get_context!(source, schema))
+      case Map.get(schema_meta, :context, nil) do
+        list when is_list(list) ->
+          Map.put(schema_meta, :context, nil)
 
-    case Tx.safe?(tenant, Schema.get_option(context, :usetenant)) do
+        _ ->
+          schema_meta
+      end
+
+    # If a context was provide in options, we always use it in place of schema_meta
+    schema_meta =
+      case Keyword.get(options, :context, nil) do
+        nil ->
+          schema_meta
+
+        context ->
+          Map.put(schema_meta, :context, context)
+      end
+
+    schema_meta =
+      %{schema: schema, context: tenant, schema_context: schema_context} =
+      Map.put(schema_meta, :schema_context, Schema.get_context!(source, schema))
+
+    case Tx.safe?(tenant, Schema.get_option(schema_context, :usetenant)) do
       {false, :unused_tenant} ->
         raise IncorrectTenancy, """
         FoundatioDB Adapter is expecting the struct for schema \
-        #{inspect(schema)} to specify no tentant in the prefix metadata, \
-        but a non-nil prefix was provided.
+        #{inspect(schema)} to specify no tentant in the context metadata, \
+        but a non-nil context was provided.
 
         Add `usetenant: true` to your schema's `@schema_context`.
 
-        Also be sure to remove the option `prefix: tenant` on the call to your Repo.
+        Also be sure to remove the option `context: tenant` on the call to your Repo.
 
         Alternatively, remove the call to \
         `Ecto.Adapters.FoundationDB.usetenant(struct, tenant)` before inserting.
@@ -152,12 +174,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       {false, :missing_tenant} ->
         raise IncorrectTenancy, """
         FoundationDB Adapter is expecting the struct for schema \
-        #{inspect(schema)} to include a tenant in the prefix metadata, \
-        but a nil prefix was provided.
+        #{inspect(schema)} to include a tenant in the context metadata, \
+        but a nil context was provided.
 
         Call `Ecto.Adapters.FoundationDB.usetenant(struxt, tenant)` before inserting.
 
-        Or use the option `prefix: tenant` on the call to your Repo.
+        Or use the option `context: tenant` on the call to your Repo.
 
         Alternatively, remove `usetenant: true` from your schema's \
         `@schema_context` if you do not want to use a tenant for this schema.

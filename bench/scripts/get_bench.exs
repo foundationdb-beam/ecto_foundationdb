@@ -12,16 +12,16 @@ users =
   1..limit
   |> Enum.map(fn _ -> User.sample_data() end)
 
-FDBRepo.insert_all(User, users, prefix: tenant)
+FDBRepo.insert_all(User, users, context: tenant)
 
 test_user = Enum.random(users)
 
 jobs = %{
   "FDB Repo.get/3" => fn _ ->
-    FDBRepo.get(User, test_user.id, prefix: tenant)
+    FDBRepo.get(User, test_user.id, context: tenant)
   end,
   "FDB Repo.get_by/3" => fn _ ->
-    FDBRepo.get_by(User, [uuid: test_user.uuid], prefix: tenant)
+    FDBRepo.get_by(User, [uuid: test_user.uuid], context: tenant)
   end
 }
 
@@ -47,4 +47,4 @@ Benchee.run(
 )
 
 {:ok, _pid} = FDBRepo.start_link(log: false)
-FDBRepo.delete_all(User, prefix: tenant)
+FDBRepo.delete_all(User, context: tenant)

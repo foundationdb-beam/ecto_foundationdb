@@ -6,7 +6,6 @@ defmodule EctoFoundationDB.Schemas.User do
   import Ecto.Changeset
 
   @schema_context usetenant: true
-
   @primary_key {:id, :binary_id, autogenerate: true}
 
   schema "users" do

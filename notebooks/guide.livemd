@@ -74,7 +74,7 @@ defmodule Sensor do
       fn ->
         for _ <- 1..n, do: record(nil)
       end,
-      prefix: tenant
+      context: tenant
     )
   end
 
@@ -107,13 +107,13 @@ for _ <- 1..4, do: Sensor.record(tenant)
 We can list all the events from the Tenant. This uses a single FoundationDB Transaction.
 
 ```elixir
-MyApp.Repo.all(TemperatureEvent, prefix: tenant)
+MyApp.Repo.all(TemperatureEvent, context: tenant)
 ```
 
 If there's a large number of events, you can stream them instead of reading them all at once. This uses multiple FoundationDB Transactions.
 
 ```elixir
-MyApp.Repo.stream(TemperatureEvent, prefix: tenant)
+MyApp.Repo.stream(TemperatureEvent, context: tenant)
 |> Enum.to_list()
 |> length()
 ```
@@ -124,7 +124,7 @@ Next, we'd like to read all events from `"surface"`. If you're executing this Li
 import Ecto.Query
 
 query = from(e in TemperatureEvent, where: e.site == ^"surface")
-MyApp.Repo.all(query, prefix: tenant)
+MyApp.Repo.all(query, context: tenant)
 ```
 
 Did you get an exception? If so, scroll back up to the `defmodule MyApp.Repo` block in the Setup section, un-comment the line with `IndexesMigration`, and Reevaluate that block. Then come back and continue from here. You don't need to Reevaluate other blocks above this text.
@@ -163,7 +163,7 @@ This next block has the same query as the one that threw an exception earlier. T
 ```elixir
 import Ecto.Query
 query = from(e in TemperatureEvent, where: e.site == ^"surface")
-MyApp.Repo.all(query, prefix: tenant)
+MyApp.Repo.all(query, context: tenant)
 ```
 
 We can also use the timestamp index that we created in a new query.
@@ -177,7 +177,7 @@ query =
     where: e.recorded_at >= ^past and e.recorded_at < ^now
   )
 
-MyApp.Repo.all(query, prefix: tenant)
+MyApp.Repo.all(query, context: tenant)
 ```
 
 Finally, just for fun, let's insert 10,000 `TemperatureEvent`s!
@@ -209,7 +209,7 @@ And if you'd like to tidy up, you can easily delete all the data.
 
 ```elixir
 # Note: destructive!
-MyApp.Repo.delete_all(TemperatureEvent, prefix: tenant)
+MyApp.Repo.delete_all(TemperatureEvent, context: tenant)
 ```
 
 ```elixir

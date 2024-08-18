@@ -38,12 +38,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
               }
             }, {_limit, limit_fn}, %{}, ordering_fn}},
         params,
-        _options
+        options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    {schema_context, tenant, query} = assert_tenancy!(query, adapter_opts, options)
 
     tenant
-    |> execute_all(adapter_meta, context, query, params)
+    |> execute_all(adapter_meta, schema_context, query, params)
     |> ordering_fn.()
     |> limit_fn.()
     |> select(Fields.parse_select_fields(select_fields))
@@ -60,11 +60,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
               wheres: wheres
             }, {nil, _limit_fn}, %{}, _ordering_fn}},
         params,
-        _options
+        options
       ) do
-    {context, %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    {schema_context, tenant, _query} = assert_tenancy!(query, adapter_opts, options)
 
-    plan = QueryPlan.get(source, schema, context, wheres, [], params)
+    plan = QueryPlan.get(source, schema, schema_context, wheres, [], params)
     num = Query.delete(tenant, adapter_meta, plan)
 
     {num, []}
@@ -76,12 +76,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         _query_cache =
           {:nocache, {:update_all, query, {nil, _limit_fn}, %{}, _ordering_fn}},
         params,
-        _options
+        options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    {schema_context, tenant, query} = assert_tenancy!(query, adapter_opts, options)
 
     num =
-      execute_update_all(tenant, adapter_meta, context, query, params)
+      execute_update_all(tenant, adapter_meta, schema_context, query, params)
 
     {num, []}
   end
@@ -95,10 +95,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    {schema_context, tenant, query} = assert_tenancy!(query, adapter_opts, options)
 
     tenant
-    |> stream_all(adapter_meta, context, query, params, options)
+    |> stream_all(adapter_meta, schema_context, query, params, options)
   end
 
   # Extract limit from an `Ecto.Query`
@@ -107,32 +107,33 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   defp assert_tenancy!(
          query = %Ecto.Query{
-           prefix: tenant,
            from: %Ecto.Query.FromExpr{source: {source, schema}}
          },
-         _adapter_opts
+         _adapter_opts,
+         query_options
        ) do
-    context = Schema.get_context!(source, schema)
+    tenant = query_options[:context]
+    schema_context = Schema.get_context!(source, schema)
 
-    case Tx.safe?(tenant, Schema.get_option(context, :usetenant)) do
+    case Tx.safe?(tenant, Schema.get_option(schema_context, :usetenant)) do
       {false, :unused_tenant} ->
         raise IncorrectTenancy, """
         FoundatioDB Adapter is expecting the query for schema \
-        #{inspect(schema)} to specify no tentant in the prefix metadata, \
-        but a non-nil prefix was provided.
+        #{inspect(schema)} to specify no tentant in the context metadata, \
+        but a non-nil context was provided.
 
         Add `usetenant: true` to your schema's `@schema_context`.
 
-        Alternatively, remove the `prefix: tenant` from your query.
+        Alternatively, remove the `context: tenant` from your query.
         """
 
       {false, :missing_tenant} ->
         raise IncorrectTenancy, """
         FoundationDB Adapter is expecting the query for schema \
-        #{inspect(schema)} to include a tenant in the prefix metadata, \
-        but a nil prefix was provided.
+        #{inspect(schema)} to include a tenant in the context metadata, \
+        but a nil context was provided.
 
-        Use `prefix: tenant` in your query.
+        Use `context: tenant` in your query.
 
         Alternatively, remove `usetenant: true` from your schema's \
         `@schema_context` if you do not want to use a tenant for this schema.
@@ -142,14 +143,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         raise Unsupported, "Non-tenant transactions are not yet implemented."
 
       true ->
-        {context, query}
+        {schema_context, tenant, query}
     end
   end
 
   defp execute_all(
          tenant,
          adapter_meta,
-         context,
+         schema_context,
          %Ecto.Query{
            from: %Ecto.Query.FromExpr{source: {source, schema}},
            wheres: wheres
@@ -166,7 +167,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     #   3. Use :erlfdb.get, :erlfdb.get_range
     #   4. Post-get filtering (Remove :not_found, remove index conflicts, )
     #   5. Arrange fields based on the select input
-    plan = QueryPlan.get(source, schema, context, wheres, [], params)
+    plan = QueryPlan.get(source, schema, schema_context, wheres, [], params)
     {objs, _continuation} = Query.all(tenant, adapter_meta, plan)
     objs
   end
@@ -174,7 +175,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   defp execute_update_all(
          tenant,
          adapter_meta = %{opts: _adapter_opts},
-         context,
+         schema_context,
          %Ecto.Query{
            from: %Ecto.Query.FromExpr{source: {source, schema}},
            wheres: wheres,
@@ -182,14 +183,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
          },
          params
        ) do
-    plan = QueryPlan.get(source, schema, context, wheres, updates, params)
+    plan = QueryPlan.get(source, schema, schema_context, wheres, updates, params)
     Query.update(tenant, adapter_meta, plan)
   end
 
   defp stream_all(
          tenant,
          adapter_meta,
-         context,
+         schema_context,
          %Ecto.Query{
            select: %Ecto.Query.SelectExpr{
              fields: select_fields
@@ -218,7 +219,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     end
 
     start_fun = fn ->
-      plan = QueryPlan.get(source, schema, context, wheres, [], params)
+      plan = QueryPlan.get(source, schema, schema_context, wheres, [], params)
 
       %{
         adapter_meta: adapter_meta,

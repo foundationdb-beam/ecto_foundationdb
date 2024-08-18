@@ -55,7 +55,7 @@ defmodule EctoFoundationdb.MixProject do
   defp deps do
     [
       {:erlfdb, "~> 0.1.0"},
-      {:ecto, "==3.11.1"},
+      {:ecto, git: "https://github.com/JesseStimpson/ecto.git", branch: "master"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.6", only: [:dev, :test, :docs]},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

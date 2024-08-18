@@ -15,7 +15,7 @@ inputs = %{
 
 jobs = %{
   "FDB Repo.insert!/1" => fn entry ->
-    FDBRepo.insert(entry.(), prefix: tenant)
+    FDBRepo.insert(entry.(), context: tenant)
   end
 }
 
@@ -29,4 +29,4 @@ Benchee.run(
   ]
 )
 
-FDBRepo.delete_all(User, prefix: tenant)
+FDBRepo.delete_all(User, context: tenant)

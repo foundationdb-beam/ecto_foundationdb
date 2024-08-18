@@ -26,7 +26,7 @@ defmodule EctoFoundationDB.MigrationsPJ do
     do: Pack.namespaced_pack(SchemaMigration.source(), "claim", ["#{source}"])
 
   def transactional(repo, tenant, migrator, limit) do
-    active_versions = repo.all(SchemaMigration.versions(), prefix: tenant)
+    active_versions = repo.all(SchemaMigration.versions(), context: tenant)
 
     ProgressiveJob.new(tenant, __MODULE__, %{
       active_versions: active_versions,

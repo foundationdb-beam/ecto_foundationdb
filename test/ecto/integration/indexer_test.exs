@@ -84,11 +84,11 @@ defmodule Ecto.Integration.IndexerTest do
 
       :ok = Migrator.up(TestRepo, tenant, migrator: TestMigrator)
 
-      assert {:ok, _} = TestRepo.insert(%User{name: "Jesse"}, prefix: tenant)
+      assert {:ok, _} = TestRepo.insert(%User{name: "Jesse"}, context: tenant)
 
-      assert {:ok, _} = TestRepo.insert(%User{name: "Sarah"}, prefix: tenant)
+      assert {:ok, _} = TestRepo.insert(%User{name: "Sarah"}, context: tenant)
 
-      assert %User{name: "Jesse"} = TestRepo.get_by!(User, [name: "J"], prefix: tenant)
+      assert %User{name: "Jesse"} = TestRepo.get_by!(User, [name: "J"], context: tenant)
 
       assert 1 == NameStartsWithJ.get_count(tenant)
     end
