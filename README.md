@@ -30,6 +30,24 @@ defp deps do
 end
 ```
 
+## Motivation
+
+What are some reasons to choose EctoFDB?
+
+FoundationDB offers:
+
+* Horizontal scaling of high-write workloads
+* Unbounded multi-tenancy
+* Serializable Transactions
+* Rich operations: multi-region, disaster recovery, backup/restore, telemetry
+
+EctoFoundationDB offers:
+
+* Object storage similar to [Record Layer](https://github.com/FoundationDB/fdb-record-layer)
+* Online migrations
+* Built-in common indexes
+* Extensible index types
+
 ## Usage
 
 See the [documentation](https://hexdocs.pm/ecto_foundationdb) for usage
