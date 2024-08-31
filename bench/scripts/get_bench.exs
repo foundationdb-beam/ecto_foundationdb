@@ -4,6 +4,7 @@ alias EctoFoundationDB.Tenant
 alias Ecto.Bench.FDBRepo
 alias Ecto.Bench.User
 
+Tenant.clear_delete!(FDBRepo, "EctoFoundationDB.Bench")
 tenant = Tenant.open_empty!(FDBRepo, "EctoFoundationDB.Bench")
 
 limit = 1_000

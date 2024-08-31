@@ -24,7 +24,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _on_conflict,
         _returning,
         _placeholders,
-        _options
+        options
       ) do
     %{source: source, schema: schema, prefix: tenant, context: context} =
       assert_tenancy!(adapter_opts, schema_meta)
@@ -38,7 +38,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     num_ins =
       IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
-        Tx.insert_all(tx, {schema, source, context}, entries, idxs, partial_idxs)
+        Tx.insert_all(tx, {schema, source, context}, entries, idxs, partial_idxs, options)
       end)
 
     {num_ins, nil}
@@ -46,7 +46,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   @impl Ecto.Adapter.Schema
   def insert(adapter_meta, schema_meta, data_object, on_conflict, returning, options) do
-    {1, nil} =
+    {_count, nil} =
       insert_all(
         adapter_meta,
         schema_meta,

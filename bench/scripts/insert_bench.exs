@@ -6,16 +6,21 @@ alias Ecto.Bench.User
 
 FDBRepo.start_link(log: false)
 
+Tenant.clear_delete!(FDBRepo, "EctoFoundationDB.Bench")
 tenant = Tenant.open_empty!(FDBRepo, "EctoFoundationDB.Bench", [])
 
 inputs = %{
-  "Struct" => fn -> struct(User, User.sample_data()) end,
-  "Changeset" => fn -> User.changeset(User.sample_data()) end
+  "Struct" => fn -> User.sample_data() end
 }
 
+n = 4000
+
 jobs = %{
-  "FDB Repo.insert!/1" => fn entry ->
-    FDBRepo.insert(entry.(), prefix: tenant)
+  "FDB Repo.insert_all" => fn entry ->
+    FDBRepo.insert_all(User, (for _ <- 1..n, do: entry.()), prefix: tenant, conflict_target: nil)
+  end,
+  "FDB Repo.insert_all no conflict" => fn entry ->
+    FDBRepo.insert_all(User, (for _ <- 1..n, do: entry.()), prefix: tenant, conflict_target: [])
   end
 }
 

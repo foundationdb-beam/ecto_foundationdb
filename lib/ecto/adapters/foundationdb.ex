@@ -341,6 +341,34 @@ defmodule Ecto.Adapters.FoundationDB do
 
   See Queries for more information.
 
+  ## Upserts
+
+  The FoundationDB Adapter supports the following upsert approaches.
+
+  ### Upserts with `on_conflict`
+
+  The following choices for `on_conflict` are supported, and they work in the manner
+  described by the offical Ecto documentation.
+
+  - `:raise`: The default.
+  - `:nothing`
+  - `:replace_all`
+  - `{:replace_all_except, fields}`
+  - `{:replace, fields}`
+
+  ### Upserts with `conflict_target`
+
+  If you provide `conflict_target: []`, the FoundationDB Adapter will make no effort to
+  inspect the existence of objects in the database before insert. When an existing
+  object is blindly overwritten, your indexes may become inconsistent, resulting in undefined
+  behavior. You should only consider its use if one of the following is true:
+
+  - (a) your schema has no indexes
+  - (b) you know apriori that any indexed fields are unchanged at the time of upsert, or
+  - (c) you know apirori that the primary key you're inserting doesn't already exist.
+
+  For these use cases, this option may speed up the loading of initial data at scale.
+
   ## Standard Options
 
     * `:cluster_file` - The path to the fdb.cluster file. The default is
