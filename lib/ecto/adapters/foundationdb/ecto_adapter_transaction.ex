@@ -15,7 +15,9 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterTransaction do
   """
   @impl true
   def transaction(_adapter_meta, options, function) when is_function(function, 0) do
-    FoundationDB.transactional(options[:prefix], fn ->
+    tenant = assert_tenancy!(options)
+
+    FoundationDB.transactional(tenant, fn ->
       function.()
     end)
   catch
@@ -23,7 +25,9 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterTransaction do
   end
 
   def transaction(_adapter_meta, options, function) when is_function(function, 1) do
-    FoundationDB.transactional(options[:prefix], fn repo ->
+    tenant = assert_tenancy!(options)
+
+    FoundationDB.transactional(tenant, fn repo ->
       function.(repo)
     end)
   catch
@@ -49,6 +53,16 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterTransaction do
   def rollback(adapter_meta, value) do
     if in_transaction?(adapter_meta) do
       throw({@rollback, value})
+    end
+  end
+
+  defp assert_tenancy!(options) do
+    case Keyword.get(options, :prefix) do
+      nil ->
+        raise "Tenant required"
+
+      tenant ->
+        tenant
     end
   end
 end

@@ -5,6 +5,7 @@ defmodule EctoFoundationDB.Layer.Tx do
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Layer.TxInsert
   alias EctoFoundationDB.Schema
 
   @db_or_tenant :__ectofdbtxcontext__
@@ -78,7 +79,7 @@ defmodule EctoFoundationDB.Layer.Tx do
     end
   end
 
-  def insert_all(tx, {schema, source, context}, entries, idxs, partial_idxs) do
+  def insert_all(tx, {schema, source, context}, entries, idxs, partial_idxs, options) do
     entries =
       entries
       |> Enum.map(fn {{pk_field, pk}, data_object} ->
@@ -90,21 +91,33 @@ defmodule EctoFoundationDB.Layer.Tx do
 
     write_primary = Schema.get_option(context, :write_primary)
 
-    get_stage = fn tx, {key, _data_object} -> :erlfdb.get(tx, key) end
+    acc = TxInsert.new(schema, idxs, partial_idxs, write_primary, options)
 
-    set_stage = fn
-      tx, {fdb_key, data_object}, :not_found, count ->
-        fdb_value = Pack.to_fdb_value(data_object)
+    case options[:conflict_target] do
+      [] ->
+        # We pretend that the data doesn't exist. This speeds up data loading
+        # but can result in inconsistent indexes if objects do exist in
+        # the database that are being blindly overwritten.
+        acc = Enum.reduce(entries, acc, &TxInsert.set_stage(tx, &1, :not_found, &2))
+        acc.count
 
-        if write_primary, do: do_set(tx, fdb_key, fdb_value)
-        Indexer.set(tx, idxs, partial_idxs, schema, {fdb_key, data_object})
-        count + 1
+      nil ->
+        acc = pipeline(tx, entries, &TxInsert.get_stage/2, acc, &TxInsert.set_stage/4)
+        acc.count
 
-      _tx, {key, _}, _result, _acc ->
-        raise Unsupported, "Key exists: #{inspect(key, binaries: :as_strings)}"
+      unsupported_conflict_target ->
+        raise Unsupported, """
+        The :conflict_target option provided is not supported by the FoundationDB Adapter.
+
+        You provided #{inspect(unsupported_conflict_target)}.
+
+        Instead, we suggest you do not use this option at all.
+
+        FoundationDB Adapter does support `conflict_target: []`, but this using this option
+        can result in inconsistent indexes, and it is only recommended if you know ahead of
+        time that your data does not already exist in the database.
+        """
     end
-
-    pipeline(tx, entries, get_stage, 0, set_stage)
   end
 
   def update_pks(tx, {schema, source, context}, pk_field, pks, set_data, idxs, partial_idxs) do
@@ -155,7 +168,7 @@ defmodule EctoFoundationDB.Layer.Tx do
       |> Keyword.merge(set_data, fn _k, _v1, v2 -> v2 end)
       |> Fields.to_front(pk_field)
 
-    if write_primary, do: do_set(tx, fdb_key, Pack.to_fdb_value(data_object))
+    if write_primary, do: :erlfdb.set(tx, fdb_key, Pack.to_fdb_value(data_object))
     Indexer.update(tx, idxs, partial_idxs, schema, {fdb_key, data_object})
   end
 
@@ -252,9 +265,5 @@ defmodule EctoFoundationDB.Layer.Tx do
         acc = fun.(tx, map_entry, :erlfdb.get(fut), acc)
         fold_futures(tx, futures, futures_map, acc, fun)
     end
-  end
-
-  defp do_set(tx, fdb_key, fdb_value) do
-    :erlfdb.set(tx, fdb_key, fdb_value)
   end
 end
