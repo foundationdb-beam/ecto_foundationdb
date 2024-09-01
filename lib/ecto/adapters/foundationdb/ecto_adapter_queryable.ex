@@ -4,6 +4,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   alias EctoFoundationDB.Exception.IncorrectTenancy
   alias EctoFoundationDB.Exception.Unsupported
+  alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Ordering
   alias EctoFoundationDB.Layer.Query
@@ -38,15 +39,35 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
               }
             }, {_limit, limit_fn}, %{}, ordering_fn}},
         params,
-        _options
+        options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    case options[:noop] do
+      query_result when not is_nil(query_result) ->
+        # This is the trick to load structs after a pipelined 'get'. See async_get_by, await, etc
+        query_result
 
-    tenant
-    |> execute_all(adapter_meta, context, query, params)
-    |> ordering_fn.()
-    |> limit_fn.()
-    |> select(Fields.parse_select_fields(select_fields))
+      _ ->
+        {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+
+        future = execute_all(tenant, adapter_meta, context, query, params)
+
+        future =
+          Future.apply(future, fn {objs, _continuation} ->
+            objs
+            |> ordering_fn.()
+            |> limit_fn.()
+            |> select(Fields.parse_select_fields(select_fields))
+          end)
+
+        case options[:returning] do
+          {:future, all_or_one} ->
+            Process.put(Future.token(), Future.set_all_or_one(future, all_or_one))
+            {0, []}
+
+          _ ->
+            Future.result(future)
+        end
+    end
   end
 
   def execute(
@@ -167,8 +188,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     #   4. Post-get filtering (Remove :not_found, remove index conflicts, )
     #   5. Arrange fields based on the select input
     plan = QueryPlan.get(source, schema, context, wheres, [], params)
-    {objs, _continuation} = Query.all(tenant, adapter_meta, plan)
-    objs
+    Query.all(tenant, adapter_meta, plan)
   end
 
   defp execute_update_all(
@@ -235,10 +255,16 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
           {:halt, acc}
 
         acc = %{plan: plan, continuation: continuation} ->
-          {objs, continuation} =
-            Query.all(tenant, adapter_meta, plan, query_options.(continuation))
+          future = Query.all(tenant, adapter_meta, plan, query_options.(continuation))
 
-          {[select(objs, field_names)], %{acc | continuation: continuation}}
+          future =
+            Future.apply(future, fn {objs, continuation} ->
+              {[select(objs, field_names)], %{acc | continuation: continuation}}
+            end)
+
+          # We can't carry the future beyond this point, because we need the continuation.
+          # It would be unusual to use stream inside a transaction anyway.
+          Future.result(future)
       end
 
     after_fun = fn _acc ->

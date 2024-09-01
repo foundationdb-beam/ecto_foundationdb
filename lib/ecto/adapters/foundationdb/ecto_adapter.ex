@@ -3,7 +3,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapter do
   @behaviour Ecto.Adapter
 
   @impl Ecto.Adapter
-  defmacro __before_compile__(_env), do: :ok
+  defmacro __before_compile__(_env), do: :this_is_never_called
 
   @impl Ecto.Adapter
   def ensure_all_started(_config, type), do: Application.ensure_all_started(:erlfdb, type)

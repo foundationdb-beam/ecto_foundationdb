@@ -369,6 +369,70 @@ defmodule Ecto.Adapters.FoundationDB do
 
   For these use cases, this option may speed up the loading of initial data at scale.
 
+  ## Pipelining
+
+  Pipelining is the technique of sending multiple queries to a database at the same time, and
+  then receiving the results at a later time. In doing so, you can often avoid waiting
+  for multiple network round trips. EctoFDB uses a `async`/`await` syntax to
+  implement pipelining.
+
+  All the "queryable" repo functions have `async` versions:
+
+  - `Repo.async_get/2` / `Repo.async_get/3`
+  - `Repo.async_get!/2` / `Repo.async_get!/3`
+  - `Repo.async_get_by/2` / `Repo.async_get_by/3`
+  - `Repo.async_get_by!/2` / `Repo.async_get_by!/3`
+  - `Repo.async_one/1` / `Repo.async_one/2`
+  - `Repo.async_one!/1` / `Repo.async_one!/2`
+  - `Repo.async_all/1` / `Repo.async_all/2`
+
+  Consider this example. Our transaction below has 2 network round trips in serial.
+  The "John" User is retrieved, and then the "James" users is retrieved. Finally, the
+  list is constructed and the transaction ends.
+
+  ```elixir
+  result = MyApp.Repo.transaction(fn ->
+    [
+      MyApp.Repo.get_by(User, name: "John"),
+      MyApp.Repo.get_by(User, name: "James")
+    ]
+  end, prefix: tenant)
+
+  [john, james] = result
+  ```
+
+  With pipelining, we can issue 2 `async_get_by` queries without waiting for their result,
+  and then only when we need the data, we `await` the result. Notice that the list of futures
+  is constructed, and then we `await` on them.
+
+  ```elixir
+  result = MyApp.Repo.transaction(fn ->
+    futures = [
+      MyApp.Repo.async_get_by(User, name: "John"),
+      MyApp.Repo.async_get_by(User, name: "James")
+    ]
+
+    MyApp.Repo.await(futures)
+  end, prefix: tenant)
+
+  [john, james] = result
+  ```
+
+  In the example above, the best case scenario is an execution time equal to 1
+  network round-trip. The worst case will almost surely be faster than 2 serial
+  round trips.
+
+  Pipelining your transactions can offer significant speed-ups, but you should also consider
+  parallelizing multiple transactions! Both techniques are useful in different
+  circumstances.
+
+  - Pipelining: Each transaction has some logic that benefits from ACID compliance.
+  - Parallel transactions: Each transaction is internally ACID compliant, but any 2 given
+    transactions may conflict if they're accessing the same keys.
+
+  If you're attempting to get the maximum throughput on data loading, you'll probably want to
+  make use of both!
+
   ## Standard Options
 
     * `:cluster_file` - The path to the fdb.cluster file. The default is
@@ -475,6 +539,7 @@ defmodule Ecto.Adapters.FoundationDB do
   @behaviour Ecto.Adapter.Transaction
 
   alias EctoFoundationDB.Database
+  alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.Options
   alias EctoFoundationDB.Tenant
@@ -526,7 +591,66 @@ defmodule Ecto.Adapters.FoundationDB do
   def transactional(db_or_tenant, fun), do: Tx.transactional_external(db_or_tenant, fun)
 
   @impl Ecto.Adapter
-  defmacro __before_compile__(_env), do: :ok
+  defmacro __before_compile__(_env) do
+    quote do
+      def async_get(queryable, id, opts \\ []),
+        do: async_query(fn -> get(queryable, id, opts ++ [returning: {:future, :one}]) end)
+
+      def async_get!(queryable, id, opts \\ []),
+        do: async_query(fn -> get!(queryable, id, opts ++ [returning: {:future, :one}]) end)
+
+      def async_get_by(queryable, clauses, opts \\ []),
+        do:
+          async_query(fn -> get_by(queryable, clauses, opts ++ [returning: {:future, :one}]) end)
+
+      def async_get_by!(queryable, clauses, opts \\ []),
+        do:
+          async_query(fn -> get_by!(queryable, clauses, opts ++ [returning: {:future, :one}]) end)
+
+      def async_one(queryable, opts \\ []),
+        do: async_query(fn -> one(queryable, opts ++ [returning: {:future, :one}]) end)
+
+      def async_one!(queryable, opts \\ []),
+        do: async_query(fn -> one!(queryable, opts ++ [returning: {:future, :one}]) end)
+
+      def async_all(queryable, opts \\ []),
+        do: async_query(fn -> all(queryable, opts ++ [returning: {:future, :all}]) end)
+
+      defp async_query(fun) do
+        _res = fun.()
+
+        case Process.delete(Future.token()) do
+          nil ->
+            raise "Pipelining failure"
+
+          future ->
+            future
+        end
+      after
+        Process.delete(Future.token())
+      end
+
+      def await(futures) do
+        futures
+        |> Future.results()
+        |> Enum.map(fn future ->
+          result = Future.result(future)
+          if is_nil(result), do: raise("Pipelining failure")
+
+          # Abuse a :noop option here to signal to the backend that we don't
+          # actual want to run a query. Instead, we just want the result to
+          # be transformed by Ecto's internal logic.
+          case Future.all_or_one(future) do
+            :all ->
+              all(Future.schema(future), noop: result)
+
+            :one ->
+              one(Future.schema(future), noop: result)
+          end
+        end)
+      end
+    end
+  end
 
   @impl Ecto.Adapter
   defdelegate ensure_all_started(config, type), to: EctoAdapter
