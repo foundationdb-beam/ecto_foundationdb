@@ -1,6 +1,7 @@
 defmodule EctoFoundationDB.Layer.Query do
   @moduledoc false
   alias EctoFoundationDB.Exception.Unsupported
+  alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.IndexInventory
@@ -18,22 +19,28 @@ defmodule EctoFoundationDB.Layer.Query do
   Executes a query for retrieving data.
   """
   def all(db_or_tenant, adapter_meta, plan, options \\ []) do
-    {plan, kvs} =
+    future = Future.before_transactional(plan.schema)
+
+    {plan, future} =
       IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx,
                                                                                idxs,
                                                                                _partial_idxs ->
         plan = make_range(idxs, plan, options)
-        {plan, tx_get_range(tx, plan, options)}
+        future = tx_get_range(tx, plan, future, options)
+
+        {plan, Future.leaving_transactional(future)}
       end)
 
-    continuation = continuation(kvs, options)
+    Future.apply(future, fn kvs ->
+      continuation = continuation(kvs, options)
 
-    objs =
-      kvs
-      |> unpack_and_filter(plan)
-      |> Stream.map(fn {_k, v} -> v end)
+      objs =
+        kvs
+        |> unpack_and_filter(plan)
+        |> Stream.map(fn {_k, v} -> v end)
 
-    {objs, continuation}
+      {objs, continuation}
+    end)
   end
 
   @doc """
@@ -100,24 +107,28 @@ defmodule EctoFoundationDB.Layer.Query do
     end
   end
 
-  defp tx_get_range(tx, %{layer_data: %{range: {fdb_key, nil}}}, _options) do
-    res = :erlfdb.wait(:erlfdb.get(tx, fdb_key))
+  defp tx_get_range(tx, %{layer_data: %{range: {fdb_key, nil}}}, future, _options) do
+    future_ref = :erlfdb.get(tx, fdb_key)
 
-    if res == :not_found do
-      []
-    else
-      [{fdb_key, res}]
-    end
+    Future.set(future, future_ref, fn res ->
+      if res == :not_found do
+        []
+      else
+        [{fdb_key, res}]
+      end
+    end)
   end
 
-  defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key}}}, options) do
+  defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key}}}, future, options) do
     get_options = Keyword.take(options, [:limit])
-    :erlfdb.wait(:erlfdb.get_range(tx, start_key, end_key, get_options))
+    future_ref = :erlfdb.get_range(tx, start_key, end_key, get_options)
+    Future.set(future, future_ref)
   end
 
-  defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key, mapper}}}, options) do
+  defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key, mapper}}}, future, options) do
     get_options = Keyword.take(options, [:limit])
-    :erlfdb.wait(:erlfdb.get_mapped_range(tx, start_key, end_key, mapper, get_options))
+    future_ref = :erlfdb.get_mapped_range(tx, start_key, end_key, mapper, get_options)
+    Future.set(future, future_ref)
   end
 
   defp tx_update_range(tx, plan = %QueryPlan{updates: updates}, idxs, partial_idxs) do
@@ -125,7 +136,8 @@ defmodule EctoFoundationDB.Layer.Query do
     write_primary = Schema.get_option(plan.context, :write_primary)
 
     tx
-    |> tx_get_range(plan, [])
+    |> tx_get_range(plan, Future.new(plan.schema), [])
+    |> Future.result()
     |> unpack_and_filter(plan)
     |> Stream.map(
       &Tx.update_data_object(
@@ -145,7 +157,8 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp tx_delete_range(tx, plan, idxs, partial_idxs) do
     tx
-    |> tx_get_range(plan, [])
+    |> tx_get_range(plan, Future.new(plan.schema), [])
+    |> Future.result()
     |> unpack_and_filter(plan)
     |> Stream.map(&Tx.delete_data_object(tx, plan.schema, &1, idxs, partial_idxs))
     |> Enum.to_list()
