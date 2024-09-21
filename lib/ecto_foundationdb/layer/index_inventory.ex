@@ -293,8 +293,7 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
 
     idxs =
       tx
-      |> :erlfdb.get_range(start_key, end_key)
-      |> :erlfdb.wait()
+      |> :erlfdb.get_range(start_key, end_key, wait: true)
       |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
       # high priority first
       |> Enum.sort(&(Keyword.get(&1, :priority, 0) > Keyword.get(&2, :priority, 0)))

@@ -65,6 +65,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
             {0, []}
 
           _ ->
+            # Future: If there is a wrapping transaction without an `async_*` qualifier, the wait happens here
             Future.result(future)
         end
     end

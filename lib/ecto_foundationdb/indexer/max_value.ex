@@ -30,8 +30,7 @@ defmodule EctoFoundationDB.Indexer.MaxValue do
 
     keys =
       tx
-      |> :erlfdb.get_range(start_key, end_key, limit: limit)
-      |> :erlfdb.wait()
+      |> :erlfdb.get_range(start_key, end_key, limit: limit, wait: true)
       |> Enum.map(fn {fdb_key, fdb_value} ->
         data = Pack.from_fdb_value(fdb_value)
         val = data[max_field]

@@ -386,6 +386,8 @@ defmodule Ecto.Adapters.FoundationDB do
   - `Repo.async_one!/1` / `Repo.async_one!/2`
   - `Repo.async_all/1` / `Repo.async_all/2`
 
+  The results of these functions are provided to `Repo.await/1` inside a `Repo.transaction/2`.
+
   Consider this example. Our transaction below has 2 network round trips in serial.
   The "John" User is retrieved, and then the "James" users is retrieved. Finally, the
   list is constructed and the transaction ends.
@@ -418,17 +420,69 @@ defmodule Ecto.Adapters.FoundationDB do
   [john, james] = result
   ```
 
-  In the example above, the best case scenario is an execution time equal to 1
-  network round-trip. The worst case will almost surely be faster than 2 serial
-  round trips.
+  Conceptually, only 1 network round-trip is required, so this will be faster than
+  waiting on each in sequence.
 
-  Pipelining your transactions can offer significant speed-ups, but you should also consider
-  parallelizing multiple transactions! Both techniques are useful in different
+  ### Pipelining on range queries (interleaving waits)
+
+  The functions `Repo.async_all/1` and `Repo.async_all/2` work a little bit different on the await. When the DB must
+  return a list of results, if that list ends up being larger than `:erlfdb`'s configured `:target_bytes`,
+  then the result set is split into multiple round-trips to the database. If your application awaits multiple
+  such queries, then `:erlfdb`'s "interleaving waits" feature is used.
+
+  Consider this example, where we're retrieving all Users and all Posts in the same transaction.
+
+  ```elixir
+  MyApp.Repo.transaction(fn ->
+    futures = [
+      MyApp.Repo.async_all(User),
+      MyApp.Repo.async_all(Post)
+    ]
+
+    MyApp.Repo.await(futures)
+  end, prefix: tenant)
+  ```
+
+  Each query individually executed would be multiple round-trips to the database as pages of results are retrieved.
+
+  ```mermaid
+  sequenceDiagram
+      Client->>Server: get_range(User)
+      Server-->>Client: {100 users, continuation_token}
+      Client->>Server: get_range(User, continuation_token)
+      Server-->>Client: {10 users, done}
+  ```
+
+  With `:erlfdb`'s interleaving waits, we send as many get_range requests as possible with pipelining
+  until all are exhausted.
+
+  ```mermaid
+  sequenceDiagram
+      Client->>Server: get_range(User)
+      Client->>Server: get_range(Post)
+      Server-->>Client: {100 users, continuation_token}
+      Server-->>Client: {100 posts, continuation_token}
+      Client->>Server: get_range(User, continuation_token)
+      Client->>Server: get_range(Post, continuation_token)
+      Server-->>Client: {10 users, done}
+      Server-->>Client: {100 posts, continuation_token}
+      Client->>Server: get_range(Post, continuation_token)
+      Server-->>Client: {2 posts, done}
+  ```
+
+  This happens automatically when you include the list of futures to your `Repo.await/1`.
+
+  ## Optimizing for throughput and latency
+
+  Pipelining operations inside your transactions can offer significant speed-ups, and you should
+  also consider parallelizing multiple transactions. Both techniques are useful in different
   circumstances.
 
-  - Pipelining: Each transaction has some logic that benefits from ACID compliance.
+  - Pipelining: The transaction can contain arbitrary logic and remain ACID compliant. If you make
+    smart use of pipelining, the latency of execution of that logic is kept to a minimum.
   - Parallel transactions: Each transaction is internally ACID compliant, but any 2 given
-    transactions may conflict if they're accessing the same keys.
+    transactions may conflict if they're accessing the same keys. When transactions do not conflict,
+    throughput goes up.
 
   If you're attempting to get the maximum throughput on data loading, you'll probably want to
   make use of both!
@@ -632,13 +686,13 @@ defmodule Ecto.Adapters.FoundationDB do
 
       def await(futures) do
         futures
-        |> Future.results()
+        |> Future.await_all()
         |> Enum.map(fn future ->
           result = Future.result(future)
           if is_nil(result), do: raise("Pipelining failure")
 
           # Abuse a :noop option here to signal to the backend that we don't
-          # actual want to run a query. Instead, we just want the result to
+          # actually want to run a query. Instead, we just want the result to
           # be transformed by Ecto's internal logic.
           case Future.all_or_one(future) do
             :all ->

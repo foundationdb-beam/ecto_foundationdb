@@ -9,12 +9,14 @@ defmodule EctoFoundationDB.Layer do
   ## Keyspace Design
 
   All keys used by `:ecto_foundationdb` are encoded with [FoundationDB's Tuple Encoding](https://github.com/apple/foundationdb/blob/main/design/tuple.md)
-  The first element of the tuple is a string prefix that is intender to keep the `:ecto_foundationdb` keyspace
+  The first element of the tuple is a string prefix that is intended to keep the `:ecto_foundationdb` keyspace
   separate from other keys in the FoundationDB cluster.
 
-  Your Schema data is stored with prefix "\\xFD".
+  Your Schema data and Default indexes are stored with prefix "\\xFD".
 
   The data associated with schema migrations is stored with prefix "\\xFE".
+
+  The rest of the keyspace is open for use by you, the application developer.
 
   All values are either
     * other keys (in the case of Default indexes) or

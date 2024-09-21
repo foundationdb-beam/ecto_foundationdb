@@ -113,8 +113,7 @@ defmodule EctoFoundationDB.Indexer.Default do
   def create(tx, idx, schema, {start_key, end_key}, limit) do
     keys =
       tx
-      |> :erlfdb.get_range(start_key, end_key, limit: limit)
-      |> :erlfdb.wait()
+      |> :erlfdb.get_range(start_key, end_key, limit: limit, wait: true)
       |> Enum.map(fn {fdb_key, fdb_value} ->
         {index_key, index_object} =
           get_index_entry(idx, schema, {fdb_key, Pack.from_fdb_value(fdb_value)})
