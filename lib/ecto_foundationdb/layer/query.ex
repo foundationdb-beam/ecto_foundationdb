@@ -19,6 +19,11 @@ defmodule EctoFoundationDB.Layer.Query do
   Executes a query for retrieving data.
   """
   def all(db_or_tenant, adapter_meta, plan, options \\ []) do
+    # All data retrieval comes through here. We use the Future module to
+    # ensure that if the whole thing is executed inside a wrapping transaction,
+    # the result is not awaited upon until requested. But if we're creating a new
+    # transaction, the wait happens before the transaction ends.
+
     future = Future.before_transactional(plan.schema)
 
     {plan, future} =
@@ -28,6 +33,7 @@ defmodule EctoFoundationDB.Layer.Query do
         plan = make_range(idxs, plan, options)
         future = tx_get_range(tx, plan, future, options)
 
+        # Future: If there is no wrapping transaction, the wait happens here
         {plan, Future.leaving_transactional(future)}
       end)
 
@@ -110,7 +116,7 @@ defmodule EctoFoundationDB.Layer.Query do
   defp tx_get_range(tx, %{layer_data: %{range: {fdb_key, nil}}}, future, _options) do
     future_ref = :erlfdb.get(tx, fdb_key)
 
-    Future.set(future, future_ref, fn res ->
+    Future.set(future, tx, future_ref, fn res ->
       if res == :not_found do
         []
       else
@@ -120,15 +126,15 @@ defmodule EctoFoundationDB.Layer.Query do
   end
 
   defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key}}}, future, options) do
-    get_options = Keyword.take(options, [:limit])
+    get_options = Keyword.take(options, [:limit]) |> Keyword.put(:wait, false)
     future_ref = :erlfdb.get_range(tx, start_key, end_key, get_options)
-    Future.set(future, future_ref)
+    Future.set(future, tx, future_ref)
   end
 
   defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key, mapper}}}, future, options) do
-    get_options = Keyword.take(options, [:limit])
+    get_options = Keyword.take(options, [:limit]) |> Keyword.put(:wait, false)
     future_ref = :erlfdb.get_mapped_range(tx, start_key, end_key, mapper, get_options)
-    Future.set(future, future_ref)
+    Future.set(future, tx, future_ref)
   end
 
   defp tx_update_range(tx, plan = %QueryPlan{updates: updates}, idxs, partial_idxs) do

@@ -1,7 +1,5 @@
 defmodule EctoFoundationDB.QueryPlan do
-  @moduledoc """
-  Internal module only used if you are implementing a custom index.
-  """
+  @moduledoc "See `Ecto.Adapters.FoundationDB`"
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.QueryPlan.Between

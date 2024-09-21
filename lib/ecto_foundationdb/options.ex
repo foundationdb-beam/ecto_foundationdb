@@ -1,7 +1,5 @@
 defmodule EctoFoundationDB.Options do
-  @moduledoc """
-  Options for `Ecto.Adapters.FoundationDB`.
-  """
+  @moduledoc "See `Ecto.Adapters.FoundationDB`"
 
   @type option() ::
           {:open_db, function()}

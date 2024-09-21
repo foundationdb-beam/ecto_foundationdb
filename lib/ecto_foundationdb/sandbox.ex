@@ -5,6 +5,8 @@ defmodule EctoFoundationDB.Sandbox do
 
   When using this module, it creates a directory in the project root called `.erlfdb`. It
   is safe to delete this directory when you no longer need it (e.g. after test execution)
+
+  See [Testing with EctoFoundationDB](testing.html) for more.
   """
   alias EctoFoundationDB.Database
   alias EctoFoundationDB.Options

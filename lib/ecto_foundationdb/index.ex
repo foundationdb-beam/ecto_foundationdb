@@ -1,6 +1,4 @@
 defmodule EctoFoundationDB.Index do
-  @moduledoc """
-  Internal module only used if you are implementing a custom index.
-  """
+  @moduledoc "See `Ecto.Adapters.FoundationDB`"
   @type t() :: Keyword.t()
 end
