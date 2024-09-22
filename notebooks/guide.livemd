@@ -14,7 +14,7 @@ It assumes the reader is familiar with general Ecto features.
 
 Before we get started, a couple of important points about executing these commands on your system.
 
-> If you received an error on the `Mix.install` setup, please make sure you have both `foundationdb-server` and `foundationdb-clients` packages installed on your system.
+> If you received an error on the `Mix.install` setup, please make sure you have both `foundationdb-server` and `foundationdb-clients` packages installed on your system. Also, ensure that your Livebook PATH environment variable includes the directory containing the `fdbcli` binary.
 
 > This LiveBook expects your system to have a running instance of FoundationDB, and it writes and deletes data from it. If your system's `/etc/foundationdb/fdb.cluster` is pointing to a real database, do not execute these commands!
 
