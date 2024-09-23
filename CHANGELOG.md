@@ -1,5 +1,11 @@
 # Changelog for v0.x
 
+## v0.2.1 (2024-09-23)
+
+### Bug fixes
+
+  * Upgrade erlfdb to 0.2.1, allowing Livebook Desktop to discover fdbcli location in /usr/local/bin
+
 ## v0.2.0 (2024-09-21)
 
 ### Bug fixes
