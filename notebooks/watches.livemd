@@ -1,0 +1,222 @@
+# EctoFDB Watches in Phoenix LiveView
+
+```elixir
+Mix.install([
+  {:phoenix_playground, "~> 0.1.0"},
+  {:ecto_foundationdb, git: "https://github.com/JesseStimpson/ecto_foundationdb", branch: "watch"}
+])
+```
+
+## Intro
+
+We're going to create a simple LiveView to showcase my favorite quote. We want to make sure our LiveView always has the most up-to-date information about the quote. A common appproach to a problem like this is to use `Phoenix.PubSub`. Instead, we'll use [EctoFoundationDB's Watches](https://hexdocs.pm/ecto_foundationdb/Ecto.Adapters.FoundationDB.html#module-watches) to deliver the messaging.
+
+## Setup Ecto
+
+First, we set up Ecto, defining a Quote schema, and starting the Repo. For this to work, you must have `foundationdb-server` running locally, with tenants enabled. Refer to the [EctoFoundationDB documentation](https://hexdocs.pm/ecto_foundationdb/Ecto.Adapters.FoundationDB.html#module-installation) for installation help.
+
+```elixir
+defmodule Repo do
+  use Ecto.Repo, otp_app: :my_app, adapter: Ecto.Adapters.FoundationDB
+
+  use EctoFoundationDB.Migrator
+
+  def migrations(), do: []
+end
+
+defmodule Quote do
+  use Ecto.Schema
+
+  alias Ecto.Changeset
+
+  @schema_context usetenant: true
+  @primary_key {:id, :binary_id, autogenerate: true}
+
+  schema "quotes" do
+    field(:author, :string)
+    field(:content, :string)
+    field(:likes, :integer, default: 0)
+    field(:as_of, :naive_datetime)
+    timestamps()
+  end
+
+  def changeset(quote, params \\ %{}) do
+    quote
+    |> Changeset.cast(params, [:author, :content, :likes])
+  end
+
+  def like!(tenant, id) do
+      Repo.transaction(fn ->
+        quote = Repo.get!(Quote, id)
+
+        quote
+        |> changeset(%{likes: quote.likes+1})
+        |> Repo.update!()
+      end, prefix: tenant)
+  end
+end
+
+
+{:ok, _} = Ecto.Adapters.FoundationDB.ensure_all_started(Repo.config(), :temporary)
+Repo.start_link(log: false)
+
+alias EctoFoundationDB.Tenant
+
+tenant = Tenant.open!(Repo, "expiriment-with-watches-in-liveview")
+
+```
+
+Next, we create a Quote in the DB. We'll focus on how this specific Quote is rendered throughout the rest of the Livebook.
+
+```elixir
+Repo.insert!(
+  %Quote{
+    id: "my-favorite-quote", 
+    author: "Philippe Verdoux", 
+    content: """
+      Enlightenment leads to benightedness; Science entails nescience.
+      """,
+    as_of: NaiveDateTime.utc_now(:second)
+  }, prefix: tenant, on_conflict: :replace_all)
+```
+
+## Setup LiveView
+
+We're using Phoenix Playground to create a sample LiveView. Some key takeaways:
+
+1. In `mount/3`, we're opening our tenant and reading the `"my-favorite-quote"` Quote that we've inserted above. In the same transaction, we're creating a watch with `label: :quote`. In the LiveView assigns, we store the `:quote` and the list of `:futures`. You'll want to use the same label for both the watch and the assigns.
+
+2. `render/1` has a simple HTML document to render our Quote. This is entirely standard LiveView HEEx. The FDB watch has no impact here.
+
+3. `handle_event/3` receives the `"like"` event, and uses an FDB transaction to add 1 to the count of likes. Notice we choose not to update the assigns.
+
+4. `handle_info/2` receives the `:ready` message from the watch future. It uses `Repo.assign_ready/3` to update the LiveView assigns map. Whenever `"my-favorite-quote"` changes in the DB, this function will be called automatically. Also, we provide `watch?: true` to continue listening for updates.
+
+```elixir
+defmodule DemoLive do
+  use Phoenix.LiveView
+
+  def mount(_params, _session, socket) do
+    
+    tenant = Tenant.open!(Repo, "expiriment-with-watches-in-liveview")
+    
+    {:ok, socket
+      |> assign(tenant: tenant)
+      |> assign_watch!(:quote, "my-favorite-quote")
+    }
+  end
+
+  defp assign_watch!(socket, label, id) do
+    {quote, futures} = Repo.transaction(
+      fn ->
+        quote = Repo.get!(Quote, id)
+        future = Repo.watch(quote, label: label)
+        {quote, [future]}
+      end,
+      prefix: socket.assigns.tenant)
+    
+    socket
+    |> assign(label, quote)
+    |> assign(futures: futures)
+  end
+
+  def render(assigns) do
+    ~H"""
+    <div class="content">
+      <h1>My Favorite Quote</h1>
+      <h6>as of <%= @quote.as_of %> UTC</h6>
+      <figure>
+        <blockquote><%= @quote.content %></blockquote>
+        <h3><figcaption>- <%= @quote.author %></figcaption></h3>
+      
+        <p>
+          <label>Likes: </label>
+          <span><%= @quote.likes %></span>
+          <button phx-click="like">👍</button>
+        </p>
+      </figure>
+    </div>
+    
+    <style type="text/css">
+      h1 { text-align: center; }
+      h3 { text-align: right; }
+      h6 { text-align: right; }
+      p { text-align: center; }
+
+      .content {
+        max-width: 500px;
+        margin: auto;
+      }
+    </style>
+    """
+  end
+
+  def handle_event("like", _params, socket) do
+
+    Quote.like!(socket.assigns.tenant, socket.assigns.quote.id)
+    
+    {:noreply, socket}
+  end
+
+  def handle_info({ref, :ready}, socket) when is_reference(ref) do
+    
+    %{assigns: assigns} = socket
+    
+    {new_assigns, futures} = 
+      Repo.assign_ready(
+        assigns.futures, 
+        [ref], 
+        watch?: true,
+        prefix: assigns.tenant
+      )
+    
+    {:noreply, 
+      socket
+      |> assign(new_assigns)
+      |> assign(futures: futures)
+    }
+  end
+end
+
+PhoenixPlayground.start(live: DemoLive)
+```
+
+## Updating My Favorite Quote
+
+I don't know about you, but my favorite quote depends on my current mood, which changes all the time. We'll update the database with my latest favorite quote, and because of the FDB watch, the LiveView will always render the most up-to-date content.
+
+```elixir
+tenant = Tenant.open!(Repo, "expiriment-with-watches-in-liveview")
+
+defmodule ChangeFavoriteQuote do
+  @id "my-favorite-quote"
+  
+  def to(tenant, author, content) do
+    Repo.transaction(fn ->
+      Repo.get(Quote, @id)
+      |> Quote.changeset(%{
+        author: author,
+        content: content,
+        as_of: NaiveDateTime.utc_now(:second),
+        likes: 0
+      })
+      |> Repo.update()
+      end, prefix: tenant)
+  end
+end
+```
+
+```elixir
+ChangeFavoriteQuote.to(
+  tenant, 
+  "Duke Leto Atreides", 
+  """
+  Give as few orders as possible. \
+  Once you've given orders on a subject, \
+  you must always give orders on that subject.
+  """)
+```
+
+```elixir
+ChangeFavoriteQuote.to(tenant, "Captain America", "I can do this all day.")
+```

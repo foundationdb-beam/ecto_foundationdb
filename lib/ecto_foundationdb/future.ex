@@ -1,7 +1,14 @@
 defmodule EctoFoundationDB.Future do
-  @moduledoc false
+  @moduledoc """
+  Opaque struct that represents an unresolved result set from some FoundationDB
+  query operation.
+
+  If you have received a Future from an EctoFDB Repo API, please consult the documentation
+  for that API for dealing with the Future. The functions here are intended to be for
+  internal use only.
+  """
   alias EctoFoundationDB.Layer.Tx
-  defstruct [:schema, :tx, :ref, :result, :handler, :must_wait?, :all_or_one]
+  defstruct [:schema, :tx, :ref, :result, :handler, :must_wait?]
 
   @token :__ectofdbfuture__
 
@@ -25,11 +32,19 @@ defmodule EctoFoundationDB.Future do
 
   def schema(%__MODULE__{schema: schema}), do: schema
 
-  def set_all_or_one(fut, hint), do: %__MODULE__{fut | all_or_one: hint}
-  def all_or_one(%__MODULE__{all_or_one: hint}), do: hint
-
   def new(schema) do
     %__MODULE__{schema: schema, handler: &Function.identity/1, must_wait?: true}
+  end
+
+  def new_watch(schema, future_ref, handler \\ &Function.identity/1) do
+    # The future for a watch is fulfilled outside of a transaction, so there is no tx val
+    %__MODULE__{
+      schema: schema,
+      tx: :watch,
+      ref: future_ref,
+      handler: handler,
+      must_wait?: false
+    }
   end
 
   def set(fut, tx, future_ref, f \\ &Function.identity/1) do
@@ -39,6 +54,12 @@ defmodule EctoFoundationDB.Future do
 
   def result(fut = %__MODULE__{ref: nil, handler: f}) do
     f.(fut.result)
+  end
+
+  def result(fut = %__MODULE__{tx: :watch}) do
+    %__MODULE__{ref: ref, handler: handler} = fut
+    res = :erlfdb.wait(ref)
+    handler.(res)
   end
 
   def result(fut) do
@@ -57,7 +78,7 @@ defmodule EctoFoundationDB.Future do
         {[tx | _], refs} = Enum.unzip(tx_refs)
         Enum.zip(refs, :erlfdb.wait_for_all_interleaving(tx, refs)) |> Enum.into(%{})
       else
-        []
+        %{}
       end
 
     Enum.map(
@@ -94,5 +115,24 @@ defmodule EctoFoundationDB.Future do
   def apply(fut, f) do
     %__MODULE__{handler: g} = fut
     %__MODULE__{fut | handler: &f.(g.(&1))}
+  end
+
+  def find_ready(futs, ready_ref) do
+    # Must only be called if you've received a {ready_ref, :ready}
+    # message in your mailbox.
+
+    find_ready(futs, ready_ref, [])
+  end
+
+  defp find_ready([], _ready_ref, acc), do: {nil, Enum.reverse(acc)}
+
+  defp find_ready([h | t], ready_ref, acc) do
+    %__MODULE__{ref: ref} = h
+
+    if match?({:erlfdb_future, ^ready_ref, _}, ref) do
+      {%__MODULE__{h | ref: nil}, Enum.reverse(acc) ++ t}
+    else
+      find_ready(t, ready_ref, [h | acc])
+    end
   end
 end
