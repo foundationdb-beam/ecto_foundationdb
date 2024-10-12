@@ -27,11 +27,18 @@ defmodule EctoIntegrationPipelineTest do
     [john, james] =
       TestRepo.transaction(
         fn ->
-          [
-            TestRepo.async_get(User, john.id),
-            TestRepo.async_get(User, james.id)
-          ]
-          |> TestRepo.await()
+          futures =
+            [f1, f2] = [
+              TestRepo.async_get(User, john.id),
+              TestRepo.async_get(User, james.id)
+            ]
+
+          assert nil != f1.ref
+          assert nil != f2.ref
+          assert nil == f1.result
+          assert nil == f2.result
+
+          TestRepo.await(futures)
         end,
         prefix: tenant
       )
@@ -42,11 +49,18 @@ defmodule EctoIntegrationPipelineTest do
     [john, james] =
       TestRepo.transaction(
         fn ->
-          [
-            TestRepo.async_get_by(User, name: "John"),
-            TestRepo.async_get_by(User, name: "James")
-          ]
-          |> TestRepo.await()
+          futures =
+            [f1, f2] = [
+              TestRepo.async_get_by(User, name: "John"),
+              TestRepo.async_get_by(User, name: "James")
+            ]
+
+          assert nil != f1.ref
+          assert nil != f2.ref
+          assert nil == f1.result
+          assert nil == f2.result
+
+          TestRepo.await(futures)
         end,
         prefix: tenant
       )
@@ -57,11 +71,18 @@ defmodule EctoIntegrationPipelineTest do
     [all_john, all_james] =
       TestRepo.transaction(
         fn ->
-          [
-            TestRepo.async_all(from(u in User, where: u.name == ^"John")),
-            TestRepo.async_all(from(u in User, where: u.name == ^"James"))
-          ]
-          |> TestRepo.await()
+          futures =
+            [f1, f2] = [
+              TestRepo.async_all(from(u in User, where: u.name == ^"John")),
+              TestRepo.async_all(from(u in User, where: u.name == ^"James"))
+            ]
+
+          assert nil != f1.ref
+          assert nil != f2.ref
+          assert nil == f1.result
+          assert nil == f2.result
+
+          TestRepo.await(futures)
         end,
         prefix: tenant
       )
@@ -72,11 +93,18 @@ defmodule EctoIntegrationPipelineTest do
     [john, james] =
       TestRepo.transaction(
         fn ->
-          [
-            TestRepo.async_one(from(u in User, where: u.name == ^"John")),
-            TestRepo.async_one(from(u in User, where: u.name == ^"James"))
-          ]
-          |> TestRepo.await()
+          futures =
+            [f1, f2] = [
+              TestRepo.async_one(from(u in User, where: u.name == ^"John")),
+              TestRepo.async_one(from(u in User, where: u.name == ^"James"))
+            ]
+
+          assert nil != f1.ref
+          assert nil != f2.ref
+          assert nil == f1.result
+          assert nil == f2.result
+
+          TestRepo.await(futures)
         end,
         prefix: tenant
       )

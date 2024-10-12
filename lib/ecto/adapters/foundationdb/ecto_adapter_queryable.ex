@@ -59,15 +59,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
             |> select(Fields.parse_select_fields(select_fields))
           end)
 
-        case options[:returning] do
-          {:future, all_or_one} ->
-            Process.put(Future.token(), Future.set_all_or_one(future, all_or_one))
-            {0, []}
-
-          _ ->
-            # Future: If there is a wrapping transaction without an `async_*` qualifier, the wait happens here
-            Future.result(future)
-        end
+        handle_returning(future, options)
     end
   end
 
@@ -190,6 +182,18 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     #   5. Arrange fields based on the select input
     plan = QueryPlan.get(source, schema, context, wheres, [], params)
     Query.all(tenant, adapter_meta, plan)
+  end
+
+  defp handle_returning(future, options) do
+    case options[:returning] do
+      {:future, all_or_one} ->
+        Process.put(Future.token(), Future.apply(future, fn res -> {all_or_one, res} end))
+        {0, []}
+
+      _ ->
+        # Future: If there is a wrapping transaction without an `async_*` qualifier, the wait happens here
+        Future.result(future)
+    end
   end
 
   defp execute_update_all(

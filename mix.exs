@@ -36,7 +36,7 @@ defmodule EctoFoundationdb.MixProject do
       main: "Ecto.Adapters.FoundationDB",
       source_url: "https://github.com/foundationdb-beam/ecto_foundationdb",
       filter_modules:
-        ~r/^Elixir.Ecto.Adapters.FoundationDB|EctoFoundationDB(.Database|.Exception.Unsupported|.Exception.IncorrectTenancy|.Index|.Indexer|.Layer|.Migrator|.Options|.QueryPlan|.Sandbox|.Tenant)?$/,
+        ~r/^Elixir.Ecto.Adapters.FoundationDB|EctoFoundationDB(.Database|.Exception.Unsupported|.Exception.IncorrectTenancy|.Future|.Index|.Indexer|.Layer|.Migrator|.Options|.QueryPlan|.Sandbox|.Tenant)?$/,
       extras: ["CHANGELOG.md", "TESTING.md", "notebooks/guide.livemd"],
       before_closing_head_tag: &docs_before_closing_head_tag/1,
       before_closing_body_tag: &docs_before_closing_body_tag/1

@@ -4,6 +4,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   alias EctoFoundationDB.Exception.IncorrectTenancy
   alias EctoFoundationDB.Exception.Unsupported
+  alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.IndexInventory
   alias EctoFoundationDB.Layer.Tx
@@ -17,7 +18,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   @impl Ecto.Adapter.Schema
   def insert_all(
-        adapter_meta = %{opts: adapter_opts},
+        adapter_meta,
         schema_meta,
         _header,
         entries,
@@ -27,7 +28,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         options
       ) do
     %{source: source, schema: schema, prefix: tenant, context: context} =
-      assert_tenancy!(adapter_opts, schema_meta)
+      assert_tenancy!(schema_meta)
 
     entries =
       Enum.map(entries, fn data_object ->
@@ -63,7 +64,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   @impl Ecto.Adapter.Schema
   def update(
-        adapter_meta = %{opts: adapter_opts},
+        adapter_meta,
         schema_meta,
         update_data,
         filters,
@@ -71,7 +72,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _options
       ) do
     %{source: source, schema: schema, prefix: tenant, context: context} =
-      assert_tenancy!(adapter_opts, schema_meta)
+      assert_tenancy!(schema_meta)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
@@ -100,14 +101,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
   @impl Ecto.Adapter.Schema
   def delete(
-        adapter_meta = %{opts: adapter_opts},
+        adapter_meta,
         schema_meta,
         filters,
         _returning,
         _options
       ) do
     %{source: source, schema: schema, prefix: tenant, context: context} =
-      assert_tenancy!(adapter_opts, schema_meta)
+      assert_tenancy!(schema_meta)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
@@ -126,10 +127,27 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     end
   end
 
-  defp assert_tenancy!(
-         _adapter_opts,
-         schema_meta = %{source: source, schema: schema}
-       ) do
+  def watch(_module, _repo, struct, {adapter_meta, options}) do
+    # This is not an Ecto callback, so we have to construct our own schema_meta
+    schema_meta = %{
+      schema: struct.__struct__,
+      source: Ecto.get_meta(struct, :source),
+      prefix: Keyword.get(options, :prefix, Ecto.get_meta(struct, :prefix))
+    }
+
+    %{schema: schema, source: source, context: context, prefix: tenant} =
+      assert_tenancy!(schema_meta)
+
+    pk_field = Fields.get_pk_field!(schema)
+    pk = Map.get(struct, pk_field)
+
+    IndexInventory.transactional(tenant, adapter_meta, source, fn tx, _idxs, _partial_idxs ->
+      future_ref = Tx.watch(tx, {schema, source, context}, {pk_field, pk}, options)
+      Future.new_watch(schema, future_ref, fn _ -> {schema, pk, options} end)
+    end)
+  end
+
+  defp assert_tenancy!(schema_meta = %{source: source, schema: schema}) do
     schema_meta =
       %{schema: schema, prefix: tenant, context: context} =
       Map.put(schema_meta, :context, Schema.get_context!(source, schema))

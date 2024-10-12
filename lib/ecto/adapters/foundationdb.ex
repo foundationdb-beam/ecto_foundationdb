@@ -3,9 +3,9 @@ defmodule Ecto.Adapters.FoundationDB do
 
   ([Hex.pm](https://hex.pm/packages/ecto_foundationdb) | [GitHub](https://github.com/foundationdb-beam/ecto_foundationdb))
 
-  Adapter module for FoundationDB.
+  Adapter module for [FoundationDB](https://www.foundationdb.org).
 
-  It uses `:erlfdb` for communicating with the database.
+  It uses [erlfdb](https://github.com/foundationdb-beam/erlfdb) for communicating with the database.
 
   ## Installation
 
@@ -20,12 +20,19 @@ defmodule Ecto.Adapters.FoundationDB do
 
   `foundationdb-clients` is always required.
 
+  If you're setting up a FoundationDB server for use with EctoFoundationDB, you must enable
+  tenants with the following `fdbcli` command:
+
+  ```bash
+  fdb> configure tenant_mode=optional_experimental
+  ```
+
   Include `:ecto_foundationdb` in your list of dependencies in `mix.exs`:
 
   ```elixir
   defp deps do
     [
-      {:ecto_foundationdb, "~> 0.1"}
+      {:ecto_foundationdb, "~> 0.3"}
     ]
   end
   ```
@@ -62,7 +69,7 @@ defmodule Ecto.Adapters.FoundationDB do
   Supervisor.start_link(...)
   ```
 
-  ## Tenants
+  ### Tenants
 
   EctoFoundationDB requires the use of [FoundationDB Tenants](https://apple.github.io/foundationdb/tenants.html).
 
@@ -72,7 +79,10 @@ defmodule Ecto.Adapters.FoundationDB do
   You'll use the Ecto `:prefix` option to specify the relevant tenant for each Ecto operation
   in your application.
 
-  Creating a schema to be used in a tenant.
+  ### Creating a schema to be used in a tenant
+
+  Take note of the line `@schema_context usetenant: true`. This informs EctoFDB that this Schema is
+  always expected to be accessed via a Tenant.
 
   ```elixir
   defmodule User do
@@ -82,13 +92,16 @@ defmodule Ecto.Adapters.FoundationDB do
     schema "users" do
       field(:name, :string)
       field(:department, :string)
+      field(:balance, :integer)
       timestamps()
     end
     # ...
   end
   ```
 
-  Setting up a tenant.
+  ### Opening a tenant
+
+  See `EctoFoundationDB.Tenant` for more details.
 
   ```elixir
   alias EctoFoundationDB.Tenant
@@ -96,26 +109,46 @@ defmodule Ecto.Adapters.FoundationDB do
   tenant = Tenant.open!(MyApp.Repo, "some-org")
   ```
 
-  Inserting a new struct.
+  ### Inserting a new struct
+
+  The Tenant ref is stored on the struct as metadata, so that when passing structs
+  to Repo functions, the `:prefix` option is not required.
 
   ```elixir
-  user = %User{name: "John", department: "Engineering"}
+  alice = %User{name: "Alice", department: "Engineering"}
          |> FoundationDB.usetenant(tenant)
 
-  user = MyApp.Repo.insert!(user)
+  alice = MyApp.Repo.insert!(alice)
   ```
 
-  Querying for a struct using the primary key.
+  ### Querying for a struct using the primary key
+
+  The `:prefix` option is required. The struct returned will have the tenant
+  ref in the metadata, like above.
 
   ```elixir
-  MyApp.Repo.get!(User, user.id, prefix: tenant)
+  MyApp.Repo.get!(User, alice.id, prefix: tenant)
   ```
 
-  When a struct is retrieved from a tenant (using `:prefix`), that struct's metadata
-  holds onto the tenant reference. This helps to protect your application from a
-  struct accidentally crossing tenant boundaries due to some unforeseen bug.
+  ### Transactions
 
-  ## Indexes
+  Multiple calls to Repo functions can be grouped inside a single transacation, which is
+  [ACID](https://en.wikipedia.org/wiki/ACID) and [globally serializable](https://en.wikipedia.org/wiki/Global_serializability).
+
+  Here's a simple example. Transactions can be arbitrarily complex, but there is a [limit to the size and runtime](#module-foundationdb).
+
+  ```elixir
+  MyApp.Repo.transaction(fn ->
+    alice = MyApp.Repo.get!(User, alice.id)
+    if alice.balance > 0 do
+      MyApp.Repo.update(User.changeset(alice, %{balance: alice.balance - 1}))
+    else
+      raise "Overdraft"
+    end
+  end, prefix: tenant)
+  ```
+
+  ## Indexes and Queries
 
   The implication of the [FoundationDB Layer Concept](https://apple.github.io/foundationdb/layer-concept.html)
   is that the manner in which data can be stored and accessed is the responsibility of the client
@@ -141,49 +174,88 @@ defmodule Ecto.Adapters.FoundationDB do
   create index(User, [:birthyear, :department, :birthdate])
   ```
 
-  In fact, the index value can be any Elixir term. All types support Equal queries. However,
-  certain Ecto Schema types support Between queries. See the Data Types section for the list.
+  In fact, the index value can be any Elixir term. All types support Equal queries (of the form `x.field == "value"`).
+  However, certain Ecto Schema types support Between queries (of the form `x.field >= 10 and x.field < 20`).
+  See the [Data Types](#module-data-types) section for the list.
 
-  For example, When an index is created on timestamp-like fields, it is an effective time
-  series index. See the query examples below.
-
-  See the Migrations section for further details about managing indexes in your application.
+  See the [Migrations](#module-migrations) section for further details about managing indexes in your application.
 
   ### Index Query Examples
 
   Retrieve all users in the Engineering department (with an Equal constraint):
 
   ```elixir
-  iex> query = from(u in User, where: u.department == ^"Engineering")
-  iex> MyApp.Repo.all(query, prefix: tenant)
+  query = from(u in User, where: u.department == ^"Engineering")
+  MyApp.Repo.all(query, prefix: tenant)
   ```
 
   Retrieve all users with a birthyear from 1992 to 1994 (with a Between constraint):
 
   ```elixir
-  iex> query = from(u in User,
-  ...>   where: u.birthyear >= ^1992 and u.birthyear <= ^1994
-  ...> )
-  iex> MyApp.Repo.all(query, prefix: tenant)
+  query = from(u in User,
+    where: u.birthyear >= ^1992 and u.birthyear <= ^1994
+  )
+  MyApp.Repo.all(query, prefix: tenant)
   ```
 
   Retrieve all Engineers born in August 1992:
 
   ```elixir
-  iex> query = from(u in User,
-  ...>   where: u.birthyear == ^1992 and
-  ...>          u.department == ^"Engineering" and
-  ...>          u.birthdate >= ^~D[1992-08-01] and u.birthdate < ^~D[1992-09-01]
-  ...> )
-  iex> MyApp.Repo.all(query, prefix: tenant)
+  query = from(u in User,
+    where: u.birthyear == ^1992 and
+           u.department == ^"Engineering" and
+           u.birthdate >= ^~D[1992-08-01] and u.birthdate < ^~D[1992-09-01]
+  )
+  MyApp.Repo.all(query, prefix: tenant)
   ```
 
-  **Order matters!**: When you create an index using multiple fields, the FDB key that stores the index will be extended with
-  all the values in the order of your defined index fields. Because FoundationDB stores keys in a well-defined order,
-  the order of the fields in your index determines the Between queries you can perform.
+  ### Index ordering matters
 
-  There can be 0 or 1 Between clauses, and if one exists, it must correspond to the final constraint in the where clause when
-  compared against the order of the index fields.
+  When you create an index using multiple fields, the FDB key that stores the index will be extended with
+  all the values *in the order of your defined index fields*. Because FoundationDB stores the keys themselves
+  in a well-defined order, the order of the fields in your index determines the Between queries you can perform.
+
+  > **_RULE:_**  For any Query, there can be 0 or 1 Between clauses, and if one exists for a field, then there must not
+  exist an Equal clause for ay field that follows, according to the list of fields in the index. Moreover, the Between
+  field must be of a [Data Type](#module-data-types) supported for Between queries.
+
+  Above, we demonstrated a nontrivial query with 2 Equal constraints and 1 Between constraint. Compare that with an invalid
+  query below, which attempts a Between constraint on the `:birthyear` field followed by an Equal constraint on the `:department`
+  field.
+
+  ```elixir
+  # Invalid query!
+  from(u in User,
+    where: u.birthyear >= ^1992 and u.birthyear < ^1995 and
+           u.department == ^"Engineering"
+  )
+  ```
+
+  **Why is this query unsupported by EctoFDB?** With the index defined as-is, EctoFDB is unable to extract a minimal
+  dataset from the database in one operation. Instead of over-extracting data and then applying a filter, we've chosen
+  to reject the query. We hope this encourages correct index management and removes worry about execution time of
+  individual Repo function calls.
+
+  **Yeah that's cool, but how do I run the query I want to run?** You have 2 options.
+
+  1. Purposefully over-extract the data using Stream, and do the filtering in Elixir:
+
+  ```elixir
+  from(u in User, where: u.birthyear >= ^1992 and u.birthyear < 1995 and)
+  |> MyApp.Repo.stream(prefix: tenant)
+  |> Stream.filter(&((&1).department == "Engineering"))
+  |> Enum.to_list()
+  ```
+
+  or
+
+  2. Create the necessary index. For our example above, the new index might look like:
+
+  ```elixir
+  create index(User, [:department, :birthyear])
+  ```
+
+  We encourage you to test execution times of your expected workload before deciding to create an index.
 
   ### Custom Indexes
 
@@ -205,28 +277,12 @@ defmodule Ecto.Adapters.FoundationDB do
     end, prefix: tenant)
   ```
 
-  It also exposes a FoundationDB-specific transaction:
-
-  ```elixir
-  alias Ecto.Adapters.FoundationDB
-
-  FoundationDB.transactional(tenant,
-    fn tx ->
-      # :erlfdb work
-    end)
-  ```
-
-  Both of these calling conventions create a transaction on FDB. Typically you will use
-  `Repo.transaction/1` when operating on your Ecto.Schema structs. If you wish
-  to do anything using the lower-level `:erlfdb` API (rare), you will use
-  `FoundationDB.transactional/2`.
-
-  Please read the [FoundationDB Developer Guid on transactions](https://apple.github.io/foundationdb/developer-guide.html#transaction-basics)
+  Please read the [FoundationDB Developer Guide on transactions](https://apple.github.io/foundationdb/developer-guide.html#transaction-basics)
   for more information about how to develop with transactions.
 
   It's important to remember that even though the database gives ACID guarantees about the
-  keys updated in a transaction, the Elixir function passed into `Repo.transaction/1` or
-  `FoundationDB.transactional/2` will be executed more than once when any conflicts
+  keys updated in a transaction, the Elixir function passed into `Repo.transaction/1`
+  may be executed more than once when any conflicts
   are encountered. For this reason, your function must not have any side effects other than
   the database operations. For example, do not publish any messages to other processes
   (such as `Phoenix.PubSub`) from within the transaction.
@@ -234,7 +290,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ```elixir
   # Do not do this!
   MyApp.Repo.transaction(fn ->
-    MyApp.Repo.insert(%User{name: "John"})
+    MyApp.Repo.insert(%User{name: "Alice"})
     ...
     Phoenix.PubSub.broadcast("my_topic", "new_user") # Not safe! :(
   end, prefix: tenant)
@@ -243,11 +299,14 @@ defmodule Ecto.Adapters.FoundationDB do
   ```elixir
   # Instead, do this:
   MyApp.Repo.transaction(fn ->
-    MyApp.Repo.insert(%User{name: "John"})
+    MyApp.Repo.insert(%User{name: "Alice"})
     ...
   end, prefix: tenant)
   Phoenix.PubSub.broadcast("my_topic", "new_user") # Safe :)
   ```
+
+  If you're looking for PubSub-like functionality at the transaction-level, please see
+  [Watches](#module-watches).
 
   ## Migrations
 
@@ -265,7 +324,9 @@ defmodule Ecto.Adapters.FoundationDB do
 
   As tenants are opened during your application runtime, migrations will be executed
   automatically. This distributes the migration across a potentially long period of time,
-  as migrations will not be executed unless the tenant is opened.
+  as migrations will not be executed unless the tenant is opened. Specifically, a call to
+  `Tenant.open/2` will block until the migration for that tenant completes. Other tenants
+  will not be affected.
 
   The Migrator is a module in your application runtime that provides the full list of
   ordered migrations. These are the migrations that will be executed when a tenant is opened.
@@ -320,7 +381,7 @@ defmodule Ecto.Adapters.FoundationDB do
   conversion between Elixir types and Database Types. Any term you put in your
   struct will be stored and later retrieved.
 
-  Data types are used by EctoFoundationDB for the creation and querying of indexes.
+  Data types *are* used by EctoFoundationDB for the creation and querying of indexes.
   Certain Ecto types are encoded into the FDB key, which allows you to formulate
   Between queries on indexes of these types:
 
@@ -339,7 +400,95 @@ defmodule Ecto.Adapters.FoundationDB do
    - `:utc_datetime`
    - `:utc_datetime_usec`
 
-  See Queries for more information.
+  See [Indexes and Queries](#module-indexes-and-queries) for more information.
+
+  ## Watches
+
+  [FoundationDB Watches](https://apple.github.io/foundationdb/developer-guide.html#watches) are
+  similar to Triggers in an RDBMS. Registering a watch on a particular key provides a guarantee[*](https://github.com/apple/foundationdb/wiki/An-Overview-how-Watches-Work)
+  that when that key in the database is changed, the client application is notified with a
+  push-style notification. This registration is initiated inside a transaction, and the caller is
+  provided a `EctoFoundationDB.Future` object that is used to receive the push notification at a later time.
+  The notification is delivered directly to the Elixir process that requested it.
+
+  The EctoFDB Repo module allows you to register a watch on any struct that you have written
+  to the database. The FDB watch is registered on the key that represents the Primary Write (the key-value
+  that stores all the data of your struct). When that struct changes in the database via any means,
+  the Future is resolved and the caller has the opportunity to refresh its internal state.
+
+  ### EctoFDB Repo functions for watches
+
+  EctoFDB adds the following functions to your Repo module. They are each discussed in detail
+  below.
+
+  - `Repo.watch/1`/`Repo.watch/2`: Registers a watch
+  - `Repo.assign_ready/2`/`Repo.assign_ready/3`: Handles Future resolution via a push message
+
+  ### `Repo.watch/2`
+
+  With arguments `struct` and `options`, registers
+  a watch on the given struct and returns a Future. This Future resolves to
+  a value when the FDB key is set or cleared. Until then, the Future remains unresolved.
+  The Future from a watch is resolvable outside of an FDB transaction.
+
+  In addition to other standard options, a `:label` option will prime the Future for use by `assign_ready/3`.
+  It's recommended that you provide a label and use `assign_ready/3`, but not required.
+
+  ### `Repo.assign_ready/3`
+
+  With arguments `futures`, `ready_refs`, and
+  `options`, returns a tuple containing: 1) a Keyword of structs with keys according to the `:label`
+  provided to `watch/2`, and 2) an updated list of futures that are still unresolved.
+
+  In order for the caller to acquire the `ready_refs` arguments, you must receive messages from the
+  process mailbox of the form `{ref, :ready}`. See the example below for detail. If your process chooses
+  to buffer a list `ready_refs` longer than 1, then `assign_ready/3` uses pipelining to retrieve the
+  resulting structs. Each watched struct must have been registered with a unique `:label`.
+
+  The `options` are provided to `Repo.async_get/3` internally. In addition to standard options, a
+  `watch?: true` option will re-register a new watch on the struct so that your calling
+  process's event loop can always be aware of changes.
+
+  ### Example
+
+  The power of watches is best illustrated in the context of a stateful Elixir process that is
+  interested in tracking the up-to-date value for a particular schema. This could be a GenServer, LiveView,
+  or some other stateful process.
+
+  ```elixir
+  defmodule MyAliceView do
+
+    # ...
+
+    def init(tenant) do
+      {alice, future} = MyRepo.transaction(
+                          fn ->
+                            alice = MyRepo.get_by(User, name: "Alice")
+                            {alice, MyRepo.watch(alice, label: :alice)}
+                          end, prefix: tenant)
+      assigns = [alice: alice]
+      {:ok, %{assigns: assigns, futures: [future]}}
+    end
+
+    # ...
+
+    def handle_info({ref, :ready}, state=%{assigns: assigns, futures: futures}) when is_reference(ref) do
+      {new_assigns, new_futures} = MyRepo.assign_ready(futures, [ref], watch?: true)
+      {:noreply, %{
+            state |
+              assigns: Map.merge(assigns, Enum.into(new_assigns, %{})),
+              futures: new_futures
+            }}
+    end
+  end
+  ```
+
+  By handling the Future message resolution event `{ref, :ready}` in the `handle_info/2`, we never need to
+  call `Repo.await/1`. Instead, our process can do other work and react to the `:ready` event immediately
+  when it's delivered.
+
+  And `Repo.assign_ready/3` provides a conventional way to retrieve the result and register a new watch
+  in one go, so that updates to Alice are not missed.
 
   ## Upserts
 
@@ -348,7 +497,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ### Upserts with `on_conflict`
 
   The following choices for `on_conflict` are supported, and they work in the manner
-  described by the offical Ecto documentation.
+  described by the official Ecto documentation.
 
   - `:raise`: The default.
   - `:nothing`
@@ -376,7 +525,11 @@ defmodule Ecto.Adapters.FoundationDB do
   for multiple network round trips. EctoFDB uses a `async`/`await` syntax to
   implement pipelining.
 
-  All the "queryable" repo functions have `async` versions:
+  ### EctoFDB Repo functions for pipelining
+
+  EctoFDB adds the following functions to your Repo module. You'll notice that there are `async_*`
+  versions of all the Queryable functions on the standard `Ecto.Repo`. These have the same arguments
+  as their counterparts, and they each return a single `EctoFoundationDB.Future`.
 
   - `Repo.async_get/2` / `Repo.async_get/3`
   - `Repo.async_get!/2` / `Repo.async_get!/3`
@@ -385,22 +538,24 @@ defmodule Ecto.Adapters.FoundationDB do
   - `Repo.async_one/1` / `Repo.async_one/2`
   - `Repo.async_one!/1` / `Repo.async_one!/2`
   - `Repo.async_all/1` / `Repo.async_all/2`
+  - `Repo.await/1`: The results of the above functions are provided to `Repo.await/1` to
+    resolve the Futures. It accepts a single Future or a list of Futures.
 
-  The results of these functions are provided to `Repo.await/1` inside a `Repo.transaction/2`.
+  ### Example
 
   Consider this example. Our transaction below has 2 network round trips in serial.
-  The "John" User is retrieved, and then the "James" users is retrieved. Finally, the
+  The "Alice" User is retrieved, and then the "Bob" user is retrieved. Finally, the
   list is constructed and the transaction ends.
 
   ```elixir
   result = MyApp.Repo.transaction(fn ->
     [
-      MyApp.Repo.get_by(User, name: "John"),
-      MyApp.Repo.get_by(User, name: "James")
+      MyApp.Repo.get_by(User, name: "Alice"),
+      MyApp.Repo.get_by(User, name: "Bob")
     ]
   end, prefix: tenant)
 
-  [john, james] = result
+  [alice, bob] = result
   ```
 
   With pipelining, we can issue 2 `async_get_by` queries without waiting for their result,
@@ -410,14 +565,14 @@ defmodule Ecto.Adapters.FoundationDB do
   ```elixir
   result = MyApp.Repo.transaction(fn ->
     futures = [
-      MyApp.Repo.async_get_by(User, name: "John"),
-      MyApp.Repo.async_get_by(User, name: "James")
+      MyApp.Repo.async_get_by(User, name: "Alice"),
+      MyApp.Repo.async_get_by(User, name: "Bob")
     ]
 
     MyApp.Repo.await(futures)
   end, prefix: tenant)
 
-  [john, james] = result
+  [alice, bob] = result
   ```
 
   Conceptually, only 1 network round-trip is required, so this will be faster than
@@ -472,6 +627,31 @@ defmodule Ecto.Adapters.FoundationDB do
 
   This happens automatically when you include the list of futures to your `Repo.await/1`.
 
+  ## Standard Options
+
+    * `:cluster_file` - The path to the fdb.cluster file. The default is
+      `"/etc/foundationdb/fdb.cluster"`.
+    * `:migrator` - A module that implements the `EctoFoundationDB.Migrator`
+      behaviour. Required when using any indexes. Defaults to `nil`. When `nil`,
+      your Repo module is assumed to be the Migrator.
+
+  ## Advanced Options
+
+    * `:storage_id` - All tenants created by this adapter are prefixed with
+      this string. This allows multiple configurations to operate on the
+      same FoundationDB cluster independently. Defaults to
+      `"Ecto.Adapters.FoundationDB"`.
+    * `:open_db` - 0-arity function used for opening a reference to the
+       FoundationDB cluster. Defaults to `:erlfdb.open(cluster_file)`. When
+       using `EctoFoundationDB.Sandbox`, you should consider setting
+       this option to `Sandbox.open_db/0`.
+    * `:migration_step` - The maximum number of keys to process in a single transaction
+      when running migrations. Defaults to `1000`. If you use a number that is
+      too large, the FDB transactions run by the Migrator will fail.
+    * `:idx_cache` - When set to `:enabled`, the Ecto ets cache is used to store the
+      available indexes per tenant. This speeds up all database operations.
+      Defaults to `:enabled`.
+
   ## Optimizing for throughput and latency
 
   Pipelining operations inside your transactions can offer significant speed-ups, and you should
@@ -487,30 +667,7 @@ defmodule Ecto.Adapters.FoundationDB do
   If you're attempting to get the maximum throughput on data loading, you'll probably want to
   make use of both!
 
-  ## Standard Options
-
-    * `:cluster_file` - The path to the fdb.cluster file. The default is
-      `"/etc/foundationdb/fdb.cluster"`.
-    * `:migrator` - A module that implements the `EctoFoundationDB.Migrator`
-      behaviour. Required when using any indexes. Defaults to `nil`. When `nil`,
-      your Repo module is assumed to be the Migrator.
-
-  ## Advanced Options
-
-    * `:storage_id` - All tenants created by this adapter are prefixed with
-      this string. This allows multiple configurations to operate on the
-      same FoundationDB cluster indepedently. Defaults to
-      `"Ecto.Adapters.FoundationDB"`.
-    * `:open_db` - 0-arity function used for opening a reference to the
-       FoundationDB cluster. Defaults to `:erlfdb.open(cluster_file)`. When
-       using `EctoFoundationDB.Sandbox`, you should consider setting
-       this option to `Sandbox.open_db/0`.
-    * `:migration_step` - The maximum number of keys to process in a single transaction
-      when running migrations. Defaults to `1000`. If you use a number that is
-      too large, the FDB transactions run by the Migrator will fail.
-    * `:idx_cache` - When set to `:enabled`, the Ecto ets cache is used to store the
-      available indexes per tenant. This speeds up all database operations.
-      Defaults to `:enabled`.
+  Read more at [FDB Developer Guide | Loading Data](https://apple.github.io/foundationdb/developer-guide.html#loading-data).
 
   ## Limitations and Caveats
 
@@ -581,9 +738,6 @@ defmodule Ecto.Adapters.FoundationDB do
   1. It makes sense for EctoFoundationDB, but it just hasn't been implemented yet.
   2. The fundamental differences between FDB and SQL backends mean that there is
      no practical reason to implement it in EctoFoundationDB.
-
-  Please feel free to request features, but also please be aware that your request
-  might be closed if it falls into that second category.
   """
 
   @behaviour Ecto.Adapter
@@ -599,6 +753,8 @@ defmodule Ecto.Adapters.FoundationDB do
   alias EctoFoundationDB.Tenant
 
   alias Ecto.Adapters.FoundationDB.EctoAdapter
+  alias Ecto.Adapters.FoundationDB.EctoAdapterAssigns
+  alias Ecto.Adapters.FoundationDB.EctoAdapterAsync
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
   alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
   alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
@@ -671,37 +827,57 @@ defmodule Ecto.Adapters.FoundationDB do
         do: async_query(fn -> all(queryable, opts ++ [returning: {:future, :all}]) end)
 
       defp async_query(fun) do
-        _res = fun.()
-
-        case Process.delete(Future.token()) do
-          nil ->
-            raise "Pipelining failure"
-
-          future ->
-            future
-        end
-      after
-        Process.delete(Future.token())
+        repo = get_dynamic_repo()
+        EctoAdapterAsync.async_query(__MODULE__, repo, fun)
       end
 
-      def await(futures) do
+      def await(futures) when is_list(futures) do
         futures
         |> Future.await_all()
-        |> Enum.map(fn future ->
-          result = Future.result(future)
-          if is_nil(result), do: raise("Pipelining failure")
+        |> Enum.map(&Future.result/1)
+      end
 
-          # Abuse a :noop option here to signal to the backend that we don't
-          # actually want to run a query. Instead, we just want the result to
-          # be transformed by Ecto's internal logic.
-          case Future.all_or_one(future) do
-            :all ->
-              all(Future.schema(future), noop: result)
+      def await(future) do
+        [res] = await([future])
+        res
+      end
 
-            :one ->
-              one(Future.schema(future), noop: result)
-          end
-        end)
+      def watch(struct, options \\ []) do
+        repo = get_dynamic_repo()
+
+        EctoAdapterSchema.watch(
+          __MODULE__,
+          repo,
+          struct,
+          Ecto.Repo.Supervisor.tuplet(
+            repo,
+            Keyword.merge(__MODULE__.default_options(:watch), options)
+          )
+        )
+      end
+
+      def assign_ready(futures, ready_refs, options \\ []) do
+        repo = get_dynamic_repo()
+
+        EctoAdapterAssigns.assign_ready(
+          __MODULE__,
+          repo,
+          futures,
+          ready_refs,
+          options
+        )
+      end
+
+      def async_assign_ready(futures, ready_ref, options \\ []) do
+        repo = get_dynamic_repo()
+
+        EctoAdapterAssigns.async_assign_ready(
+          __MODULE__,
+          repo,
+          futures,
+          ready_ref,
+          options
+        )
       end
     end
   end

@@ -25,7 +25,7 @@ Include `:ecto_foundationdb` in your list of dependencies in `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:ecto_foundationdb, git: "https://github.com/foundationdb-beam/ecto_foundationdb.git", branch: "main"}
+    {:ecto_foundationdb, "~> 0.3"}
   ]
 end
 ```

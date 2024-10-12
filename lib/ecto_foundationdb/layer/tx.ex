@@ -61,7 +61,17 @@ defmodule EctoFoundationDB.Layer.Tx do
   def transactional(context, fun) do
     case Process.get(@db_or_tenant, nil) do
       nil ->
-        :erlfdb.transactional(context, fun)
+        try do
+          Process.put(@db_or_tenant, context)
+
+          :erlfdb.transactional(context, fn tx ->
+            Process.put(@tx, tx)
+            fun.(tx)
+          end)
+        after
+          Process.delete(@tx)
+          Process.delete(@db_or_tenant)
+        end
 
       ^context ->
         tx = Process.get(@tx, nil)
@@ -210,6 +220,15 @@ defmodule EctoFoundationDB.Layer.Tx do
     num = count_range(tx, key_start, key_end)
     :erlfdb.clear_range(tx, key_start, key_end)
     num
+  end
+
+  def watch(tx, {_schema, source, context}, {_pk_field, pk}, _options) do
+    if not Schema.get_option(context, :write_primary) do
+      raise Unsupported, "Watches on schemas with `write_primary: false` are not supported."
+    end
+
+    fut = :erlfdb.watch(tx, Pack.primary_pack(source, pk))
+    fut
   end
 
   defp count_range(tx, key_start, key_end) do
