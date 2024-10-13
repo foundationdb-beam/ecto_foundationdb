@@ -9,7 +9,7 @@ Mix.install([
 
 ## Intro
 
-We're going to create a simple LiveView to showcase my favorite quote. We want to make sure our LiveView always has the most up-to-date information about the quote. A common appproach to a problem like this is to use `Phoenix.PubSub`. Instead, we'll use [EctoFoundationDB's Watches](https://hexdocs.pm/ecto_foundationdb/Ecto.Adapters.FoundationDB.html#module-watches) to deliver the messaging.
+We're going to create a simple LiveView to showcase your favorite quote. We want to make sure our LiveView always has the most up-to-date information about the quote. A common appproach to a problem like this is to use `Phoenix.PubSub`. Instead, we'll use [EctoFoundationDB's Watches](https://hexdocs.pm/ecto_foundationdb/Ecto.Adapters.FoundationDB.html#module-watches) to deliver the messaging.
 
 ## Setup Ecto
 
@@ -84,7 +84,7 @@ Repo.insert!(
 
 We're using Phoenix Playground to create a sample LiveView. Some key takeaways:
 
-1. In `assign_watch!/4`, we're reading the `"my-favorite-quote"` Quote that we've inserted above. In the same transaction, we're creating a watch with `label: :quote`. In the LiveView assigns, we store the `:quote` and the list of `:futures`. You'll want to use the same label for both the watch and the assigns.
+1. In `assign_watch!/4`, we're reading the Quote with id `"my-favorite-quote"` that we've inserted above. In the same transaction, we're creating a watch with `label: :quote`. In the LiveView assigns, we store the `:quote` and the list of `:futures`. You'll want to use the same label for both the watch and the assigns.
 
 2. `handle_event/3` receives the `"like"` event, and uses an FDB transaction to add 1 to the count of likes. Notice we choose not to update the assigns, for demonstration purposes.
 
@@ -185,7 +185,7 @@ With the block above evaluated, you can now open a web browser to `http://localh
 
 ## Updating My Favorite Quote
 
-I don't know about you, but my favorite quote depends on my current mood, which changes all the time. We'll update the database with my latest favorite quote, and because of the FDB watch, the LiveView will always render the most up-to-date content, without any PubSub.
+Your favorite quote might change from moment to moment. We'll update the database with your current favorite quote, and because of the FDB watch, the LiveView will always render the most up-to-date content, without any PubSub.
 
 ```elixir
 tenant = Tenant.open!(Repo, "experiment-with-watches-in-liveview")
@@ -222,3 +222,5 @@ ChangeFavoriteQuote.to(
 ```elixir
 ChangeFavoriteQuote.to(tenant, "Captain America", "I can do this all day.")
 ```
+
+Real-time updates like this are common to many LiveView applications, and FDB watches fit very well into such a design. Each LiveView process can directly subscribe to all the database entities it's interested in, without having an intermediary dispatch.
