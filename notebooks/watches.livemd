@@ -3,7 +3,7 @@
 ```elixir
 Mix.install([
   {:phoenix_playground, "~> 0.1.0"},
-  {:ecto_foundationdb, git: "https://github.com/JesseStimpson/ecto_foundationdb", branch: "watch"}
+  {:ecto_foundationdb, git: "https://github.com/foundationdb-beam/ecto_foundationdb", branch: "main"}
 ])
 ```
 
