@@ -13,7 +13,7 @@ We're going to create a simple LiveView to showcase my favorite quote. We want t
 
 ## Setup Ecto
 
-First, we set up Ecto, defining a Quote schema, and starting the Repo. For this to work, you must have `foundationdb-server` running locally, with tenants enabled. Refer to the [EctoFoundationDB documentation](https://hexdocs.pm/ecto_foundationdb/Ecto.Adapters.FoundationDB.html#module-installation) for installation help.
+First, we set up Ecto, defining a Quote schema, and starting the Repo. For this to work, you must have `foundationdb-server` running locally. Refer to the [EctoFoundationDB documentation](https://hexdocs.pm/ecto_foundationdb/Ecto.Adapters.FoundationDB.html#module-installation) for installation help.
 
 ```elixir
 defmodule Repo do
@@ -62,7 +62,7 @@ Repo.start_link(log: false)
 
 alias EctoFoundationDB.Tenant
 
-tenant = Tenant.open!(Repo, "expiriment-with-watches-in-liveview")
+tenant = Tenant.open!(Repo, "experiment-with-watches-in-liveview")
 
 ```
 
@@ -84,13 +84,13 @@ Repo.insert!(
 
 We're using Phoenix Playground to create a sample LiveView. Some key takeaways:
 
-1. In `mount/3`, we're opening our tenant and reading the `"my-favorite-quote"` Quote that we've inserted above. In the same transaction, we're creating a watch with `label: :quote`. In the LiveView assigns, we store the `:quote` and the list of `:futures`. You'll want to use the same label for both the watch and the assigns.
+1. In `assign_watch!/4`, we're reading the `"my-favorite-quote"` Quote that we've inserted above. In the same transaction, we're creating a watch with `label: :quote`. In the LiveView assigns, we store the `:quote` and the list of `:futures`. You'll want to use the same label for both the watch and the assigns.
 
-2. `render/1` has a simple HTML document to render our Quote. This is entirely standard LiveView HEEx. The FDB watch has no impact here.
+2. `handle_event/3` receives the `"like"` event, and uses an FDB transaction to add 1 to the count of likes. Notice we choose not to update the assigns, for demonstration purposes.
 
-3. `handle_event/3` receives the `"like"` event, and uses an FDB transaction to add 1 to the count of likes. Notice we choose not to update the assigns.
+3. `handle_info/2` receives the `:ready` message from the watch future. It uses `Repo.assign_ready/3` to update the LiveView assigns map. Whenever `"my-favorite-quote"` changes in the DB, this function will be called automatically. Also, we provide `watch?: true` to continue listening for updates.
 
-4. `handle_info/2` receives the `:ready` message from the watch future. It uses `Repo.assign_ready/3` to update the LiveView assigns map. Whenever `"my-favorite-quote"` changes in the DB, this function will be called automatically. Also, we provide `watch?: true` to continue listening for updates.
+4. `assign_watch!/4` and `handle_info/2` both contain nothing specific to the Quote schema. This is a general purpose approach that can be re-used for any other schema types.
 
 ```elixir
 defmodule DemoLive do
@@ -98,25 +98,25 @@ defmodule DemoLive do
 
   def mount(_params, _session, socket) do
     
-    tenant = Tenant.open!(Repo, "expiriment-with-watches-in-liveview")
+    tenant = Tenant.open!(Repo, "experiment-with-watches-in-liveview")
     
     {:ok, socket
       |> assign(tenant: tenant)
-      |> assign_watch!(:quote, "my-favorite-quote")
+      |> assign_watch!(Quote, :quote, "my-favorite-quote")
     }
   end
 
-  defp assign_watch!(socket, label, id) do
-    {quote, futures} = Repo.transaction(
+  defp assign_watch!(socket, schema, label, id) do
+    {struct, futures} = Repo.transaction(
       fn ->
-        quote = Repo.get!(Quote, id)
-        future = Repo.watch(quote, label: label)
-        {quote, [future]}
+        struct = Repo.get!(schema, id)
+        future = Repo.watch(struct, label: label)
+        {struct, [future]}
       end,
       prefix: socket.assigns.tenant)
     
     socket
-    |> assign(label, quote)
+    |> assign(label, struct)
     |> assign(futures: futures)
   end
 
@@ -181,12 +181,14 @@ end
 PhoenixPlayground.start(live: DemoLive)
 ```
 
+With the block above evaluated, you can now open a web browser to `http://localhost:4000`. We suggest you keep this open side-by-side with this Livebook if possible, so that you can watch the updates in real-time.
+
 ## Updating My Favorite Quote
 
-I don't know about you, but my favorite quote depends on my current mood, which changes all the time. We'll update the database with my latest favorite quote, and because of the FDB watch, the LiveView will always render the most up-to-date content.
+I don't know about you, but my favorite quote depends on my current mood, which changes all the time. We'll update the database with my latest favorite quote, and because of the FDB watch, the LiveView will always render the most up-to-date content, without any PubSub.
 
 ```elixir
-tenant = Tenant.open!(Repo, "expiriment-with-watches-in-liveview")
+tenant = Tenant.open!(Repo, "experiment-with-watches-in-liveview")
 
 defmodule ChangeFavoriteQuote do
   @id "my-favorite-quote"
