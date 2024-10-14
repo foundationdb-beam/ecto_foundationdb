@@ -1,4 +1,4 @@
-# EctoFDB Watches in Phoenix LiveView
+# Livebook | Watches in LiveView
 
 ```elixir
 Mix.install([
@@ -29,7 +29,6 @@ defmodule Quote do
 
   alias Ecto.Changeset
 
-  @schema_context usetenant: true
   @primary_key {:id, :binary_id, autogenerate: true}
 
   schema "quotes" do
@@ -71,8 +70,8 @@ Next, we create a Quote in the DB. We'll focus on how this specific Quote is ren
 ```elixir
 Repo.insert!(
   %Quote{
-    id: "my-favorite-quote", 
-    author: "Philippe Verdoux", 
+    id: "my-favorite-quote",
+    author: "Philippe Verdoux",
     content: """
       Enlightenment leads to benightedness; Science entails nescience.
       """,
@@ -97,9 +96,9 @@ defmodule DemoLive do
   use Phoenix.LiveView
 
   def mount(_params, _session, socket) do
-    
+
     tenant = Tenant.open!(Repo, "experiment-with-watches-in-liveview")
-    
+
     {:ok, socket
       |> assign(tenant: tenant)
       |> assign_watch!(Quote, :quote, "my-favorite-quote")
@@ -114,7 +113,7 @@ defmodule DemoLive do
         {struct, [future]}
       end,
       prefix: socket.assigns.tenant)
-    
+
     socket
     |> assign(label, struct)
     |> assign(futures: futures)
@@ -128,7 +127,7 @@ defmodule DemoLive do
       <figure>
         <blockquote><%= @quote.content %></blockquote>
         <h3><figcaption>- <%= @quote.author %></figcaption></h3>
-      
+
         <p>
           <label>Likes: </label>
           <span><%= @quote.likes %></span>
@@ -136,7 +135,7 @@ defmodule DemoLive do
         </p>
       </figure>
     </div>
-    
+
     <style type="text/css">
       h1 { text-align: center; }
       h3 { text-align: right; }
@@ -154,23 +153,23 @@ defmodule DemoLive do
   def handle_event("like", _params, socket) do
 
     Quote.like!(socket.assigns.tenant, socket.assigns.quote.id)
-    
+
     {:noreply, socket}
   end
 
   def handle_info({ref, :ready}, socket) when is_reference(ref) do
-    
+
     %{assigns: assigns} = socket
-    
-    {new_assigns, futures} = 
+
+    {new_assigns, futures} =
       Repo.assign_ready(
-        assigns.futures, 
-        [ref], 
+        assigns.futures,
+        [ref],
         watch?: true,
         prefix: assigns.tenant
       )
-    
-    {:noreply, 
+
+    {:noreply,
       socket
       |> assign(new_assigns)
       |> assign(futures: futures)
@@ -192,7 +191,7 @@ tenant = Tenant.open!(Repo, "experiment-with-watches-in-liveview")
 
 defmodule ChangeFavoriteQuote do
   @id "my-favorite-quote"
-  
+
   def to(tenant, author, content) do
     Repo.transaction(fn ->
       Repo.get(Quote, @id)
@@ -210,8 +209,8 @@ end
 
 ```elixir
 ChangeFavoriteQuote.to(
-  tenant, 
-  "Duke Leto Atreides", 
+  tenant,
+  "Duke Leto Atreides",
   """
   Give as few orders as possible. \
   Once you've given orders on a subject, \
@@ -223,4 +222,8 @@ ChangeFavoriteQuote.to(
 ChangeFavoriteQuote.to(tenant, "Captain America", "I can do this all day.")
 ```
 
-Real-time updates like this are common to many LiveView applications, and FDB watches fit very well into such a design. Each LiveView process can directly subscribe to all the database entities it's interested in, without having an intermediary dispatch.
+## Takeaways
+
+It's true that the behavior that our webpage exhibits is standard LiveView real-time updating. In real Phoenix applications, this is commonly done via `Phoenix.PubSub`, and it works great.
+
+The main takeaway I hope you see in this Livebook is that we've done the same real-time updating via the database directly, without any dispatcher. Doing so allows your PubSub to focus on higher-level application behavior instead of slinging data objects.

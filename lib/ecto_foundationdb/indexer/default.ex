@@ -104,19 +104,19 @@ defmodule EctoFoundationDB.Indexer.Default do
   def allows_between?(_), do: false
 
   @impl true
-  def create_range(idx) do
+  def create_range(tenant, idx) do
     source = idx[:source]
-    Pack.primary_range(source)
+    Pack.primary_range(tenant, source)
   end
 
   @impl true
-  def create(tx, idx, schema, {start_key, end_key}, limit) do
+  def create(tenant, tx, idx, schema, {start_key, end_key}, limit) do
     keys =
       tx
       |> :erlfdb.get_range(start_key, end_key, limit: limit, wait: true)
       |> Enum.map(fn {fdb_key, fdb_value} ->
         {index_key, index_object} =
-          get_index_entry(idx, schema, {fdb_key, Pack.from_fdb_value(fdb_value)})
+          get_index_entry(tenant, idx, schema, {fdb_key, Pack.from_fdb_value(fdb_value)})
 
         :erlfdb.set(tx, index_key, index_object)
         fdb_key
@@ -126,16 +126,16 @@ defmodule EctoFoundationDB.Indexer.Default do
   end
 
   @impl true
-  def set(tx, idx, schema, kv) do
-    {index_key, index_object} = get_index_entry(idx, schema, kv)
+  def set(tenant, tx, idx, schema, kv) do
+    {index_key, index_object} = get_index_entry(tenant, idx, schema, kv)
 
     :erlfdb.set(tx, index_key, index_object)
     :ok
   end
 
   @impl true
-  def clear(tx, idx, schema, kv) do
-    {index_key, _index_object} = get_index_entry(idx, schema, kv)
+  def clear(tenant, tx, idx, schema, kv) do
+    {index_key, _index_object} = get_index_entry(tenant, idx, schema, kv)
 
     :erlfdb.clear(tx, index_key)
     :ok
@@ -156,8 +156,25 @@ defmodule EctoFoundationDB.Indexer.Default do
     left_values = for op <- constraints, do: indexkey_encoder(:left, types, op)
     right_values = for op <- constraints, do: indexkey_encoder(:right, types, op)
 
-    start_key = Pack.default_index_pack(plan.source, idx[:id], length(fields), left_values, nil)
-    end_key = Pack.default_index_pack(plan.source, idx[:id], length(fields), right_values, nil)
+    start_key =
+      Pack.default_index_pack(
+        plan.tenant,
+        plan.source,
+        idx[:id],
+        length(fields),
+        left_values,
+        nil
+      )
+
+    end_key =
+      Pack.default_index_pack(
+        plan.tenant,
+        plan.source,
+        idx[:id],
+        length(fields),
+        right_values,
+        nil
+      )
 
     end_key =
       case List.last(constraints) do
@@ -171,14 +188,14 @@ defmodule EctoFoundationDB.Indexer.Default do
     start_key = options[:start_key] || start_key
 
     if Keyword.get(idx[:options], :mapped?, true) do
-      {start_key, end_key, Pack.primary_mapper()}
+      {start_key, end_key, Pack.primary_mapper(plan.tenant)}
     else
       {start_key, end_key}
     end
   end
 
   # Note: pk is always first. See insert and update paths
-  defp get_index_entry(idx, schema, {fdb_key, data_object = [{pk_field, pk_value} | _]}) do
+  defp get_index_entry(tenant, idx, schema, {fdb_key, data_object = [{pk_field, pk_value} | _]}) do
     index_name = idx[:id]
     index_fields = idx[:fields]
     index_options = idx[:options]
@@ -194,7 +211,14 @@ defmodule EctoFoundationDB.Indexer.Default do
       end
 
     index_key =
-      Pack.default_index_pack(source, index_name, length(index_fields), index_values, pk_value)
+      Pack.default_index_pack(
+        tenant,
+        source,
+        index_name,
+        length(index_fields),
+        index_values,
+        pk_value
+      )
 
     if Keyword.get(index_options, :mapped?, true) do
       {index_key, fdb_key}
@@ -240,16 +264,16 @@ defmodule EctoFoundationDB.Indexer.Default do
   # (`write_primary: false` and `mapped?: false`). But the rest of the implementation
   # is not straightforward.
   #   1. For example when a `set/4` comes in, if the next index is mapped, then we
-  #      need to compute the key for the `:from` index, but we don't have the infomation
+  #      need to compute the key for the `:from` index, but we don't have the information
   #      to do so.
   #   2. During migrations, partial_idxs are managed in the Indexer and they suffer the
   #       same problem as above.
   #
   # case options[:from] do
   #   nil ->
-  #     Pack.primary_range(source)
+  #     Pack.primary_range(tenant, source)
 
   #   from ->
-  #     Pack.default_index_range(source, from)
+  #     Pack.default_index_range(tenant, source, from)
   # end
 end

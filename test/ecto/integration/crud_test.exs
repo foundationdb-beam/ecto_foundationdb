@@ -4,7 +4,6 @@ defmodule Ecto.Integration.CrudTest do
   alias Ecto.Integration.TestRepo
 
   alias EctoFoundationDB.Schemas.Account
-  alias EctoFoundationDB.Schemas.Global
   alias EctoFoundationDB.Schemas.Product
   alias EctoFoundationDB.Schemas.User
 
@@ -55,18 +54,6 @@ defmodule Ecto.Integration.CrudTest do
     test "insert fail, missing tenancy" do
       assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
         TestRepo.insert(%User{name: "George"})
-      end)
-    end
-
-    test "insert fail, unused tenancy", context do
-      assert_raise(IncorrectTenancy, ~r/non-nil prefix was provided/, fn ->
-        TestRepo.insert(%Global{name: "failure"}, prefix: context[:tenant])
-      end)
-    end
-
-    test "insert fail, tenancy only" do
-      assert_raise(Unsupported, ~r/Non-tenant transactions/, fn ->
-        TestRepo.insert(%Global{name: "failure"})
       end)
     end
 
@@ -135,18 +122,6 @@ defmodule Ecto.Integration.CrudTest do
     test "get fail, missing tenancy" do
       assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
         TestRepo.get(Product, "abc123")
-      end)
-    end
-
-    test "get fail, unused tenancy", context do
-      assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
-        TestRepo.get(Global, "abc123", prefix: context[:tenant])
-      end)
-    end
-
-    test "get fail, tenancy only" do
-      assert_raise(Unsupported, ~r/Non-tenant transactions/, fn ->
-        TestRepo.get(Global, "abc123")
       end)
     end
 
@@ -276,18 +251,6 @@ defmodule Ecto.Integration.CrudTest do
         TestRepo.delete(%User{id: "something", name: "George"})
       end)
     end
-
-    test "delete fail, unused tenancy", context do
-      assert_raise(IncorrectTenancy, ~r/non-nil prefix was provided/, fn ->
-        TestRepo.delete(%Global{id: "something", name: "failure"}, prefix: context[:tenant])
-      end)
-    end
-
-    test "delete fail, tenancy only" do
-      assert_raise(Unsupported, ~r/Non-tenant transactions/, fn ->
-        TestRepo.delete(%Global{id: "something", name: "failure"})
-      end)
-    end
   end
 
   describe "update" do
@@ -315,22 +278,6 @@ defmodule Ecto.Integration.CrudTest do
       assert_raise(IncorrectTenancy, ~r/nil prefix was provided/, fn ->
         %User{id: "something", name: "George"}
         |> User.changeset(%{name: "Bob"})
-        |> TestRepo.update()
-      end)
-    end
-
-    test "update fail, unused tenancy", context do
-      assert_raise(IncorrectTenancy, ~r/non-nil prefix was provided/, fn ->
-        %Global{id: "something", name: "failure"}
-        |> Global.changeset(%{name: "update failure"})
-        |> TestRepo.update(prefix: context[:tenant])
-      end)
-    end
-
-    test "update fail, tenancy only" do
-      assert_raise(Unsupported, ~r/Non-tenant transactions/, fn ->
-        %Global{id: "something", name: "failure"}
-        |> Global.changeset(%{name: "update failure"})
         |> TestRepo.update()
       end)
     end

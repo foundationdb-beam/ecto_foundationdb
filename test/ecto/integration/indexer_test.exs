@@ -36,41 +36,43 @@ defmodule Ecto.Integration.IndexerTest do
     @behaviour Indexer
 
     alias EctoFoundationDB.QueryPlan
+    alias EctoFoundationDB.Tenant
+
     @count_key "name_starts_with_J_count"
     @index_key "name_starts_with_J_index/"
 
     # omitted for brevity. A complete Indexer must implement all functions
     @impl true
-    def create_range(_idx), do: {"", "\xFF"}
+    def create_range(_tenant, _idx), do: {"", "\xFF"}
 
     @impl true
-    def create(_tx, _idx, _schema, _range, _limit), do: {0, {"\xFF", "\xFF"}}
+    def create(_tenant, _tx, _idx, _schema, _range, _limit), do: {0, {"\xFF", "\xFF"}}
 
     @impl true
-    def clear(_tx, _idx, _schema, _kv), do: nil
+    def clear(_tenant, _tx, _idx, _schema, _kv), do: nil
 
     @impl true
-    def set(tx, _idx, _schema, {_, data}) do
+    def set(tenant, tx, _idx, _schema, {_, data}) do
       name = Keyword.get(data, :name)
 
       if not is_nil(name) and String.starts_with?(name, "J") do
-        :erlfdb.add(tx, @count_key, 1)
+        :erlfdb.add(tx, Tenant.pack(tenant, {@count_key}), 1)
 
         # For simplicity, we duplicate the data into the index key
-        :erlfdb.set(tx, @index_key <> data[:id], Pack.to_fdb_value(data))
+        :erlfdb.set(tx, Tenant.pack(tenant, {@index_key, data[:id]}), Pack.to_fdb_value(data))
       end
     end
 
     @impl true
     def range(_idx, plan, _options) do
       %QueryPlan{constraints: [%QueryPlan.Equal{field: :name, param: "J"}]} = plan
-      {@index_key, :erlfdb_key.strinc(@index_key)}
+      Tenant.range(plan.tenant, {@index_key})
     end
 
     def get_count(tenant) do
       FoundationDB.transactional(tenant, fn tx ->
         tx
-        |> :erlfdb.get(@count_key)
+        |> :erlfdb.get(Tenant.pack(tenant, {@count_key}))
         |> :erlfdb.wait()
         |> :binary.decode_unsigned(:little)
       end)

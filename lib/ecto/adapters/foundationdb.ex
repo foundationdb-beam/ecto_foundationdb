@@ -5,7 +5,8 @@ defmodule Ecto.Adapters.FoundationDB do
 
   Adapter module for [FoundationDB](https://www.foundationdb.org).
 
-  It uses [erlfdb](https://github.com/foundationdb-beam/erlfdb) for communicating with the database.
+  It uses [erlfdb](https://github.com/foundationdb-beam/erlfdb) for communicating with the database,
+  and implements an Ecto-compatible Layer on top of FDB's key-value store.
 
   ## Installation
 
@@ -19,13 +20,6 @@ defmodule Ecto.Adapters.FoundationDB do
   application server in production.
 
   `foundationdb-clients` is always required.
-
-  If you're setting up a FoundationDB server for use with EctoFoundationDB, you must enable
-  tenants with the following `fdbcli` command:
-
-  ```bash
-  fdb> configure tenant_mode=optional_experimental
-  ```
 
   Include `:ecto_foundationdb` in your list of dependencies in `mix.exs`:
 
@@ -71,23 +65,20 @@ defmodule Ecto.Adapters.FoundationDB do
 
   ### Tenants
 
-  EctoFoundationDB requires the use of [FoundationDB Tenants](https://apple.github.io/foundationdb/tenants.html).
+  EctoFoundationDB requires your application to use multitenancy via `EctoFoundationDB.Tenant`.
+  We strongly encourage your application to decide on a multitenancy strategy that makes sense
+  for your problem domain (or simply use `"default"` to get started).
 
-  Each tenant you create has a separate keyspace from all others, and a given FoundationDB
-  Transaction is guaranteed to be isolated to a particular tenant's keyspace.
+  Once you have opened a tenant, you'll use the Ecto `:prefix` option to provide the tenant
+  to each Repo operation.
 
-  You'll use the Ecto `:prefix` option to specify the relevant tenant for each Ecto operation
-  in your application.
+  ### Creating a schema
 
-  ### Creating a schema to be used in a tenant
-
-  Take note of the line `@schema_context usetenant: true`. This informs EctoFDB that this Schema is
-  always expected to be accessed via a Tenant.
+  This is a standard `Ecto.Schema` that will be used in the examples of this documentation.
 
   ```elixir
   defmodule User do
     use Ecto.Schema
-    @schema_context usetenant: true
     @primary_key {:id, :binary_id, autogenerate: true}
     schema "users" do
       field(:name, :string)
@@ -111,7 +102,7 @@ defmodule Ecto.Adapters.FoundationDB do
 
   ### Inserting a new struct
 
-  The Tenant ref is stored on the struct as metadata, so that when passing structs
+  The Tenant is stored on the struct as metadata, so that when passing structs
   to Repo functions, the `:prefix` option is not required.
 
   ```elixir
@@ -124,7 +115,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ### Querying for a struct using the primary key
 
   The `:prefix` option is required. The struct returned will have the tenant
-  ref in the metadata, like above.
+  in the metadata, like above.
 
   ```elixir
   MyApp.Repo.get!(User, alice.id, prefix: tenant)
@@ -132,7 +123,7 @@ defmodule Ecto.Adapters.FoundationDB do
 
   ### Transactions
 
-  Multiple calls to Repo functions can be grouped inside a single transacation, which is
+  Multiple calls to Repo functions can be grouped inside a single transaction, which is
   [ACID](https://en.wikipedia.org/wiki/ACID) and [globally serializable](https://en.wikipedia.org/wiki/Global_serializability).
 
   Here's a simple example. Transactions can be arbitrarily complex, but there is a [limit to the size and runtime](#module-foundationdb).
@@ -641,10 +632,9 @@ defmodule Ecto.Adapters.FoundationDB do
       this string. This allows multiple configurations to operate on the
       same FoundationDB cluster independently. Defaults to
       `"Ecto.Adapters.FoundationDB"`.
-    * `:open_db` - 0-arity function used for opening a reference to the
-       FoundationDB cluster. Defaults to `:erlfdb.open(cluster_file)`. When
-       using `EctoFoundationDB.Sandbox`, you should consider setting
-       this option to `Sandbox.open_db/0`.
+    * `:open_db` - 1-arity function accepting the Repo module. Used for opening a reference to the
+       FoundationDB cluster. Defaults to `&EctoFoundationDB.Database.open/1`. When
+       using `EctoFoundationDB.Sandbox`, you should set this option to `Sandbox.open_db/1`.
     * `:migration_step` - The maximum number of keys to process in a single transaction
       when running migrations. Defaults to `1000`. If you use a number that is
       too large, the FDB transactions run by the Migrator will fail.
@@ -741,7 +731,6 @@ defmodule Ecto.Adapters.FoundationDB do
   """
 
   @behaviour Ecto.Adapter
-  @behaviour Ecto.Adapter.Storage
   @behaviour Ecto.Adapter.Schema
   @behaviour Ecto.Adapter.Queryable
   @behaviour Ecto.Adapter.Transaction
@@ -757,20 +746,16 @@ defmodule Ecto.Adapters.FoundationDB do
   alias Ecto.Adapters.FoundationDB.EctoAdapterAsync
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable
   alias Ecto.Adapters.FoundationDB.EctoAdapterSchema
-  alias Ecto.Adapters.FoundationDB.EctoAdapterStorage
   alias Ecto.Adapters.FoundationDB.EctoAdapterTransaction
 
   @spec db(Ecto.Repo.t()) :: Database.t()
   def db(repo) when is_atom(repo) do
-    db(repo.config())
-  end
-
-  @spec db(Options.t()) :: Database.t()
-  def db(options) do
-    case :persistent_term.get({__MODULE__, :database}, nil) do
+    case :persistent_term.get({__MODULE__, repo, :database}, nil) do
       nil ->
-        db = EctoAdapterStorage.open_db(options)
-        :persistent_term.put({__MODULE__, :database}, {db, options})
+        options = repo.config()
+        fun = Options.get(options, :open_db)
+        db = fun.(repo)
+        :persistent_term.put({__MODULE__, repo, :database}, {db, options})
         db
 
       {db, _options} ->
@@ -797,8 +782,8 @@ defmodule Ecto.Adapters.FoundationDB do
   For example, a transaction must complete
   [within 5 seconds](https://apple.github.io/foundationdb/developer-guide.html#long-running-transactions).
   """
-  @spec transactional(Database.t() | Tenant.t() | nil, function()) :: any()
-  def transactional(db_or_tenant, fun), do: Tx.transactional_external(db_or_tenant, fun)
+  @spec transactional(Tenant.t() | nil, function()) :: any()
+  def transactional(tenant, fun), do: Tx.transactional_external(tenant, fun)
 
   @impl Ecto.Adapter
   defmacro __before_compile__(_env) do
@@ -899,15 +884,6 @@ defmodule Ecto.Adapters.FoundationDB do
 
   @impl Ecto.Adapter
   defdelegate dumpers(primitive_type, ecto_type), to: EctoAdapter
-
-  @impl Ecto.Adapter.Storage
-  defdelegate storage_up(options), to: EctoAdapterStorage
-
-  @impl Ecto.Adapter.Storage
-  defdelegate storage_down(options), to: EctoAdapterStorage
-
-  @impl Ecto.Adapter.Storage
-  defdelegate storage_status(options), to: EctoAdapterStorage
 
   @impl Ecto.Adapter.Schema
   defdelegate autogenerate(type), to: EctoAdapterSchema

@@ -22,7 +22,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
     :erlfdb.get(tx, key)
   end
 
-  def set_stage(tx, {fdb_key, data_object}, :not_found, acc) do
+  def set_stage(tenant, tx, {fdb_key, data_object}, :not_found, acc) do
     %__MODULE__{
       schema: schema,
       idxs: idxs,
@@ -35,11 +35,11 @@ defmodule EctoFoundationDB.Layer.TxInsert do
     fdb_value = Pack.to_fdb_value(data_object)
 
     if write_primary, do: :erlfdb.set(tx, fdb_key, fdb_value)
-    Indexer.set(tx, idxs, partial_idxs, schema, {fdb_key, data_object})
+    Indexer.set(tenant, tx, idxs, partial_idxs, schema, {fdb_key, data_object})
     %__MODULE__{acc | count: count + 1}
   end
 
-  def set_stage(tx, {fdb_key, data_object = [{pk_field, _} | _]}, result, acc) do
+  def set_stage(tenant, tx, {fdb_key, data_object = [{pk_field, _} | _]}, result, acc) do
     %__MODULE__{
       schema: schema,
       idxs: idxs,
@@ -57,13 +57,13 @@ defmodule EctoFoundationDB.Layer.TxInsert do
         existing_object = Pack.from_fdb_value(result)
 
         Tx.update_data_object(
+          tenant,
           tx,
           schema,
           pk_field,
           {fdb_key, existing_object},
           [set: data_object],
-          idxs,
-          partial_idxs,
+          {idxs, partial_idxs},
           write_primary
         )
 
@@ -73,13 +73,13 @@ defmodule EctoFoundationDB.Layer.TxInsert do
         existing_object = Pack.from_fdb_value(result)
 
         Tx.update_data_object(
+          tenant,
           tx,
           schema,
           pk_field,
           {fdb_key, existing_object},
           [set: Keyword.drop(data_object, fields)],
-          idxs,
-          partial_idxs,
+          {idxs, partial_idxs},
           write_primary
         )
 
@@ -89,13 +89,13 @@ defmodule EctoFoundationDB.Layer.TxInsert do
         existing_object = Pack.from_fdb_value(result)
 
         Tx.update_data_object(
+          tenant,
           tx,
           schema,
           pk_field,
           {fdb_key, existing_object},
           [set: Keyword.take(data_object, fields)],
-          idxs,
-          partial_idxs,
+          {idxs, partial_idxs},
           write_primary
         )
 

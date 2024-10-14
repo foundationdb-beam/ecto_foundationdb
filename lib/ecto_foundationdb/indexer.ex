@@ -5,46 +5,54 @@ defmodule EctoFoundationDB.Indexer do
   alias EctoFoundationDB.Index
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.QueryPlan
+  alias EctoFoundationDB.Tenant
 
-  @callback create_range(Index.t()) :: {:erlfdb.key(), :erlfdb.key()}
-  @callback create(:erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple(), integer()) ::
+  @callback create_range(Tenant.t(), Index.t()) :: {:erlfdb.key(), :erlfdb.key()}
+  @callback create(
+              Tenant.t(),
+              :erlfdb.transaction(),
+              Index.t(),
+              Ecto.Schema.t(),
+              tuple(),
+              integer()
+            ) ::
               {integer(), {:erlfdb.key(), :erlfdb.key()}}
-  @callback set(:erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
-  @callback clear(:erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
-  @callback update(:erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
+  @callback set(Tenant.t(), :erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
+  @callback clear(Tenant.t(), :erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
+  @callback update(Tenant.t(), :erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
   @callback range(Index.t(), QueryPlan.t(), Keyword.t()) :: tuple()
   @callback unpack(Index.t(), QueryPlan.t(), tuple()) :: tuple()
-  @optional_callbacks update: 4, unpack: 3
+  @optional_callbacks update: 5, unpack: 3
 
-  def create_range(idx),
-    do: idx[:indexer].create_range(idx)
+  def create_range(tenant, idx),
+    do: idx[:indexer].create_range(tenant, idx)
 
-  def create(tx, idx, schema, range, limit),
-    do: idx[:indexer].create(tx, idx, schema, range, limit)
+  def create(tenant, tx, idx, schema, range, limit),
+    do: idx[:indexer].create(tenant, tx, idx, schema, range, limit)
 
-  def set(tx, idxs, partial_idxs, schema, kv) do
+  def set(tenant, tx, idxs, partial_idxs, schema, kv) do
     idxs = idxs ++ filter_partials(partial_idxs, kv, [])
 
     for idx <- idxs,
-        do: idx[:indexer].set(tx, idx, schema, kv)
+        do: idx[:indexer].set(tenant, tx, idx, schema, kv)
   end
 
-  def clear(tx, idxs, partial_idxs, schema, kv) do
+  def clear(tenant, tx, idxs, partial_idxs, schema, kv) do
     idxs = idxs ++ filter_partials(partial_idxs, kv, [])
 
     for idx <- idxs,
-        do: idx[:indexer].clear(tx, idx, schema, kv)
+        do: idx[:indexer].clear(tenant, tx, idx, schema, kv)
   end
 
-  def update(tx, idxs, partial_idxs, schema, kv) do
+  def update(tenant, tx, idxs, partial_idxs, schema, kv) do
     idxs = idxs ++ filter_partials(partial_idxs, kv, [])
 
     for idx <- idxs do
       apply(
         idx[:indexer],
         :update,
-        [tx, idx, schema, kv],
-        &_update/4
+        [tenant, tx, idx, schema, kv],
+        &_update/5
       )
     end
   end
@@ -65,9 +73,9 @@ defmodule EctoFoundationDB.Indexer do
   defp _unpack(_idx, _plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, []}),
     do: nil
 
-  defp _update(tx, idx, schema, kv) do
-    idx[:indexer].clear(tx, idx, schema, kv)
-    idx[:indexer].set(tx, idx, schema, kv)
+  defp _update(tenant, tx, idx, schema, kv) do
+    idx[:indexer].clear(tenant, tx, idx, schema, kv)
+    idx[:indexer].set(tenant, tx, idx, schema, kv)
   end
 
   defp apply(module, fun, args, default_fun) do

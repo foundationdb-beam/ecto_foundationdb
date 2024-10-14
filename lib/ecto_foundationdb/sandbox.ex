@@ -10,11 +10,18 @@ defmodule EctoFoundationDB.Sandbox do
   """
   alias EctoFoundationDB.Database
   alias EctoFoundationDB.Options
+  alias EctoFoundationDB.Sandbox.Sandboxer
   alias EctoFoundationDB.Tenant
 
-  @spec open_db() :: Database.t()
-  def open_db() do
-    get_or_create_test_db()
+  @spec open_db(Ecto.Repo.t()) :: Database.t()
+  def open_db(repo) do
+    [{Ecto.Adapters.FoundationDB.Supervisor, sup, :supervisor, _}] =
+      Supervisor.which_children(repo)
+
+    repo_children = Supervisor.which_children(sup)
+    {Sandboxer, pid, :worker, _} = List.keyfind!(repo_children, Sandboxer, 0)
+
+    Sandboxer.get_or_create_test_db(pid)
   end
 
   @spec checkout(Ecto.Repo.t(), Tenant.id(), Options.t()) :: Tenant.t()
@@ -26,17 +33,5 @@ defmodule EctoFoundationDB.Sandbox do
   def checkin(repo, id) when is_binary(id) do
     Tenant.clear_delete!(repo, id)
     :ok
-  end
-
-  defp get_or_create_test_db() do
-    case :persistent_term.get({__MODULE__, :database}, nil) do
-      nil ->
-        new_db = :erlfdb_util.get_test_db([])
-        :persistent_term.put({__MODULE__, :database}, new_db)
-        new_db
-
-      already_initted_db ->
-        already_initted_db
-    end
   end
 end

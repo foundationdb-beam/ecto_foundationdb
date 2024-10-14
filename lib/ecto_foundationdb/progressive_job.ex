@@ -7,7 +7,7 @@ defmodule EctoFoundationDB.ProgressiveJob do
   ## Behaviour
 
   To implement a `ProgressiveJob`, you must define a module that implements the
-  `ProgressiveJob` beahviour.
+  `ProgressiveJob` behaviour.
 
   - `init/1` - Initializes the job state. This function is called once at the beginning
     of the job.
@@ -62,8 +62,9 @@ defmodule EctoFoundationDB.ProgressiveJob do
   alias Ecto.Adapters.FoundationDB
 
   alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Tenant
 
-  @callback init(term()) ::
+  @callback init(Tenant.t(), term()) ::
               {:ok, :erlfdb.key(), term(), term()} | :ignore
   @callback done?(term(), :erlfdb.transaction()) :: {boolean(), term()}
 
@@ -117,12 +118,14 @@ defmodule EctoFoundationDB.ProgressiveJob do
 
     * `job` - The `ProgressiveJob` struct created by `new/3`.
   """
-  def transactional_stream(job = %__MODULE__{module: module, init_args: init_args}) do
+  def transactional_stream(
+        job = %__MODULE__{tenant: tenant, module: module, init_args: init_args}
+      ) do
     # For any future debuggers: Please remember that the function used in :erlfdb.transactional
     # can be executed and then rolled back, and then executed again. On the second execution, it
     # may follow a different code path. So, any log messages you add are not true evidence
     # of any writes being made to the database. In other words, logs are side effects.
-    case module.init(init_args) do
+    case module.init(tenant, init_args) do
       {:ok, claim_keys, cursor, state} ->
         job = %__MODULE__{
           job

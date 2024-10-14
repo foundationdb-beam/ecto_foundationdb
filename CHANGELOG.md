@@ -1,5 +1,25 @@
 # Changelog for v0.x
 
+## v0.3 (release date pending)
+
+### \*\* Major breaking changes \*\*
+
+Databases that have been created using a prior version of EctoFoundationDB will be broken on
+EctoFDB v0.3 and above. Please start a new database with EctoFDB v0.3. If you currently have
+a database on v0.2 or earlier, please [submit an issue](https://github.com/foundationdb-beam/ecto_foundationdb/issues)
+to discuss the upgrade path.
+
+### Enhancements
+
+* [Watches](Ecto.Adapters.FoundationDB.html#module-watches): Support for FDB Watches, which is like a database-driven PubSub on an Ecto struct.
+* [Directory Tenants](EctoFoundationDB.Tenant): A new default backend for Multitenancy that is production-ready. Managed tenants have been moved to "Experimental" status.
+* `@schema_context usetenant: true` is no longer required.
+* The `:open_db` option now defines a 1-arity function that accepts the Repo module.
+
+### New Documentation
+
+* [Livebook | Watches in LiveView](watches.livemd)
+
 ## v0.2.1 (2024-09-23)
 
 ### Bug fixes

@@ -11,6 +11,8 @@ defmodule EctoFoundationDB.Layer.Pack do
   # Schema migrations are stored as primary writes and default indexes with
   #     {@migration_prefix, source, ...}
 
+  alias EctoFoundationDB.Tenant
+
   @adapter_prefix <<0xFD>>
   @migration_prefix <<0xFE>>
   @data_namespace "d"
@@ -19,21 +21,23 @@ defmodule EctoFoundationDB.Layer.Pack do
   @doc """
   ## Examples
 
-    iex> EctoFoundationDB.Layer.Pack.adapter_repo_range()
+    iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
+    iex> EctoFoundationDB.Layer.Pack.adapter_repo_range(tenant)
     {"\\x01\\xFD\\x00\\x00", "\\x01\\xFD\\x00\\xFF"}
   """
-  def adapter_repo_range() do
-    :erlfdb_tuple.range({@adapter_prefix})
+  def adapter_repo_range(tenant) do
+    Tenant.range(tenant, {@adapter_prefix})
   end
 
   @doc """
   ## Examples
 
-  iex> EctoFoundationDB.Layer.Pack.adapter_source_range("my-source")
+  iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
+  iex> EctoFoundationDB.Layer.Pack.adapter_source_range(tenant, "my-source")
   {"\\x01\\xFD\\x00\\x01my-source\\x00\\x00", "\\x01\\xFD\\x00\\x01my-source\\x00\\xFF"}
   """
-  def adapter_source_range(source) do
-    :erlfdb_tuple.range({prefix(source), source})
+  def adapter_source_range(tenant, source) do
+    Tenant.range(tenant, {prefix(source), source})
   end
 
   @doc """
@@ -54,27 +58,28 @@ defmodule EctoFoundationDB.Layer.Pack do
 
   ## Examples
 
-    iex> EctoFoundationDB.Layer.Pack.primary_pack("my-source", "my-id")
-    iex> |> :erlfdb_tuple.unpack()
+    iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
+    iex> EctoFoundationDB.Layer.Pack.primary_pack(tenant, "my-source", "my-id")
+    iex> |> then(&EctoFoundationDB.Tenant.unpack(tenant, &1))
     {"\\xFD", "my-source", "d", <<131, 109, 0, 0, 0, 5, 109, 121, 45, 105, 100>>}
   """
-  def primary_pack(source, id) do
-    namespaced_pack(source, @data_namespace, [encode_pk_for_key(id)])
+  def primary_pack(tenant, source, id) do
+    namespaced_pack(tenant, source, @data_namespace, [encode_pk_for_key(id)])
   end
 
   @doc """
   ## Examples
 
-    iex> EctoFoundationDB.Layer.Pack.primary_range("my-source")
+    iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
+    iex> EctoFoundationDB.Layer.Pack.primary_range(tenant, "my-source")
     {"\\x01\\xFD\\0\\x01my-source\\0\\x01d\\0\\0", "\\x01\\xFD\\0\\x01my-source\\0\\x01d\\0\\xFF"}
   """
-  def primary_range(source) do
-    namespaced_range(source, @data_namespace, [])
+  def primary_range(tenant, source) do
+    namespaced_range(tenant, source, @data_namespace, [])
   end
 
-  def primary_mapper() do
-    # prefix   source    namespace id        get_range
-    {"{V[0]}", "{V[1]}", "{V[2]}", "{V[3]}", "{...}"}
+  def primary_mapper(tenant) do
+    Tenant.primary_mapper(tenant)
   end
 
   @doc """
@@ -82,21 +87,22 @@ defmodule EctoFoundationDB.Layer.Pack do
 
   ## Examples
 
-    iex> EctoFoundationDB.Layer.Pack.default_index_pack("my-source", "my-index", 1, ["my-val"], "my-id")
-    iex> |> :erlfdb_tuple.unpack()
+    iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
+    iex> EctoFoundationDB.Layer.Pack.default_index_pack(tenant, "my-source", "my-index", 1, ["my-val"], "my-id")
+    iex> |> then(&EctoFoundationDB.Tenant.unpack(tenant, &1))
     {"\\xFD", "my-source", "i", "my-index", 1, "my-val", <<131, 109, 0, 0, 0, 5, 109, 121, 45, 105, 100>>}
   """
-  def default_index_pack(source, index_name, idx_len, index_values, id) do
+  def default_index_pack(tenant, source, index_name, idx_len, index_values, id) do
     vals =
       ["#{index_name}", idx_len] ++
         index_values ++ if(is_nil(id), do: [], else: [encode_pk_for_key(id)])
 
-    namespaced_pack(source, @index_namespace, vals)
+    namespaced_pack(tenant, source, @index_namespace, vals)
   end
 
-  def default_index_range(source, index_name) do
+  def default_index_range(tenant, source, index_name) do
     vals = ["#{index_name}"]
-    namespaced_range(source, @index_namespace, vals)
+    namespaced_range(tenant, source, @index_namespace, vals)
   end
 
   @doc """
@@ -104,27 +110,29 @@ defmodule EctoFoundationDB.Layer.Pack do
 
   ## Examples
 
-    iex> EctoFoundationDB.Layer.Pack.default_index_range("my-source", "my-index", 1, ["my-val"])
+    iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
+    iex> EctoFoundationDB.Layer.Pack.default_index_range(tenant, "my-source", "my-index", 1, ["my-val"])
     {"\\x01\\xFD\\0\\x01my-source\\0\\x01i\\0\\x01my-index\\0\\x15\\x01\\x01my-val\\0\\0", "\\x01\\xFD\\0\\x01my-source\\0\\x01i\\0\\x01my-index\\0\\x15\\x01\\x01my-val\\0\\xFF"}
   """
-  def default_index_range(source, index_name, idx_len, index_values) do
+  def default_index_range(tenant, source, index_name, idx_len, index_values) do
     vals = ["#{index_name}", idx_len] ++ index_values
-    namespaced_range(source, @index_namespace, vals)
+    namespaced_range(tenant, source, @index_namespace, vals)
   end
 
-  def namespaced_pack(source, namespace, vals) when is_list(vals) do
+  def namespaced_pack(tenant, source, namespace, vals) when is_list(vals) do
     ([prefix(source), source, namespace] ++ vals)
     |> :erlang.list_to_tuple()
-    |> :erlfdb_tuple.pack()
+    |> then(&Tenant.pack(tenant, &1))
   end
 
-  def namespaced_range(source, namespace, vals) do
+  def namespaced_range(tenant, source, namespace, vals) do
     ([prefix(source), source, namespace] ++ vals)
     |> :erlang.list_to_tuple()
-    |> :erlfdb_tuple.range()
+    |> then(&Tenant.range(tenant, &1))
   end
 
-  defp prefix("\xFF" <> _), do: @migration_prefix
+  defp prefix("schema_migrations"), do: @migration_prefix
+  defp prefix("indexes"), do: @migration_prefix
   defp prefix(_), do: @adapter_prefix
 
   @doc """

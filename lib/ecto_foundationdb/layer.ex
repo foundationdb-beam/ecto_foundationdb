@@ -8,18 +8,36 @@ defmodule EctoFoundationDB.Layer do
 
   ## Keyspace Design
 
-  All keys used by `:ecto_foundationdb` are encoded with [FoundationDB's Tuple Encoding](https://github.com/apple/foundationdb/blob/main/design/tuple.md)
-  The first element of the tuple is a string prefix that is intended to keep the `:ecto_foundationdb` keyspace
-  separate from other keys in the FoundationDB cluster.
+  All keys used by `:ecto_foundationdb` are encoded with [FoundationDB's Tuple Encoding](https://github.com/apple/foundationdb/blob/main/design/tuple.md).
 
-  Your Schema data and Default indexes are stored with prefix "\\xFD".
+  With the default `:tenant_backend` of `EctoFoundationDB.Tenant.DirectoryTenant`, each tuple written by EctoFDB is
+  prefixed with a short binary string as allocated by `:erlfdb_directory. This tenant prefixing is the most critical
+  element of the keyspace because it's the mechanism that guarantees tenants cannot cross their boundaries. **The rest of
+  this documentation is written assuming you're using the DirectoryTenant`.**
 
-  The data associated with schema migrations is stored with prefix "\\xFE".
+  The first element of the tuple after the tenant prefix is a string prefix that is intended to keep the
+  `:ecto_foundationdb` keyspace separate from other keys in the FoundationDB cluster.
 
-  The rest of the keyspace is open for use by you, the application developer.
+  Your Schema data and Default indexes are stored with "\\xFD".
 
-  All values are either
-    * other keys (in the case of Default indexes) or
+  The data associated with schema migrations is stored with "\\xFE".
+
+  The rest of the tenant's keyspace is open for use by you, the application developer. For example, it is safe to write:
+
+  ```elixir
+  db = FoundationDB.open(MyApp.Repo)
+  tenant = Tenant.open(MyApp.Repo, "some-org")
+
+  # Multitenancy-Safe. The key is properly packed
+  :erlfdb.set(db, Tenant.pack(tenant, {"hello"}), "world")
+
+  # Multitenancy-Unsafe. The key is not packed into the tenant's keyspace
+  :erlfdb.set(db, :erlfdb_tuple.pack({"hello"}), "world")
+  :erlfdb.set(db, "hello", "world")
+  ```
+
+  A value (the binary stored at each key) is either
+    * some other keys (in the case of Default indexes) or
     * Erlang term data encoded with `:erlang.term_to_binary/1`
 
   ## Primary Write and Read
@@ -30,7 +48,6 @@ defmodule EctoFoundationDB.Layer do
   ```elixir
   defmodule EctoFoundationDB.Schemas.User do
     use Ecto.Schema
-    @schema_context usetenant: true
     schema "users" do
       field(:name, :string)
       field(:department, :string)
@@ -39,8 +56,8 @@ defmodule EctoFoundationDB.Layer do
   end
   ```
 
-  In this example, a User has an `:id` and a `:name`. Also notice that the User is defined with
-  `usetenant: true` which provides a scope under which the User lives. For example, a typical tenant
+  In this example, a User has an `:id` and a `:name`. Also remember that the User is defined within
+  a tenant which provides a scope under which the User lives. For example, a typical tenant
   would be the organization the User belongs to. Since the User is in this tenant, we do not need
   to provide an identifier for this organization on the User object itself.
 
