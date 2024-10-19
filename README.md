@@ -12,8 +12,8 @@ as the driver for communicating with FoundationDB.
 Install the latest stable release of FoundationDB from the
 [official FoundationDB Releases](https://github.com/apple/foundationdb/releases).
 
-You will only need to install the `foundationdb-server` package if you're
-running an instance of the FoundationDB Server. For example, it's common to
+The `foundationdb-server` package is required on any system that will be running
+a FoundationDB server instance. For example, it's common to
 run the `foundationdb-server` on your development machine and on managed
 instances running a FoundationDB cluster, but not for your stateless Elixir
 application server in production.
@@ -53,14 +53,7 @@ EctoFoundationDB offers:
 See the [documentation](https://hexdocs.pm/ecto_foundationdb) for usage
 information.
 
-### Tenants
-
-`ecto_foundationdb` requires the use of FoundationDB Tenants, which can be
-enabled on your cluster with the following configuration in an `fdbcli` prompt.
-
-```
-fdb> configure tenant_mode=optional_experimental
-```
+For documentation on `main` branch, see [Ecto.Adapters.FoundationDB](https://github.com/foundationdb-beam/ecto_foundationdb/blob/main/lib/ecto/adapters/foundationdb.ex).
 
 ## Running tests
 
