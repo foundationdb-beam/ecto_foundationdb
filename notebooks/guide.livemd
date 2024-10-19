@@ -1,4 +1,4 @@
-# EctoFoundationDB Guide
+# Livebook | Getting Started
 
 ```elixir
 Mix.install([
@@ -45,13 +45,12 @@ This next step simulates your app's startup. Normally, you would have a project 
 MyApp.Repo.start_link(log: false)
 ```
 
-Next, we define an `Ecto.Schema` for events that are coming from a temperature sensor. This is a pretty standard Schema module, but notice the `usetenant: true` option on `@schema_context`. This ensures that our `TemperatureEvent`s will be written to a Tenant in the database.
+Next, we define an `Ecto.Schema` for events that are coming from a temperature sensor. This is a pretty standard Schema module.
 
 ```elixir
 defmodule TemperatureEvent do
   use Ecto.Schema
 
-  @schema_context usetenant: true
   @primary_key {:id, :binary_id, autogenerate: true}
 
   schema "temperature_events" do

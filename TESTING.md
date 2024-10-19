@@ -6,7 +6,7 @@ First, in `config/test.exs`:
 
 ```elixir
 config :my_app, MyApp.Repo,
-  open_db: &EctoFoundationDB.Sandbox.open_db/0
+  open_db: &EctoFoundationDB.Sandbox.open_db/1
 ```
 
 Next, set up an ExUnit Case that will provide you with a new Tenant to use

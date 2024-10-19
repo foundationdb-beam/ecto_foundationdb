@@ -4,13 +4,9 @@ defmodule EctoFoundationDB.Migration.SchemaMigration do
   alias EctoFoundationDB.Migration.SchemaMigration
   use Ecto.Schema
 
-  @schema_context usetenant: true
-
   import Ecto.Query, only: [from: 2]
 
-  # We put the schema_migrations source at the end of the keyspace so that
-  # we can empty out a tenant's data without changing its migrations
-  @schema_migrations_source "\xFFschema_migrations"
+  @schema_migrations_source "schema_migrations"
 
   def source(), do: @schema_migrations_source
 

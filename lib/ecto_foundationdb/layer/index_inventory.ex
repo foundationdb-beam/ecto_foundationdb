@@ -9,7 +9,7 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
   alias EctoFoundationDB.Options
   alias EctoFoundationDB.QueryPlan
 
-  @index_inventory_source "\xFFindexes"
+  @index_inventory_source "indexes"
   @max_version_name "version"
   @idx_operation_failed {:erlfdb_error, 1020}
 
@@ -37,13 +37,14 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
 
   ## Examples
 
-    iex> {key, obj} = EctoFoundationDB.Layer.IndexInventory.new_index("users", "users_name_index", [:name], [])
-    iex> {:erlfdb_tuple.unpack(key), obj}
-    {{"\\xFE", "\\xFFindexes", "users", "users_name_index"}, [id: "users_name_index", indexer: EctoFoundationDB.Indexer.Default, source: "users", fields: [:name], options: []]}
+    iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
+    iex> {key, obj} = EctoFoundationDB.Layer.IndexInventory.new_index(tenant, "users", "users_name_index", [:name], [])
+    iex> {EctoFoundationDB.Tenant.unpack(tenant, key), obj}
+    {{"\\xFE", "indexes", "users", "users_name_index"}, [id: "users_name_index", indexer: EctoFoundationDB.Indexer.Default, source: "users", fields: [:name], options: []]}
 
   """
-  def new_index(source, index_name, index_fields, options) do
-    inventory_key = inventory_key(source, index_name)
+  def new_index(tenant, source, index_name, index_fields, options) do
+    inventory_key = inventory_key(tenant, source, index_name)
 
     idx = [
       id: index_name,
@@ -56,12 +57,8 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
     {inventory_key, idx}
   end
 
-  def inventory_key(source, index_name) do
-    Pack.namespaced_pack(source(), source, ["#{index_name}"])
-  end
-
-  def special_key(name) do
-    Pack.namespaced_pack(source(), name, [])
+  def inventory_key(tenant, source, index_name) do
+    Pack.namespaced_pack(tenant, source(), source, ["#{index_name}"])
   end
 
   defp get_indexer(options) do
@@ -212,21 +209,22 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
   This function uses the Ecto cache and clever use of FDB constructs to guarantee
   that the cache is consistent with transactional semantics.
   """
-  def transactional(db_or_tenant, %{cache: cache, opts: adapter_opts}, source, fun) do
+  def transactional(tenant, %{cache: cache, opts: adapter_opts}, source, fun) do
     cache? = :enabled == Options.get(adapter_opts, :idx_cache)
-    cache_key = {__MODULE__, db_or_tenant, source}
+    cache_key = {__MODULE__, tenant, source}
 
-    Tx.transactional(db_or_tenant, fn tx ->
-      tx_with_idxs_cache(tx, cache?, cache, adapter_opts, source, cache_key, fun)
+    Tx.transactional(tenant, fn tx ->
+      tx_with_idxs_cache(tenant, tx, cache?, cache, adapter_opts, source, cache_key, fun)
     end)
   end
 
-  defp tx_with_idxs_cache(tx, cache?, cache, adapter_opts, source, cache_key, fun) do
+  defp tx_with_idxs_cache(tenant, tx, cache?, cache, adapter_opts, source, cache_key, fun) do
     now = System.monotonic_time(:millisecond)
 
     {_, {cvsn, cidxs}, ts} = cache_lookup(cache?, cache, cache_key, now)
 
-    {vsn, idxs, partial_idxs, validator} = tx_idxs(tx, adapter_opts, source, {cvsn, cidxs})
+    {vsn, idxs, partial_idxs, validator} =
+      tx_idxs(tenant, tx, adapter_opts, source, {cvsn, cidxs})
 
     cache_update(cache?, cache, cache_key, {cvsn, cidxs}, {vsn, idxs}, partial_idxs, ts, now)
 
@@ -240,17 +238,17 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
     end
   end
 
-  defp tx_idxs(tx, adapter_opts, source, cache_val) do
+  defp tx_idxs(tenant, tx, adapter_opts, source, cache_val) do
     case Map.get(builtin_indexes(), source, nil) do
       nil ->
-        tx_idxs_get(tx, adapter_opts, source, cache_val)
+        tx_idxs_get(tenant, tx, adapter_opts, source, cache_val)
 
       idxs ->
         {-1, idxs, [], fn -> true end}
     end
   end
 
-  defp tx_idxs_get(tx, adapter_opts, source, {vsn, idxs}) do
+  defp tx_idxs_get(tenant, tx, adapter_opts, source, {vsn, idxs}) do
     # Every transaction performs a 'get' on these two keys, which **does** have an impact
     # on performance. The cost of the 'get' is worth it because
     #
@@ -261,17 +259,17 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
     #
     # In both cases, we only wait for the result at the end of the rest of the transaction
     # which gives FDB the opportunity to select the keys in the background while the user's
-    # more interesting work is being excuted. If something is found to be violated at the end
+    # more interesting work is being executed. If something is found to be violated at the end
     # of the transaction, the entire transaction is retried.
-    max_version_future = MaxValue.get(tx, SchemaMigration.source(), @max_version_name)
-    claim_future = :erlfdb.get(tx, MigrationsPJ.claim_key(source))
+    max_version_future = MaxValue.get(tenant, tx, SchemaMigration.source(), @max_version_name)
+    claim_future = :erlfdb.get(tx, MigrationsPJ.claim_key(tenant, source))
 
     case idxs do
       idxs when is_list(idxs) ->
         tx_idxs_try_cache({vsn, idxs}, max_version_future, claim_future)
 
       _idxs ->
-        tx_idxs_get_wait(tx, adapter_opts, source, max_version_future, claim_future)
+        tx_idxs_get_wait(tenant, tx, adapter_opts, source, max_version_future, claim_future)
     end
   end
 
@@ -288,8 +286,8 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
     {vsn, idxs, [], vsn_validator}
   end
 
-  defp tx_idxs_get_wait(tx, _adapter_opts, source, max_version_future, claim_future) do
-    {start_key, end_key} = idx_range(source)
+  defp tx_idxs_get_wait(tenant, tx, _adapter_opts, source, max_version_future, claim_future) do
+    {start_key, end_key} = idx_range(tenant, source)
 
     idxs =
       tx
@@ -308,15 +306,15 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
 
       {_, partial_idxs} ->
         # Adding a write conflict here allows writes to commit at a lower latency
-        # at the expense of migration taking longer, becuase we're not letting the
+        # at the expense of migration taking longer, because we're not letting the
         # migration job starve us out
-        :erlfdb.add_write_conflict_key(tx, MigrationsPJ.claim_key(source))
+        :erlfdb.add_write_conflict_key(tx, MigrationsPJ.claim_key(tenant, source))
         {MaxValue.decode(max_version), idxs, partial_idxs, fn -> true end}
     end
   end
 
-  defp idx_range(source) do
-    Pack.namespaced_range(source(), source, [])
+  defp idx_range(tenant, source) do
+    Pack.namespaced_range(tenant, source(), source, [])
   end
 
   defp get_partial_idxs(:not_found, _), do: {false, []}

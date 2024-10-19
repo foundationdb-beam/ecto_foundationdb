@@ -14,6 +14,8 @@ defmodule Ecto.Integration.IndexTest do
     test "index consistency", context do
       tenant = context[:tenant]
 
+      assert tenant.backend == EctoFoundationDB.Tenant.DirectoryTenant
+
       # Insert consistency
       {:ok, _user1} =
         %User{name: "John"}

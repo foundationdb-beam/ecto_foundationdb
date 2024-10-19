@@ -18,7 +18,7 @@ defmodule EctoFoundationDB.Layer.Query do
   @doc """
   Executes a query for retrieving data.
   """
-  def all(db_or_tenant, adapter_meta, plan, options \\ []) do
+  def all(tenant, adapter_meta, plan, options \\ []) do
     # All data retrieval comes through here. We use the Future module to
     # ensure that if the whole thing is executed inside a wrapping transaction,
     # the result is not awaited upon until requested. But if we're creating a new
@@ -27,9 +27,9 @@ defmodule EctoFoundationDB.Layer.Query do
     future = Future.before_transactional(plan.schema)
 
     {plan, future} =
-      IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx,
-                                                                               idxs,
-                                                                               _partial_idxs ->
+      IndexInventory.transactional(tenant, adapter_meta, plan.source, fn tx,
+                                                                         idxs,
+                                                                         _partial_idxs ->
         plan = make_range(idxs, plan, options)
         future = tx_get_range(tx, plan, future, options)
 
@@ -52,10 +52,8 @@ defmodule EctoFoundationDB.Layer.Query do
   @doc """
   Executes a query for updating data.
   """
-  def update(db_or_tenant, adapter_meta, plan) do
-    IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx,
-                                                                             idxs,
-                                                                             partial_idxs ->
+  def update(tenant, adapter_meta, plan) do
+    IndexInventory.transactional(tenant, adapter_meta, plan.source, fn tx, idxs, partial_idxs ->
       plan = make_range(idxs, plan, [])
       tx_update_range(tx, plan, idxs, partial_idxs)
     end)
@@ -64,15 +62,17 @@ defmodule EctoFoundationDB.Layer.Query do
   @doc """
   Executes a query for deleting data.
   """
-  def delete(db_or_tenant, adapter_meta, plan = %QueryPlan{constraints: [%QueryPlan.None{}]}) do
+  def delete(
+        tenant,
+        adapter_meta,
+        plan = %QueryPlan{tenant: tenant, constraints: [%QueryPlan.None{}]}
+      ) do
     # Special case, very efficient
-    Tx.transactional(db_or_tenant, &Tx.clear_all(&1, adapter_meta, plan.source))
+    Tx.transactional(tenant, &Tx.clear_all(tenant, &1, adapter_meta, plan.source))
   end
 
-  def delete(db_or_tenant, adapter_meta, plan) do
-    IndexInventory.transactional(db_or_tenant, adapter_meta, plan.source, fn tx,
-                                                                             idxs,
-                                                                             partial_idxs ->
+  def delete(tenant, adapter_meta, plan) do
+    IndexInventory.transactional(tenant, adapter_meta, plan.source, fn tx, idxs, partial_idxs ->
       plan = make_range(idxs, plan, [])
       tx_delete_range(tx, plan, idxs, partial_idxs)
     end)
@@ -147,13 +147,13 @@ defmodule EctoFoundationDB.Layer.Query do
     |> unpack_and_filter(plan)
     |> Stream.map(
       &Tx.update_data_object(
+        plan.tenant,
         tx,
         plan.schema,
         pk_field,
         &1,
         updates,
-        idxs,
-        partial_idxs,
+        {idxs, partial_idxs},
         write_primary
       )
     )
@@ -166,7 +166,7 @@ defmodule EctoFoundationDB.Layer.Query do
     |> tx_get_range(plan, Future.new(plan.schema), [])
     |> Future.result()
     |> unpack_and_filter(plan)
-    |> Stream.map(&Tx.delete_data_object(tx, plan.schema, &1, idxs, partial_idxs))
+    |> Stream.map(&Tx.delete_data_object(plan.tenant, tx, plan.schema, &1, {idxs, partial_idxs}))
     |> Enum.to_list()
     |> length()
   end
@@ -188,21 +188,26 @@ defmodule EctoFoundationDB.Layer.Query do
          plan = %QueryPlan{constraints: [%QueryPlan.None{}], layer_data: layer_data},
          options
        ) do
-    {start_key, end_key} = Pack.primary_range(plan.source)
+    {start_key, end_key} = Pack.primary_range(plan.tenant, plan.source)
     start_key = options[:start_key] || start_key
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
   defp make_datakey_range(
-         plan = %QueryPlan{constraints: [%QueryPlan.Equal{param: param}], layer_data: layer_data},
+         plan = %QueryPlan{
+           tenant: tenant,
+           constraints: [%QueryPlan.Equal{param: param}],
+           layer_data: layer_data
+         },
          _options
        ) do
-    fdb_key = Pack.primary_pack(plan.source, param)
+    fdb_key = Pack.primary_pack(tenant, plan.source, param)
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {fdb_key, nil})}
   end
 
   defp make_datakey_range(
          plan = %QueryPlan{
+           tenant: tenant,
            constraints: [
              between =
                %QueryPlan.Between{
@@ -220,8 +225,8 @@ defmodule EctoFoundationDB.Layer.Query do
     param_right =
       if between.inclusive_right?, do: :erlfdb_key.strinc(param_right), else: param_right
 
-    start_key = Pack.primary_pack(plan.source, param_left)
-    end_key = Pack.primary_pack(plan.source, param_right)
+    start_key = Pack.primary_pack(tenant, plan.source, param_left)
+    end_key = Pack.primary_pack(tenant, plan.source, param_right)
     start_key = options[:start_key] || start_key
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end

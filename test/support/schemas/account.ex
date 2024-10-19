@@ -8,8 +8,6 @@ defmodule EctoFoundationDB.Schemas.Account do
   alias EctoFoundationDB.Schemas.Product
   alias EctoFoundationDB.Schemas.User
 
-  @schema_context usetenant: true
-
   @primary_key {:id, :binary_id, autogenerate: true}
 
   schema "accounts" do

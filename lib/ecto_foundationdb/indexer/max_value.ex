@@ -17,13 +17,13 @@ defmodule EctoFoundationDB.Indexer.MaxValue do
   def decode(x), do: :binary.decode_unsigned(x, :little)
 
   @impl true
-  def create_range(idx) do
+  def create_range(tenant, idx) do
     source = idx[:source]
-    Pack.primary_range(source)
+    Pack.primary_range(tenant, source)
   end
 
   @impl true
-  def create(tx, idx, _schema, {start_key, end_key}, limit) do
+  def create(tenant, tx, idx, _schema, {start_key, end_key}, limit) do
     index_name = idx[:id]
     source = idx[:source]
     [max_field] = idx[:fields]
@@ -34,7 +34,7 @@ defmodule EctoFoundationDB.Indexer.MaxValue do
       |> Enum.map(fn {fdb_key, fdb_value} ->
         data = Pack.from_fdb_value(fdb_value)
         val = data[max_field]
-        :erlfdb.max(tx, key(source, index_name), val)
+        :erlfdb.max(tx, key(tenant, source, index_name), val)
         fdb_key
       end)
 
@@ -42,21 +42,21 @@ defmodule EctoFoundationDB.Indexer.MaxValue do
   end
 
   @impl true
-  def set(tx, idx, _schema, {_, data}) do
+  def set(tenant, tx, idx, _schema, {_, data}) do
     index_name = idx[:id]
     source = idx[:source]
     [max_field] = idx[:fields]
     val = data[max_field]
-    :erlfdb.max(tx, key(source, index_name), val)
+    :erlfdb.max(tx, key(tenant, source, index_name), val)
   end
 
   @impl true
-  def clear(tx, idx, _schema, {_, data}) do
+  def clear(tenant, tx, idx, _schema, {_, data}) do
     index_name = idx[:id]
     source = idx[:source]
     [max_field] = idx[:fields]
     val = data[max_field]
-    key = key(source, index_name)
+    key = key(tenant, source, index_name)
 
     db_val =
       tx
@@ -82,11 +82,11 @@ defmodule EctoFoundationDB.Indexer.MaxValue do
     """
   end
 
-  def get(tx, source, index_name) do
-    :erlfdb.get(tx, key(source, index_name))
+  def get(tenant, tx, source, index_name) do
+    :erlfdb.get(tx, key(tenant, source, index_name))
   end
 
-  def key(source, index_name) do
-    Pack.namespaced_pack(source, "max", ["#{index_name}"])
+  def key(tenant, source, index_name) do
+    Pack.namespaced_pack(tenant, source, "max", ["#{index_name}"])
   end
 end

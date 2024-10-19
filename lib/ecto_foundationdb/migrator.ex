@@ -36,10 +36,11 @@ defmodule EctoFoundationDB.Migrator do
   def up_all(repo, options \\ []) do
     options = Keyword.merge(repo.config(), options)
     db = FoundationDB.db(repo)
-    ids = Tenant.list(db, options)
+
+    ids = Tenant.Backend.list(db, options)
 
     up_fun = fn id ->
-      tenant = Tenant.db_open(db, id, options)
+      tenant = Tenant.Backend.db_open(db, id, options)
       up(repo, tenant, options)
     end
 
@@ -58,7 +59,7 @@ defmodule EctoFoundationDB.Migrator do
   @spec up(Ecto.Repo.t(), Tenant.t() | Tenant.id(), Options.t()) :: :ok
   def up(repo, tenant_id, options) when is_binary(tenant_id) do
     db = FoundationDB.db(repo)
-    tenant = Tenant.db_open(db, tenant_id, options)
+    tenant = Tenant.Backend.db_open(db, tenant_id, options)
     up(repo, tenant, options)
   end
 

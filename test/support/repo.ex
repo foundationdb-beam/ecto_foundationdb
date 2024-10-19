@@ -7,8 +7,10 @@ defmodule Ecto.Integration.TestRepo do
   """
 
   use Ecto.Repo, otp_app: :ecto_foundationdb, adapter: Ecto.Adapters.FoundationDB
+end
 
-  def uuid() do
-    Ecto.UUID
-  end
+defmodule Ecto.Integration.TestManagedTenantRepo do
+  @moduledoc false
+
+  use Ecto.Repo, otp_app: :ecto_foundationdb, adapter: Ecto.Adapters.FoundationDB
 end

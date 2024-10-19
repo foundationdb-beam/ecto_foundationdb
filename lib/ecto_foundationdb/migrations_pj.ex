@@ -12,18 +12,18 @@ defmodule EctoFoundationDB.MigrationsPJ do
 
   defmodule State do
     @moduledoc false
-    defstruct [:repo, :final_version, :limit]
+    defstruct [:tenant, :repo, :final_version, :limit]
   end
 
   alias __MODULE__.State
 
-  def claim_keys(new_migrations) do
+  def claim_keys(tenant, new_migrations) do
     sources = get_sources(new_migrations, [])
-    for source <- sources, do: claim_key(source)
+    for source <- sources, do: claim_key(tenant, source)
   end
 
-  def claim_key(source),
-    do: Pack.namespaced_pack(SchemaMigration.source(), "claim", ["#{source}"])
+  def claim_key(tenant, source),
+    do: Pack.namespaced_pack(tenant, SchemaMigration.source(), "claim", ["#{source}"])
 
   def transactional(repo, tenant, migrator, limit) do
     active_versions = repo.all(SchemaMigration.versions(), prefix: tenant)
@@ -39,7 +39,12 @@ defmodule EctoFoundationDB.MigrationsPJ do
   end
 
   @impl true
-  def init(%{active_versions: active_versions, repo: repo, migrator: migrator, limit: limit}) do
+  def init(tenant, %{
+        active_versions: active_versions,
+        repo: repo,
+        migrator: migrator,
+        limit: limit
+      }) do
     latest_active_version = Enum.max(active_versions, &>=/2, fn -> -1 end)
 
     migrations = migrator.migrations()
@@ -53,7 +58,7 @@ defmodule EctoFoundationDB.MigrationsPJ do
       |> Enum.sort()
       |> Enum.map(fn {vsn, mod} ->
         commands = mod.change()
-        ranges = for command <- commands, do: get_command_range(command)
+        ranges = for command <- commands, do: get_command_range(tenant, command)
         {vsn, ranges}
       end)
 
@@ -62,8 +67,8 @@ defmodule EctoFoundationDB.MigrationsPJ do
     if final_version == latest_active_version do
       :ignore
     else
-      {:ok, claim_keys(new_migrations), new_migrations,
-       %State{repo: repo, final_version: final_version, limit: limit}}
+      {:ok, claim_keys(tenant, new_migrations), new_migrations,
+       %State{tenant: tenant, repo: repo, final_version: final_version, limit: limit}}
     end
   end
 
@@ -96,6 +101,7 @@ defmodule EctoFoundationDB.MigrationsPJ do
   end
 
   defp get_command_range(
+         tenant,
          command =
            {:create,
             %Index{
@@ -109,20 +115,26 @@ defmodule EctoFoundationDB.MigrationsPJ do
     index_options = Keyword.merge(index_options, concurrently: concurrently)
 
     {inventory_key, idx} =
-      IndexInventory.new_index(Schema.get_source(schema), index_name, index_fields, index_options)
+      IndexInventory.new_index(
+        tenant,
+        Schema.get_source(schema),
+        index_name,
+        index_fields,
+        index_options
+      )
 
     command_kv = {command, {inventory_key, idx}}
-    {start_key, end_key} = Indexer.create_range(idx)
+    {start_key, end_key} = Indexer.create_range(tenant, idx)
     {command_kv, {start_key, start_key, end_key}}
   end
 
   defp exec_command_next(
-         %State{limit: limit},
+         %State{tenant: tenant, limit: limit},
          tx,
          {_command = {:create, %Index{schema: schema}}, {_ck, idx}},
          {start_key, cursor_key, end_key}
        ) do
-    case Indexer.create(tx, idx, schema, {cursor_key, end_key}, limit) do
+    case Indexer.create(tenant, tx, idx, schema, {cursor_key, end_key}, limit) do
       {^limit, {next_cursor_key, ^end_key}} ->
         {:more, {start_key, next_cursor_key, end_key}}
 
