@@ -2,7 +2,7 @@
 
 ```elixir
 Mix.install([
-  {:ecto_foundationdb, "~> 0.1"}
+  {:ecto_foundationdb, "~> 0.3"}
 ])
 ```
 
