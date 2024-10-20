@@ -12,7 +12,7 @@ to discuss the upgrade path.
 ### Enhancements
 
 * [Watches](Ecto.Adapters.FoundationDB.html#module-watches): Support for FDB Watches, which is like a database-driven PubSub on an Ecto struct.
-* [Directory Tenants](EctoFoundationDB.Tenant): A new default backend for Multitenancy that is production-ready. Managed tenants have been moved to "Experimental" status.
+* [Directory Tenants](EctoFoundationDB.Tenant.html): A new default backend for Multitenancy that is production-ready. Managed tenants have been moved to "Experimental" status.
 * `@schema_context usetenant: true` is no longer required.
 * The `:open_db` option now defines a 1-arity function that accepts the Repo module.
 
