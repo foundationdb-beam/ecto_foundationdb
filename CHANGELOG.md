@@ -1,6 +1,6 @@
 # Changelog for v0.x
 
-## v0.3 (release date pending)
+## v0.3 (2024-10-20)
 
 ### \*\* Major breaking changes \*\*
 
