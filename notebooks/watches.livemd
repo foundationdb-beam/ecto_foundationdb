@@ -3,7 +3,7 @@
 ```elixir
 Mix.install([
   {:phoenix_playground, "~> 0.1.0"},
-  {:ecto_foundationdb, git: "https://github.com/foundationdb-beam/ecto_foundationdb", branch: "main"}
+  {:ecto_foundationdb, "~> 0.3"}
 ])
 ```
 
@@ -212,9 +212,8 @@ ChangeFavoriteQuote.to(
   tenant,
   "Duke Leto Atreides",
   """
-  Give as few orders as possible. \
-  Once you've given orders on a subject, \
-  you must always give orders on that subject.
+  Once you have explored a fear, it becomes less terrifying. \
+  Part of courage comes from extending our knowledge.
   """)
 ```
 
@@ -224,6 +223,6 @@ ChangeFavoriteQuote.to(tenant, "Captain America", "I can do this all day.")
 
 ## Takeaways
 
-It's true that the behavior that our webpage exhibits is standard LiveView real-time updating. In real Phoenix applications, this is commonly done via `Phoenix.PubSub`, and it works great.
+The behavior that our webpage exhibits is standard LiveView real-time updating. In real Phoenix applications, this is commonly done via `Phoenix.PubSub`. There are many advantages to using PubSub, but in this demo we replaced it with a feature from FDB.
 
-The main takeaway I hope you see in this Livebook is that we've done the same real-time updating via the database directly, without any dispatcher. Doing so allows your PubSub to focus on higher-level application behavior instead of slinging data objects.
+The main takeaway from this Livebook is that there is no dispatcher. Each process of our application can choose to register a watch, and it will be notified directly as needed.
