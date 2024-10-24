@@ -7,6 +7,10 @@
 * Fixed consistency issue with index updates. Previously, the old index key was still queryable.
 * Fixed write amplification issue when updating struct's non-indexed fields.
 
+### New Documentation
+
+* Added `fdb_api_counting_text.exs` which tests and documents the `:erlfdb` operations that our Layer is expected to make.
+
 ## v0.3 (2024-10-20)
 
 ### \*\* Major breaking changes \*\*
