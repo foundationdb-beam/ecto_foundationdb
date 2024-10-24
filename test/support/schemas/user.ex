@@ -9,13 +9,14 @@ defmodule EctoFoundationDB.Schemas.User do
 
   schema "users" do
     field(:name, :string)
+    field(:notes, :string)
 
     timestamps()
   end
 
   def changeset(struct, attrs) do
     struct
-    |> cast(attrs, [:name])
+    |> cast(attrs, [:name, :notes])
     |> validate_required([:name])
   end
 end

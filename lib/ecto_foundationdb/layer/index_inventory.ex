@@ -289,16 +289,16 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
   defp tx_idxs_get_wait(tenant, tx, _adapter_opts, source, max_version_future, claim_future) do
     {start_key, end_key} = idx_range(tenant, source)
 
+    idxs_future = :erlfdb.get_range(tx, start_key, end_key, wait: false)
+
+    [max_version, claim, idxs] =
+      :erlfdb.wait_for_all_interleaving(tx, [max_version_future, claim_future, idxs_future])
+
     idxs =
-      tx
-      |> :erlfdb.get_range(start_key, end_key, wait: true)
+      idxs
       |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
       # high priority first
       |> Enum.sort(&(Keyword.get(&1, :priority, 0) > Keyword.get(&2, :priority, 0)))
-
-    max_version = :erlfdb.wait(max_version_future)
-
-    claim = :erlfdb.wait(claim_future)
 
     case get_partial_idxs(claim, source) do
       {claim_active?, []} ->

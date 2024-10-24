@@ -174,7 +174,7 @@ defmodule Ecto.Integration.CrudTest do
     test "tx_insert", context do
       tenant = context[:tenant]
 
-      # Operations inside a FoundationDB Adapater Transaction have the tenant applied
+      # Operations inside a FoundationDB Adapter Transaction have the tenant applied
       # automatically.
       user =
         TestRepo.transaction(
