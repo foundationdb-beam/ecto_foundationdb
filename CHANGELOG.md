@@ -1,5 +1,12 @@
 # Changelog for v0.x
 
+## v0.3.1 (2024-10-24)
+
+### Bug fixes
+
+* Fixed consistency issue with index updates. Previously, the old index key was still queryable.
+* Fixed write amplification issue when updating struct's non-indexed fields.
+
 ## v0.3 (2024-10-20)
 
 ### \*\* Major breaking changes \*\*

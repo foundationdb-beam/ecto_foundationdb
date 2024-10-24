@@ -48,6 +48,8 @@ defmodule Ecto.Integration.IndexTest do
       |> User.changeset(%{name: "John"})
       |> TestRepo.update!()
 
+      assert nil == TestRepo.get_by(User, [name: "James"], prefix: tenant)
+
       assert [%User{name: "John"}, %User{name: "John"}] =
                from(u in User, where: u.name == ^"John")
                |> TestRepo.all(prefix: tenant)
