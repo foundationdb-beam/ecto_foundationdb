@@ -189,20 +189,17 @@ defmodule EctoFoundationDB.Layer.Tx do
         tx,
         schema,
         pk_field,
-        {fdb_key, data_object},
+        {fdb_key, orig_data_object},
         updates,
         {idxs, partial_idxs},
         write_primary
       ) do
-    set_data = Keyword.get(updates, :set, [])
-
-    data_object =
-      data_object
-      |> Keyword.merge(set_data, fn _k, _v1, v2 -> v2 end)
-      |> Fields.to_front(pk_field)
+    orig_data_object = Fields.to_front(orig_data_object, pk_field)
+    data_object = Keyword.merge(orig_data_object, updates[:set])
 
     if write_primary, do: :erlfdb.set(tx, fdb_key, Pack.to_fdb_value(data_object))
-    Indexer.update(tenant, tx, idxs, partial_idxs, schema, {fdb_key, data_object})
+
+    Indexer.update(tenant, tx, idxs, partial_idxs, schema, {fdb_key, orig_data_object}, updates)
   end
 
   def delete_pks(tenant, tx, {schema, source, _context}, pks, {idxs, partial_idxs}) do

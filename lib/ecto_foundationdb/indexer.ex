@@ -19,10 +19,17 @@ defmodule EctoFoundationDB.Indexer do
               {integer(), {:erlfdb.key(), :erlfdb.key()}}
   @callback set(Tenant.t(), :erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
   @callback clear(Tenant.t(), :erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
-  @callback update(Tenant.t(), :erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
+  @callback update(
+              Tenant.t(),
+              :erlfdb.transaction(),
+              Index.t(),
+              Ecto.Schema.t(),
+              tuple(),
+              Keyword.t()
+            ) :: :ok
   @callback range(Index.t(), QueryPlan.t(), Keyword.t()) :: tuple()
   @callback unpack(Index.t(), QueryPlan.t(), tuple()) :: tuple()
-  @optional_callbacks update: 5, unpack: 3
+  @optional_callbacks update: 6, unpack: 3
 
   def create_range(tenant, idx),
     do: idx[:indexer].create_range(tenant, idx)
@@ -30,29 +37,29 @@ defmodule EctoFoundationDB.Indexer do
   def create(tenant, tx, idx, schema, range, limit),
     do: idx[:indexer].create(tenant, tx, idx, schema, range, limit)
 
-  def set(tenant, tx, idxs, partial_idxs, schema, kv) do
-    idxs = idxs ++ filter_partials(partial_idxs, kv, [])
+  def set(tenant, tx, idxs, partial_idxs, schema, kv = {k, _}) do
+    idxs = idxs ++ filter_partials(partial_idxs, k, [])
 
     for idx <- idxs,
         do: idx[:indexer].set(tenant, tx, idx, schema, kv)
   end
 
-  def clear(tenant, tx, idxs, partial_idxs, schema, kv) do
-    idxs = idxs ++ filter_partials(partial_idxs, kv, [])
+  def clear(tenant, tx, idxs, partial_idxs, schema, kv = {k, _}) do
+    idxs = idxs ++ filter_partials(partial_idxs, k, [])
 
     for idx <- idxs,
         do: idx[:indexer].clear(tenant, tx, idx, schema, kv)
   end
 
-  def update(tenant, tx, idxs, partial_idxs, schema, kv) do
-    idxs = idxs ++ filter_partials(partial_idxs, kv, [])
+  def update(tenant, tx, idxs, partial_idxs, schema, kv = {k, _}, updates) do
+    idxs = idxs ++ filter_partials(partial_idxs, k, [])
 
     for idx <- idxs do
       apply(
         idx[:indexer],
         :update,
-        [tenant, tx, idx, schema, kv],
-        &_update/5
+        [tenant, tx, idx, schema, kv, updates],
+        &_update/6
       )
     end
   end
@@ -73,8 +80,27 @@ defmodule EctoFoundationDB.Indexer do
   defp _unpack(_idx, _plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, []}),
     do: nil
 
-  defp _update(tenant, tx, idx, schema, kv) do
+  defp _update(tenant, tx, idx, schema, kv, updates) do
+    if Keyword.get(idx[:options], :mapped?, true) do
+      index_fields = idx[:fields]
+      set_data = updates[:set]
+
+      x = MapSet.intersection(MapSet.new(Keyword.keys(set_data)), MapSet.new(index_fields))
+
+      if MapSet.size(x) == 0 do
+        :ok
+      else
+        __update(tenant, tx, idx, schema, kv, updates)
+      end
+    else
+      __update(tenant, tx, idx, schema, kv, updates)
+    end
+  end
+
+  defp __update(tenant, tx, idx, schema, kv = {k, v}, updates) do
+    set_data = updates[:set]
     idx[:indexer].clear(tenant, tx, idx, schema, kv)
+    kv = {k, Keyword.merge(v, set_data)}
     idx[:indexer].set(tenant, tx, idx, schema, kv)
   end
 
@@ -86,19 +112,19 @@ defmodule EctoFoundationDB.Indexer do
     end
   end
 
-  defp filter_partials([], _kv, acc) do
+  defp filter_partials([], _k, acc) do
     Enum.reverse(acc)
   end
 
   defp filter_partials(
          [{partial_idx, {start_key, cursor_key, _end_key}} | partial_idxs],
-         kv = {fdb_key, _fdb_value},
+         fdb_key,
          acc
        ) do
     if fdb_key >= start_key and fdb_key < cursor_key do
-      filter_partials(partial_idxs, kv, [partial_idx | acc])
+      filter_partials(partial_idxs, fdb_key, [partial_idx | acc])
     else
-      filter_partials(partial_idxs, kv, acc)
+      filter_partials(partial_idxs, fdb_key, acc)
     end
   end
 end

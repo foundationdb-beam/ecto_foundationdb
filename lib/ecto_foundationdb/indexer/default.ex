@@ -128,7 +128,6 @@ defmodule EctoFoundationDB.Indexer.Default do
   @impl true
   def set(tenant, tx, idx, schema, kv) do
     {index_key, index_object} = get_index_entry(tenant, idx, schema, kv)
-
     :erlfdb.set(tx, index_key, index_object)
     :ok
   end

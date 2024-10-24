@@ -238,10 +238,6 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # set data in primary write
              {EctoFoundationDB.Layer.Tx, :set},
 
-             # clear and set default index. @todo, no index has changed, this is write amplification (#25)
-             {EctoFoundationDB.Indexer.Default, :clear},
-             {EctoFoundationDB.Indexer.Default, :set},
-
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
            ] == calls
