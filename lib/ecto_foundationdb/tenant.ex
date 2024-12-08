@@ -142,6 +142,26 @@ defmodule EctoFoundationDB.Tenant do
   @spec delete(Ecto.Repo.t(), id()) :: :ok
   def delete(repo, id) when byte_size(id) > 0, do: Backend.delete(FDB.db(repo), id, repo.config())
 
+  @doc """
+  Packs an Elixir tuple into an FDB-encoded Tuple.
+
+  ## Keyspace Design
+  We always pack into a **non-prefixed tuple key**. In other words, EctoFDB
+  DirectoryTenant keys use the subspace prefix as the first tuple element
+  instead of binary key prefix. As such, our keys are not compliant with
+  other Directory Layer implementations. However, we've made this choice so that
+  we can continue to use GetMappedRange functionality. (Indeed, the GetMappedRange mapper spec
+  has reserved syntax for stripping out non-tuple prefixes, but it's not yet implemented.)
+  Note: ManagedTenant keys do not use directories/subspaces. The underlying binary
+  prefix that a ManagedTenant uses internally still allows use of GetMappedRange.
+
+  ManagedTenants and GetMappedRange are both experimental features. The safest choice is
+  to use neither, but that would forfeit the GetMappedRange optimization. We choose
+  to accept the risk of GetMappedRange, which can easily be replaced with a different
+  client implementation, and suggest against using ManagedTenant because it puts
+  your data at risk with its unsupported\[[0](https://github.com/apple/foundationdb/issues/11292)\]\[[1](https://github.com/apple/foundationdb/issues/11382)\]
+  keyspace.
+  """
   def pack(tenant, tuple) when is_tuple(tuple) do
     tuple
     |> tenant.backend.extend_tuple(tenant.meta)
