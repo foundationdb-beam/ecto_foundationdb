@@ -4,6 +4,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
   alias Ecto.Adapters.FoundationDB
   alias Ecto.Integration.TestRepo
 
+  alias EctoFoundationDB.ModuleToModuleTracer
   alias EctoFoundationDB.Schemas.User
 
   # This module tracks all calls from modules that begin with EctoFoundationDB.* to the following
@@ -28,65 +29,32 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     {:erlfdb, :wait_for_all_interleaving, 2}
   ]
 
-  def start_trace(target) do
-    tracer = spawn(fn -> trace_listener([]) end)
-    trace_flags = [:call, :arity]
-    match_spec = [{:_, [], [{:message, {{:cp, {:caller}}}}]}]
-    :erlang.trace_pattern(:on_load, match_spec, [:local])
-    :erlang.trace_pattern({:erlfdb, :_, :_}, match_spec, [:local])
-    :erlang.trace(target, true, [{:tracer, tracer} | trace_flags])
-    tracer
-  end
+  def with_erlfdb_calls(fun) do
+    caller_spec = fn caller_module ->
+      try do
+        case Module.split(caller_module) do
+          ["EctoFoundationDB" | _] ->
+            true
 
-  def stop_trace(tracer, target) do
-    :erlang.trace(target, false, [:all])
-    :erlang.send(tracer, {:dump, self()})
+          _ ->
+            false
+        end
+      rescue
+        _e in ArgumentError ->
+          false
+      end
+    end
 
-    ret =
-      receive do
-        {:acc, acc} ->
-          {:ok, Enum.reverse(acc)}
-      after
-        5000 -> {:error, :timeout}
+    {traced_calls, res} =
+      ModuleToModuleTracer.with_traced_calls([caller_spec], @traced_calls, fun)
+
+    # clean up the traces for more concise assertions
+    traced_calls =
+      for {caller, {:erlfdb, call_fun, _arity}} <- traced_calls do
+        {caller, call_fun}
       end
 
-    Process.exit(tracer, :normal)
-    ret
-  end
-
-  defp trace_listener(acc) do
-    receive do
-      {:dump, pid} ->
-        :erlang.send(pid, {:acc, acc})
-
-      {:trace, _pid, :call, {:erlfdb, fun, arity}, {:cp, {caller, _, _}}} ->
-        try do
-          case Module.split(caller) do
-            ["EctoFoundationDB" | _] ->
-              if Enum.member?(@traced_calls, {:erlfdb, fun, arity}) do
-                trace_listener([{caller, fun} | acc])
-              else
-                trace_listener(acc)
-              end
-
-            _ ->
-              trace_listener(acc)
-          end
-        rescue
-          _e in ArgumentError ->
-            trace_listener(acc)
-        end
-
-      _term ->
-        trace_listener(acc)
-    end
-  end
-
-  def with_erlfdb_calls(fun) do
-    tracer = start_trace(self())
-    res = fun.()
-    {:ok, calls} = stop_trace(tracer, self())
-    {calls, res}
+    {traced_calls, res}
   end
 
   test "counting", context do
