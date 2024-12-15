@@ -11,6 +11,7 @@ defmodule EctoFoundationDB.Layer.Pack do
   # Schema migrations are stored as primary writes and default indexes with
   #     {@migration_prefix, source, ...}
 
+  alias EctoFoundationDB.Layer.Splayer
   alias EctoFoundationDB.Tenant
 
   @adapter_prefix <<0xFD>>
@@ -59,12 +60,12 @@ defmodule EctoFoundationDB.Layer.Pack do
   ## Examples
 
     iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
-    iex> EctoFoundationDB.Layer.Pack.primary_pack(tenant, "my-source", "my-id")
-    iex> |> then(&EctoFoundationDB.Tenant.unpack(tenant, &1))
+    iex> splayer = EctoFoundationDB.Layer.Pack.primary_splayer(tenant, "my-source", "my-id")
+    iex> EctoFoundationDB.Tenant.unpack(tenant, EctoFoundationDB.Layer.Splayer.pack(splayer, nil))
     {"\\xFD", "my-source", "d", <<131, 109, 0, 0, 0, 5, 109, 121, 45, 105, 100>>}
   """
-  def primary_pack(tenant, source, id) do
-    namespaced_pack(tenant, source, @data_namespace, [encode_pk_for_key(id)])
+  def primary_splayer(tenant, source, id) do
+    namespaced_splayer(tenant, source, @data_namespace, [encode_pk_for_key(id)])
   end
 
   @doc """
@@ -120,9 +121,14 @@ defmodule EctoFoundationDB.Layer.Pack do
   end
 
   def namespaced_pack(tenant, source, namespace, vals) when is_list(vals) do
+    splayer = namespaced_splayer(tenant, source, namespace, vals)
+    Splayer.pack(splayer, nil)
+  end
+
+  def namespaced_splayer(tenant, source, namespace, vals) when is_list(vals) do
     ([prefix(source), source, namespace] ++ vals)
     |> :erlang.list_to_tuple()
-    |> then(&Tenant.pack(tenant, &1))
+    |> then(&Tenant.splayer(tenant, &1))
   end
 
   def namespaced_range(tenant, source, namespace, vals) do

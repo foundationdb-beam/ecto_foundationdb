@@ -3,9 +3,10 @@ defmodule EctoFoundationDB.Layer.TxInsert do
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Layer.Splayer
   alias EctoFoundationDB.Layer.Tx
 
-  defstruct [:schema, :idxs, :partial_idxs, :write_primary, :options, :count]
+  defstruct [:schema, :idxs, :partial_idxs, :write_primary, :options]
 
   def new(schema, idxs, partial_idxs, write_primary, options) do
     %__MODULE__{
@@ -13,45 +14,42 @@ defmodule EctoFoundationDB.Layer.TxInsert do
       idxs: idxs,
       partial_idxs: partial_idxs,
       write_primary: write_primary,
-      options: options,
-      count: 0
+      options: options
     }
   end
 
-  def get_stage(tx, {key, _data_object}) do
-    :erlfdb.get(tx, key)
-  end
-
-  def set_stage(tenant, tx, {fdb_key, data_object}, :not_found, acc) do
+  def do_set(acc, tenant, tx, {splayer, data_object}, :not_found) do
     %__MODULE__{
       schema: schema,
       idxs: idxs,
       partial_idxs: partial_idxs,
       write_primary: write_primary,
-      options: _options,
-      count: count
+      options: _options
     } = acc
+
+    fdb_key = Splayer.pack(splayer, nil)
 
     fdb_value = Pack.to_fdb_value(data_object)
 
     if write_primary, do: :erlfdb.set(tx, fdb_key, fdb_value)
     Indexer.set(tenant, tx, idxs, partial_idxs, schema, {fdb_key, data_object})
-    %__MODULE__{acc | count: count + 1}
+    :ok
   end
 
-  def set_stage(tenant, tx, {fdb_key, data_object = [{pk_field, _} | _]}, result, acc) do
+  def do_set(acc, tenant, tx, {splayer, data_object = [{pk_field, _} | _]}, result) do
     %__MODULE__{
       schema: schema,
       idxs: idxs,
       partial_idxs: partial_idxs,
       write_primary: write_primary,
-      options: options,
-      count: count
+      options: options
     } = acc
+
+    fdb_key = Splayer.pack(splayer, nil)
 
     case options[:on_conflict] do
       :nothing ->
-        acc
+        nil
 
       :replace_all ->
         existing_object = Pack.from_fdb_value(result)
@@ -67,7 +65,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           write_primary
         )
 
-        %__MODULE__{acc | count: count + 1}
+        :ok
 
       {:replace_all_except, fields} ->
         existing_object = Pack.from_fdb_value(result)
@@ -83,7 +81,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           write_primary
         )
 
-        %__MODULE__{acc | count: count + 1}
+        :ok
 
       {:replace, fields} ->
         existing_object = Pack.from_fdb_value(result)
@@ -99,7 +97,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           write_primary
         )
 
-        %__MODULE__{acc | count: count + 1}
+        :ok
 
       val when is_nil(val) or val == :raise ->
         raise Unsupported, "Key exists: #{inspect(fdb_key, binaries: :as_strings)}"

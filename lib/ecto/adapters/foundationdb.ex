@@ -818,8 +818,9 @@ defmodule Ecto.Adapters.FoundationDB do
 
       def await(futures) when is_list(futures) do
         futures
-        |> Future.await_all()
-        |> Enum.map(&Future.result/1)
+        |> Future.await_stream()
+        |> Stream.map(&Future.result/1)
+        |> Enum.to_list()
       end
 
       def await(future) do

@@ -33,7 +33,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       Enum.map(entries, fn data_object ->
         pk_field = Fields.get_pk_field!(schema)
         pk = data_object[pk_field]
-        {{pk_field, pk}, data_object}
+        future = Future.before_transactional(schema)
+        {{pk_field, pk}, future, data_object}
       end)
 
     num_ins =
@@ -82,6 +83,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
+    future = Future.before_transactional(schema)
 
     res =
       IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
@@ -90,7 +92,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
           tx,
           {schema, source, context},
           pk_field,
-          [pk],
+          [{pk, future}],
           update_data,
           {idxs, partial_idxs}
         )
@@ -118,10 +120,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
+    future = Future.before_transactional(schema)
 
     res =
       IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
-        Tx.delete_pks(tenant, tx, {schema, source, context}, [pk], {idxs, partial_idxs})
+        Tx.delete_pks(tenant, tx, {schema, source, context}, [{pk, future}], {idxs, partial_idxs})
       end)
 
     case res do

@@ -6,6 +6,7 @@ defmodule EctoFoundationDB.Layer.Query do
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.IndexInventory
   alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Layer.Splayer
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
@@ -113,6 +114,7 @@ defmodule EctoFoundationDB.Layer.Query do
     end
   end
 
+  # @todo: Is this dead code now?
   defp tx_get_range(tx, %{layer_data: %{range: {fdb_key, nil}}}, future, _options) do
     future_ref = :erlfdb.get(tx, fdb_key)
 
@@ -201,8 +203,9 @@ defmodule EctoFoundationDB.Layer.Query do
          },
          _options
        ) do
-    fdb_key = Pack.primary_pack(tenant, plan.source, param)
-    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {fdb_key, nil})}
+    splayer = Pack.primary_splayer(tenant, plan.source, param)
+
+    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, Splayer.range(splayer))}
   end
 
   defp make_datakey_range(
@@ -225,8 +228,11 @@ defmodule EctoFoundationDB.Layer.Query do
     param_right =
       if between.inclusive_right?, do: :erlfdb_key.strinc(param_right), else: param_right
 
-    start_key = Pack.primary_pack(tenant, plan.source, param_left)
-    end_key = Pack.primary_pack(tenant, plan.source, param_right)
+    splayer_left = Pack.primary_splayer(tenant, plan.source, param_left)
+    splayer_right = Pack.primary_splayer(tenant, plan.source, param_right)
+    {start_key, _} = Splayer.range(splayer_left)
+    {_, end_key} = Splayer.range(splayer_right)
+
     start_key = options[:start_key] || start_key
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end

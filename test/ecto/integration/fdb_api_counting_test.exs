@@ -147,7 +147,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # get and wait primary write key
-             {EctoFoundationDB.Layer.Query, :get},
+             {EctoFoundationDB.Layer.Query, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # wait for max_version and claim_key
@@ -170,7 +170,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.Tx, :get},
+             {EctoFoundationDB.Layer.Tx, :get_range},
              {EctoFoundationDB.Layer.Tx, :wait_for_any},
 
              # set data in primary write
@@ -200,7 +200,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.Tx, :get},
+             {EctoFoundationDB.Layer.Tx, :get_range},
              {EctoFoundationDB.Layer.Tx, :wait_for_any},
 
              # set data in primary write
@@ -295,7 +295,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # check for existence
-             {EctoFoundationDB.Layer.Tx, :get},
+             {EctoFoundationDB.Layer.Tx, :get_range},
              {EctoFoundationDB.Layer.Tx, :wait_for_any},
 
              # clear primary write
