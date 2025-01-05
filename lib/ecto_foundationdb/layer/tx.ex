@@ -6,7 +6,7 @@ defmodule EctoFoundationDB.Layer.Tx do
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Pack
-  alias EctoFoundationDB.Layer.Splayer
+  alias EctoFoundationDB.Layer.KVZipper
   alias EctoFoundationDB.Layer.TxInsert
   alias EctoFoundationDB.Schema
   alias EctoFoundationDB.Tenant
@@ -109,7 +109,7 @@ defmodule EctoFoundationDB.Layer.Tx do
   def insert_all(tenant, tx, {schema, source, context}, entries, {idxs, partial_idxs}, options) do
     write_primary = Schema.get_option(context, :write_primary)
 
-    acc = TxInsert.new(schema, idxs, partial_idxs, write_primary, options)
+    acc = TxInsert.new(tenant, schema, idxs, partial_idxs, write_primary, options)
 
     case options[:conflict_target] do
       [] ->
@@ -118,9 +118,9 @@ defmodule EctoFoundationDB.Layer.Tx do
         # the database that are being blindly overwritten.
 
         Enum.map(entries, fn {{pk_field, pk}, _future, data_object} ->
-          splayer = Pack.primary_splayer(tenant, source, pk)
+          zipper = Pack.primary_zipper(tenant, source, pk)
           data_object = Fields.to_front(data_object, pk_field)
-          TxInsert.do_set(acc, tenant, tx, {splayer, data_object}, :not_found)
+          TxInsert.do_set(acc, tx, {zipper, data_object}, :not_found)
         end)
 
         length(entries)
@@ -128,13 +128,13 @@ defmodule EctoFoundationDB.Layer.Tx do
       nil ->
         entries
         |> Enum.map(fn {{pk_field, pk}, future, data_object} ->
-          splayer = Pack.primary_splayer(tenant, source, pk)
           data_object = Fields.to_front(data_object, pk_field)
-          future = Splayer.async_get(splayer, tx, future)
 
-          Future.apply(future, fn result ->
-            TxInsert.do_set(acc, tenant, tx, {splayer, data_object}, result)
-          end)
+          zipper = Pack.primary_zipper(tenant, source, pk)
+
+          zipper
+          |> KVZipper.async_get(tenant, tx, future)
+          |> Future.apply(&TxInsert.do_set(acc, tx, {zipper, data_object}, &1))
         end)
         |> Future.await_stream()
         |> Stream.map(&Future.result/1)
@@ -165,32 +165,31 @@ defmodule EctoFoundationDB.Layer.Tx do
         pk_field,
         pk_futures,
         set_data,
-        {idxs, partial_idxs}
+        {idxs, partial_idxs},
+        options
       ) do
     write_primary = Schema.get_option(context, :write_primary)
 
     futures =
       Enum.map(pk_futures, fn {pk, future} ->
-        splayer = Pack.primary_splayer(tenant, source, pk)
-        future = Splayer.async_get(splayer, tx, future)
+        zipper = Pack.primary_zipper(tenant, source, pk)
+        future = KVZipper.async_get(zipper, tenant, tx, future)
 
         Future.apply(future, fn
           :not_found ->
             nil
 
-          fdb_value ->
-            fdb_key = Splayer.pack(splayer, nil)
-            data_object = Pack.from_fdb_value(fdb_value)
-
+          data_object ->
             update_data_object(
               tenant,
               tx,
               schema,
               pk_field,
-              {fdb_key, data_object},
+              {zipper, data_object},
               [set: set_data],
               {idxs, partial_idxs},
-              write_primary
+              write_primary,
+              options
             )
 
             :ok
@@ -211,15 +210,28 @@ defmodule EctoFoundationDB.Layer.Tx do
         tx,
         schema,
         pk_field,
-        {fdb_key, orig_data_object},
+        {zipper, orig_data_object},
         updates,
         {idxs, partial_idxs},
-        write_primary
+        write_primary,
+        options
       ) do
     orig_data_object = Fields.to_front(orig_data_object, pk_field)
     data_object = Keyword.merge(orig_data_object, updates[:set])
 
-    if write_primary, do: :erlfdb.set(tx, fdb_key, Pack.to_fdb_value(data_object))
+    {_, kvs} = KVZipper.unzip(zipper, Pack.to_fdb_value(data_object), options)
+
+    # For unzipped object, metadata is in the key, so the key will always change and must be cleared.
+    {fdb_key, clear_end} = KVZipper.range(zipper)
+
+    if write_primary do
+      # @todo: clear_range can be avoided in most cases. We would need to know whether `orig_data_object`
+      # was zipped or not. If it was not zipped, there's no need to do the clear_range
+      :erlfdb.clear_range(tx, fdb_key <> <<0>>, clear_end)
+      for {k, v} <- kvs, do: :erlfdb.set(tx, k, v)
+    else
+      :erlfdb.clear_range(tx, fdb_key, clear_end)
+    end
 
     Indexer.update(tenant, tx, idxs, partial_idxs, schema, {fdb_key, orig_data_object}, updates)
   end
@@ -227,21 +239,19 @@ defmodule EctoFoundationDB.Layer.Tx do
   def delete_pks(tenant, tx, {schema, source, _context}, pk_futures, {idxs, partial_idxs}) do
     futures =
       Enum.map(pk_futures, fn {pk, future} ->
-        splayer = Pack.primary_splayer(tenant, source, pk)
-        future = Splayer.async_get(splayer, tx, future)
+        zipper = Pack.primary_zipper(tenant, source, pk)
+        future = KVZipper.async_get(zipper, tenant, tx, future)
 
         Future.apply(future, fn
           :not_found ->
             nil
 
-          fdb_value ->
-            fdb_key = Splayer.pack(splayer, nil)
-
+          data_object ->
             delete_data_object(
               tenant,
               tx,
               schema,
-              {fdb_key, Pack.from_fdb_value(fdb_value)},
+              {zipper, data_object},
               {idxs, partial_idxs}
             )
 
@@ -258,10 +268,17 @@ defmodule EctoFoundationDB.Layer.Tx do
     end)
   end
 
-  def delete_data_object(tenant, tx, schema, kv = {fdb_key, _}, {idxs, partial_idxs}) do
-    :erlfdb.clear(tx, fdb_key)
+  def delete_data_object(
+        tenant,
+        tx,
+        schema,
+        _kv = {zipper, v},
+        {idxs, partial_idxs}
+      ) do
+    {start_key, end_key} = KVZipper.range(zipper)
+    :erlfdb.clear_range(tx, start_key, end_key)
 
-    Indexer.clear(tenant, tx, idxs, partial_idxs, schema, kv)
+    Indexer.clear(tenant, tx, idxs, partial_idxs, schema, {start_key, v})
   end
 
   def clear_all(tenant, tx, %{opts: _adapter_opts}, source) do
@@ -279,8 +296,8 @@ defmodule EctoFoundationDB.Layer.Tx do
       raise Unsupported, "Watches on schemas with `write_primary: false` are not supported."
     end
 
-    splayer = Pack.primary_splayer(tenant, source, pk)
-    key = Splayer.pack(splayer, nil)
+    zipper = Pack.primary_zipper(tenant, source, pk)
+    key = KVZipper.pack_key(zipper, nil)
 
     fut = :erlfdb.watch(tx, key)
     fut

@@ -8,6 +8,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   alias EctoFoundationDB.Layer.IndexInventory
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.Schema
+  alias EctoFoundationDB.Tenant
 
   @impl Ecto.Adapter.Schema
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
@@ -76,7 +77,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         update_data,
         filters,
         _returning,
-        _options
+        options
       ) do
     %{source: source, schema: schema, prefix: tenant, context: context} =
       assert_tenancy!(schema_meta)
@@ -94,7 +95,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
           pk_field,
           [{pk, future}],
           update_data,
-          {idxs, partial_idxs}
+          {idxs, partial_idxs},
+          options
         )
       end)
 
@@ -171,7 +173,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         Or use the option `prefix: tenant` on the call to your Repo.
         """
 
-      {true, tenant} ->
+      {true, tenant=%Tenant{}} ->
         Map.put(schema_meta, :prefix, tenant)
     end
   end

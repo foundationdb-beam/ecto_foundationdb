@@ -33,7 +33,7 @@ defmodule EctoFoundationDB.Tenant do
 
   alias Ecto.Adapters.FoundationDB, as: FDB
 
-  alias EctoFoundationDB.Layer.Splayer
+  alias EctoFoundationDB.Layer.KVZipper
   alias EctoFoundationDB.Migrator
   alias EctoFoundationDB.Options
   alias EctoFoundationDB.Tenant
@@ -164,13 +164,13 @@ defmodule EctoFoundationDB.Tenant do
   keyspace.
   """
   def pack(tenant, tuple) when is_tuple(tuple) do
-    splayer = splayer(tenant, tuple)
-    Splayer.pack(splayer, nil)
+    zipper = zipper(tenant, tuple)
+    KVZipper.pack_key(zipper, nil)
   end
 
-  def splayer(tenant, tuple) when is_tuple(tuple) do
+  def zipper(tenant, tuple) when is_tuple(tuple) do
     tuple = tenant.backend.extend_tuple(tuple, tenant.meta)
-    Splayer.new(tuple)
+    KVZipper.new(tuple)
   end
 
   def unpack(tenant, tuple) do

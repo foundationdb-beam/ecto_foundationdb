@@ -6,6 +6,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
   alias EctoFoundationDB.ModuleToModuleTracer
   alias EctoFoundationDB.Schemas.User
+  alias EctoFoundationDB.Test.Util
 
   # This module tracks all calls from modules that begin with EctoFoundationDB.* to the following
   # list of :erlfdb exported functions. If there are new relevant functions to track, they must be
@@ -88,10 +89,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :wait_for_all_interleaving},
 
              # check for existence of primary write
-             {EctoFoundationDB.Layer.Tx, :get},
+             {EctoFoundationDB.Layer.KVZipper, :get_range},
 
              # wait for existence check
-             {EctoFoundationDB.Layer.Tx, :wait_for_any},
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # primary write
              {EctoFoundationDB.Layer.TxInsert, :set},
@@ -121,8 +122,8 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # check for existence of primary write
-             {EctoFoundationDB.Layer.Tx, :get},
-             {EctoFoundationDB.Layer.Tx, :wait_for_any},
+             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # primary write, index write
              {EctoFoundationDB.Layer.TxInsert, :set},
@@ -170,8 +171,11 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Layer.Tx, :wait_for_any},
+             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+
+             # clear all existing unzipped keys. @todo: this is unnecessary. See Tx.update_data_object for more.
+             {EctoFoundationDB.Layer.Tx, :clear_range},
 
              # set data in primary write
              {EctoFoundationDB.Layer.Tx, :set},
@@ -200,8 +204,11 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Layer.Tx, :wait_for_any},
+             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+
+             # clear all existing unzipped keys.
+             {EctoFoundationDB.Layer.Tx, :clear_range},
 
              # set data in primary write
              {EctoFoundationDB.Layer.Tx, :set},
@@ -295,14 +302,84 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # check for existence
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Layer.Tx, :wait_for_any},
+             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
-             # clear primary write
-             {EctoFoundationDB.Layer.Tx, :clear},
+             # clear primary write and unzipped keys
+             {EctoFoundationDB.Layer.Tx, :clear_range},
 
              # clear :name index
              {EctoFoundationDB.Indexer.Default, :clear},
+
+             # wait for max_version and claim_key
+             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+           ] == calls
+
+    # =================================================================
+    # Insert Unzipped Object
+    # =================================================================
+
+    {calls, eve} =
+      with_erlfdb_calls(fn ->
+        {:ok, alice} =
+          %User{name: "Eve", notes: Util.get_random_bytes(100_000)}
+          |> FoundationDB.usetenant(tenant)
+          |> TestRepo.insert()
+
+        alice
+      end)
+
+    assert [
+             # get max_version
+             {EctoFoundationDB.Layer.IndexInventory, :get},
+
+             # get source claim_key
+             {EctoFoundationDB.Layer.IndexInventory, :get},
+
+             # check for existence of primary write
+             {EctoFoundationDB.Layer.KVZipper, :get_range},
+
+             # wait for existence check
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+
+             # primary write
+             {EctoFoundationDB.Layer.TxInsert, :set},
+
+             # unzipped writes
+             {EctoFoundationDB.Layer.TxInsert, :set},
+             {EctoFoundationDB.Layer.TxInsert, :set},
+
+             # index write
+             {EctoFoundationDB.Indexer.Default, :set},
+
+             # wait for max_version and claim_key
+             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+           ] == calls
+
+    # =================================================================
+    # Update an non-indexed field on a Zipped Object
+    # =================================================================
+
+    {calls, _} =
+      with_erlfdb_calls(fn ->
+        changeset = User.changeset(eve, %{notes: "Hello world"})
+        {:ok, _} = TestRepo.update(changeset)
+      end)
+
+    assert [
+             # get max_version and claim_key
+             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.IndexInventory, :get},
+
+             # get and wait for existing data from primary write
+             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+
+             # clear all existing unzipped keys
+             {EctoFoundationDB.Layer.Tx, :clear_range},
+
+             # set data in primary write
+             {EctoFoundationDB.Layer.Tx, :set},
 
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}

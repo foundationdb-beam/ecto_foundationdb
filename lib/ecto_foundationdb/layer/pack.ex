@@ -11,7 +11,7 @@ defmodule EctoFoundationDB.Layer.Pack do
   # Schema migrations are stored as primary writes and default indexes with
   #     {@migration_prefix, source, ...}
 
-  alias EctoFoundationDB.Layer.Splayer
+  alias EctoFoundationDB.Layer.KVZipper
   alias EctoFoundationDB.Tenant
 
   @adapter_prefix <<0xFD>>
@@ -60,12 +60,22 @@ defmodule EctoFoundationDB.Layer.Pack do
   ## Examples
 
     iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
-    iex> splayer = EctoFoundationDB.Layer.Pack.primary_splayer(tenant, "my-source", "my-id")
-    iex> EctoFoundationDB.Tenant.unpack(tenant, EctoFoundationDB.Layer.Splayer.pack(splayer, nil))
+    iex> zipper = EctoFoundationDB.Layer.Pack.primary_zipper(tenant, "my-source", "my-id")
+    iex> EctoFoundationDB.Tenant.unpack(tenant, EctoFoundationDB.Layer.KVZipper.pack_key(zipper, nil))
     {"\\xFD", "my-source", "d", <<131, 109, 0, 0, 0, 5, 109, 121, 45, 105, 100>>}
   """
-  def primary_splayer(tenant, source, id) do
-    namespaced_splayer(tenant, source, @data_namespace, [encode_pk_for_key(id)])
+  def primary_zipper(tenant, source, id) do
+    namespaced_zipper(tenant, source, @data_namespace, [encode_pk_for_key(id)])
+  end
+
+  def primary_write_key_to_zipper(tenant, key) when is_binary(key) do
+    tenant
+    |> Tenant.unpack(key)
+    |> then(&primary_write_key_to_zipper(tenant, &1))
+  end
+
+  def primary_write_key_to_zipper(tenant, tuple) do
+    Tenant.zipper(tenant, tuple)
   end
 
   @doc """
@@ -121,14 +131,14 @@ defmodule EctoFoundationDB.Layer.Pack do
   end
 
   def namespaced_pack(tenant, source, namespace, vals) when is_list(vals) do
-    splayer = namespaced_splayer(tenant, source, namespace, vals)
-    Splayer.pack(splayer, nil)
+    zipper = namespaced_zipper(tenant, source, namespace, vals)
+    KVZipper.pack_key(zipper, nil)
   end
 
-  def namespaced_splayer(tenant, source, namespace, vals) when is_list(vals) do
+  def namespaced_zipper(tenant, source, namespace, vals) when is_list(vals) do
     ([prefix(source), source, namespace] ++ vals)
     |> :erlang.list_to_tuple()
-    |> then(&Tenant.splayer(tenant, &1))
+    |> then(&Tenant.zipper(tenant, &1))
   end
 
   def namespaced_range(tenant, source, namespace, vals) do

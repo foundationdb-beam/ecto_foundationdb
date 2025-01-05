@@ -6,7 +6,7 @@ defmodule EctoFoundationDB.Layer.Query do
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.IndexInventory
   alias EctoFoundationDB.Layer.Pack
-  alias EctoFoundationDB.Layer.Splayer
+  alias EctoFoundationDB.Layer.KVZipper
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
@@ -43,7 +43,7 @@ defmodule EctoFoundationDB.Layer.Query do
 
       objs =
         kvs
-        |> unpack_and_filter(plan)
+        |> unpack_and_filter(tenant, plan)
         |> Stream.map(fn {_k, v} -> v end)
 
       {objs, continuation}
@@ -53,10 +53,10 @@ defmodule EctoFoundationDB.Layer.Query do
   @doc """
   Executes a query for updating data.
   """
-  def update(tenant, adapter_meta, plan) do
+  def update(tenant, adapter_meta, plan, options) do
     IndexInventory.transactional(tenant, adapter_meta, plan.source, fn tx, idxs, partial_idxs ->
       plan = make_range(idxs, plan, [])
-      tx_update_range(tx, plan, idxs, partial_idxs)
+      tx_update_range(tx, tenant, plan, idxs, partial_idxs, options)
     end)
   end
 
@@ -75,7 +75,7 @@ defmodule EctoFoundationDB.Layer.Query do
   def delete(tenant, adapter_meta, plan) do
     IndexInventory.transactional(tenant, adapter_meta, plan.source, fn tx, idxs, partial_idxs ->
       plan = make_range(idxs, plan, [])
-      tx_delete_range(tx, plan, idxs, partial_idxs)
+      tx_delete_range(tx, tenant, plan, idxs, partial_idxs)
     end)
   end
 
@@ -139,14 +139,21 @@ defmodule EctoFoundationDB.Layer.Query do
     Future.set(future, tx, future_ref)
   end
 
-  defp tx_update_range(tx, plan = %QueryPlan{updates: updates}, idxs, partial_idxs) do
+  defp tx_update_range(
+         tx,
+         tenant,
+         plan = %QueryPlan{updates: updates},
+         idxs,
+         partial_idxs,
+         options
+       ) do
     pk_field = Fields.get_pk_field!(plan.schema)
     write_primary = Schema.get_option(plan.context, :write_primary)
 
     tx
     |> tx_get_range(plan, Future.new(plan.schema), [])
     |> Future.result()
-    |> unpack_and_filter(plan)
+    |> unpack_and_filter(tenant, plan)
     |> Stream.map(
       &Tx.update_data_object(
         plan.tenant,
@@ -156,34 +163,38 @@ defmodule EctoFoundationDB.Layer.Query do
         &1,
         updates,
         {idxs, partial_idxs},
-        write_primary
+        write_primary,
+        options
       )
     )
     |> Enum.to_list()
     |> length()
   end
 
-  defp tx_delete_range(tx, plan, idxs, partial_idxs) do
+  defp tx_delete_range(tx, tenant, plan, idxs, partial_idxs) do
     tx
     |> tx_get_range(plan, Future.new(plan.schema), [])
     |> Future.result()
-    |> unpack_and_filter(plan)
+    |> unpack_and_filter(tenant, plan)
     |> Stream.map(&Tx.delete_data_object(plan.tenant, tx, plan.schema, &1, {idxs, partial_idxs}))
     |> Enum.to_list()
     |> length()
   end
 
-  defp unpack_and_filter(kvs, plan = %{layer_data: %{idx: idx}}) do
+  defp unpack_and_filter(kvs, tenant, plan = %{layer_data: %{idx: idx}}) do
     kvs
     |> Stream.map(&Indexer.unpack(idx, plan, &1))
     |> Stream.filter(fn
       nil -> false
       _ -> true
     end)
+    |> Stream.map(fn {fdb_key, data_object} ->
+      {Pack.primary_write_key_to_zipper(tenant, fdb_key), data_object}
+    end)
   end
 
-  defp unpack_and_filter(kvs, _plan) do
-    Stream.map(kvs, fn {k, v} -> {k, Pack.from_fdb_value(v)} end)
+  defp unpack_and_filter(kvs, tenant, _plan) do
+    KVZipper.stream_zip(kvs, tenant)
   end
 
   defp make_datakey_range(
@@ -203,9 +214,9 @@ defmodule EctoFoundationDB.Layer.Query do
          },
          _options
        ) do
-    splayer = Pack.primary_splayer(tenant, plan.source, param)
+    zipper = Pack.primary_zipper(tenant, plan.source, param)
 
-    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, Splayer.range(splayer))}
+    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, KVZipper.range(zipper))}
   end
 
   defp make_datakey_range(
@@ -228,10 +239,10 @@ defmodule EctoFoundationDB.Layer.Query do
     param_right =
       if between.inclusive_right?, do: :erlfdb_key.strinc(param_right), else: param_right
 
-    splayer_left = Pack.primary_splayer(tenant, plan.source, param_left)
-    splayer_right = Pack.primary_splayer(tenant, plan.source, param_right)
-    {start_key, _} = Splayer.range(splayer_left)
-    {_, end_key} = Splayer.range(splayer_right)
+    zipper_left = Pack.primary_zipper(tenant, plan.source, param_left)
+    zipper_right = Pack.primary_zipper(tenant, plan.source, param_right)
+    {start_key, _} = KVZipper.range(zipper_left)
+    {_, end_key} = KVZipper.range(zipper_right)
 
     start_key = options[:start_key] || start_key
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}

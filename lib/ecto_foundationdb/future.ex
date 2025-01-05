@@ -54,6 +54,7 @@ defmodule EctoFoundationDB.Future do
     %__MODULE__{
       schema: schema,
       tx: :watch,
+      ref: get_ref(erlfdb_future),
       erlfdb_future: erlfdb_future,
       handler: handler,
       must_wait?: false
@@ -61,13 +62,7 @@ defmodule EctoFoundationDB.Future do
   end
 
   def set(fut, tx, erlfdb_future, f \\ &Function.identity/1) do
-    ref =
-      case erlfdb_future do
-        {:erlfdb_future, ref, _} -> ref
-        {:fold_future, _, {:erlfdb_future, ref, _}} -> ref
-        _ -> :erlang.error(:badarg)
-      end
-
+    ref = get_ref(erlfdb_future)
     %__MODULE__{handler: g} = fut
     %__MODULE__{fut | ref: ref, tx: tx, erlfdb_future: erlfdb_future, handler: &f.(g.(&1))}
   end
@@ -88,10 +83,6 @@ defmodule EctoFoundationDB.Future do
     handler.(res)
   end
 
-  def await_ready(futs) do
-    await_ready(futs, [])
-  end
-
   def await_all(futs) do
     futs
     |> await_stream()
@@ -100,20 +91,25 @@ defmodule EctoFoundationDB.Future do
 
   # Future: If there is a wrapping transaction with an `async_*` qualifier, the wait happens here
   def await_stream(futs) do
-    tx_refs = get_tx_and_refs(futs)
+    # important to maintain order of the input futures
+    reffed_futures =
+      for %__MODULE__{ref: ref, erlfdb_future: erlfdb_future} <- futs,
+          not is_nil(erlfdb_future),
+          do: {ref, erlfdb_future}
 
     results =
-      if length(tx_refs) > 0 do
-        {[tx | _], refs} = Enum.unzip(tx_refs)
-        Enum.zip(refs, :erlfdb.wait_for_all_interleaving(tx, refs)) |> Enum.into(%{})
+      if length(reffed_futures) > 0 do
+        [%__MODULE__{tx: tx} | _] = futs
+        {refs, erlfdb_futures} = Enum.unzip(reffed_futures)
+        Enum.zip(refs, :erlfdb.wait_for_all_interleaving(tx, erlfdb_futures)) |> Enum.into(%{})
       else
         %{}
       end
 
     Stream.map(
       futs,
-      fn fut = %__MODULE__{erlfdb_future: erlfdb_future, result: result, handler: f} ->
-        case Map.get(results, erlfdb_future, nil) do
+      fn fut = %__MODULE__{ref: ref, result: result, handler: f} ->
+        case Map.get(results, ref, nil) do
           nil ->
             %__MODULE__{
               fut
@@ -169,25 +165,7 @@ defmodule EctoFoundationDB.Future do
   defp match_ref?({:fold_future, _, erlfdb_future}, ref2), do: match_ref?(erlfdb_future, ref2)
   defp match_ref?(_, _), do: false
 
-  defp await_ready(futs, resend_q) do
-    # Inspired by :erlfdb.wait_for_any
-    receive do
-      {ready_ref, :ready} ->
-        case find_ready(futs, ready_ref) do
-          {nil, futs} ->
-            await_ready(futs, [ready_ref | resend_q])
-
-          {ready, remaining} ->
-            for m <- resend_q, do: send(self(), m)
-            {ready, remaining}
-        end
-    end
-  end
-
-  defp get_tx_and_refs(futs) do
-    # important to maintain order of the input futures
-    for %__MODULE__{tx: tx, erlfdb_future: erlfdb_future} <- futs,
-        not is_nil(erlfdb_future),
-        do: {tx, erlfdb_future}
-  end
+  defp get_ref({:erlfdb_future, ref, _}), do: ref
+  defp get_ref({:fold_future, _, {:erlfdb_future, ref, _}}), do: ref
+  defp get_ref(_), do: :erlang.error(:badarg)
 end

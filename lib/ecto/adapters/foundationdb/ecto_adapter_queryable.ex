@@ -10,6 +10,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
+  alias EctoFoundationDB.Tenant
 
   @impl Ecto.Adapter.Queryable
   def prepare(
@@ -137,7 +138,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         Use `prefix: tenant` in your query.
         """
 
-      {true, tenant} ->
+      {true, tenant=%Tenant{}} ->
         {context, %Ecto.Query{query | prefix: tenant}}
     end
   end
@@ -180,7 +181,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   defp execute_update_all(
          tenant,
-         adapter_meta = %{opts: _adapter_opts},
+         adapter_meta = %{opts: options},
          context,
          %Ecto.Query{
            from: %Ecto.Query.FromExpr{source: {source, schema}},
@@ -190,7 +191,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
          params
        ) do
     plan = QueryPlan.get(tenant, source, schema, context, wheres, updates, params)
-    Query.update(tenant, adapter_meta, plan)
+    Query.update(tenant, adapter_meta, plan, options)
   end
 
   defp stream_all(

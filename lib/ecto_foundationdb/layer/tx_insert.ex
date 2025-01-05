@@ -3,13 +3,14 @@ defmodule EctoFoundationDB.Layer.TxInsert do
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.Pack
-  alias EctoFoundationDB.Layer.Splayer
+  alias EctoFoundationDB.Layer.KVZipper
   alias EctoFoundationDB.Layer.Tx
 
-  defstruct [:schema, :idxs, :partial_idxs, :write_primary, :options]
+  defstruct [:tenant, :schema, :idxs, :partial_idxs, :write_primary, :options]
 
-  def new(schema, idxs, partial_idxs, write_primary, options) do
+  def new(tenant, schema, idxs, partial_idxs, write_primary, options) do
     %__MODULE__{
+      tenant: tenant,
       schema: schema,
       idxs: idxs,
       partial_idxs: partial_idxs,
@@ -18,26 +19,9 @@ defmodule EctoFoundationDB.Layer.TxInsert do
     }
   end
 
-  def do_set(acc, tenant, tx, {splayer, data_object}, :not_found) do
+  def do_set(acc, tx, {zipper, data_object}, :not_found) do
     %__MODULE__{
-      schema: schema,
-      idxs: idxs,
-      partial_idxs: partial_idxs,
-      write_primary: write_primary,
-      options: _options
-    } = acc
-
-    fdb_key = Splayer.pack(splayer, nil)
-
-    fdb_value = Pack.to_fdb_value(data_object)
-
-    if write_primary, do: :erlfdb.set(tx, fdb_key, fdb_value)
-    Indexer.set(tenant, tx, idxs, partial_idxs, schema, {fdb_key, data_object})
-    :ok
-  end
-
-  def do_set(acc, tenant, tx, {splayer, data_object = [{pk_field, _} | _]}, result) do
-    %__MODULE__{
+      tenant: tenant,
       schema: schema,
       idxs: idxs,
       partial_idxs: partial_idxs,
@@ -45,62 +29,80 @@ defmodule EctoFoundationDB.Layer.TxInsert do
       options: options
     } = acc
 
-    fdb_key = Splayer.pack(splayer, nil)
+    {_, kvs} = KVZipper.unzip(zipper, Pack.to_fdb_value(data_object), options)
+
+    if write_primary do
+      for {k, v} <- kvs, do: :erlfdb.set(tx, k, v)
+    end
+
+    # The indexer is not informed of the object splitting
+    fdb_key = KVZipper.pack_key(zipper, nil)
+
+    Indexer.set(tenant, tx, idxs, partial_idxs, schema, {fdb_key, data_object})
+    :ok
+  end
+
+  def do_set(acc, tx, {zipper, data_object = [{pk_field, pk} | _]}, existing_object) do
+    %__MODULE__{
+      tenant: tenant,
+      schema: schema,
+      idxs: idxs,
+      partial_idxs: partial_idxs,
+      write_primary: write_primary,
+      options: options
+    } = acc
 
     case options[:on_conflict] do
       :nothing ->
         nil
 
       :replace_all ->
-        existing_object = Pack.from_fdb_value(result)
-
         Tx.update_data_object(
           tenant,
           tx,
           schema,
           pk_field,
-          {fdb_key, existing_object},
+          {zipper, existing_object},
           [set: data_object],
           {idxs, partial_idxs},
-          write_primary
+          write_primary,
+          options
         )
 
         :ok
 
       {:replace_all_except, fields} ->
-        existing_object = Pack.from_fdb_value(result)
-
         Tx.update_data_object(
           tenant,
           tx,
           schema,
           pk_field,
-          {fdb_key, existing_object},
+          {zipper, existing_object},
           [set: Keyword.drop(data_object, fields)],
           {idxs, partial_idxs},
-          write_primary
+          write_primary,
+          options
         )
 
         :ok
 
       {:replace, fields} ->
-        existing_object = Pack.from_fdb_value(result)
-
         Tx.update_data_object(
           tenant,
           tx,
           schema,
           pk_field,
-          {fdb_key, existing_object},
+          {zipper, existing_object},
           [set: Keyword.take(data_object, fields)],
           {idxs, partial_idxs},
-          write_primary
+          write_primary,
+          options
         )
 
         :ok
 
       val when is_nil(val) or val == :raise ->
-        raise Unsupported, "Key exists: #{inspect(fdb_key, binaries: :as_strings)}"
+        raise Unsupported, "Key exists: #{inspect(schema)} #{inspect(pk)}"
 
       unsupported_on_conflict ->
         raise Unsupported, """
