@@ -1,5 +1,6 @@
 defmodule EctoFoundationDB.Layer.KVZipper do
   alias EctoFoundationDB.Future
+  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.InternalMetadata
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Options
@@ -110,22 +111,23 @@ defmodule EctoFoundationDB.Layer.KVZipper do
     {start_key, end_key} = range(zipper)
     future_ref = :erlfdb.get_range(tx, start_key, end_key, wait: false)
 
-    # Same API contract as :erlfdb.get except the value will already be decoded with
-    # Pack.from_fdb_value
     f = fn
       [] ->
-        :not_found
+        nil
 
-      [{_k, v}] ->
-        Pack.from_fdb_value(v)
+      [{k, v}] ->
+        %DecodedKV{
+          zipper: Pack.primary_write_key_to_zipper(tenant, k),
+          data_object: Pack.from_fdb_value(v)
+        }
 
       kvs ->
-        [{_k, v}] =
+        [kv] =
           kvs
           |> stream_zip(tenant)
           |> Enum.to_list()
 
-        v
+        kv
     end
 
     Future.set(future, tx, future_ref, f)
@@ -162,7 +164,7 @@ defmodule EctoFoundationDB.Layer.KVZipper do
         """
 
       {false, nil} ->
-        item = {Pack.primary_write_key_to_zipper(tenant, k), v}
+        item = %DecodedKV{zipper: Pack.primary_write_key_to_zipper(tenant, k), data_object: v}
         {[item], %{acc | key_tuple: nil, values: [], meta: nil}}
     end
   end
@@ -179,9 +181,14 @@ defmodule EctoFoundationDB.Layer.KVZipper do
 
         case :erlang.crc32(fdb_value) do
           ^crc ->
+            data_object = Pack.from_fdb_value(fdb_value)
+
             item =
-              {Pack.primary_write_key_to_zipper(tenant, key_tuple),
-               Pack.from_fdb_value(fdb_value)}
+              %DecodedKV{
+                zipper: Pack.primary_write_key_to_zipper(tenant, key_tuple),
+                data_object: data_object,
+                zipped?: true
+              }
 
             {[item], %{acc | key_tuple: nil, values: [], meta: nil}}
 

@@ -1,5 +1,6 @@
 defmodule EctoFoundationDB.Layer.Tx do
   @moduledoc false
+  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Exception.IncorrectTenancy
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
@@ -120,7 +121,8 @@ defmodule EctoFoundationDB.Layer.Tx do
         Enum.map(entries, fn {{pk_field, pk}, _future, data_object} ->
           zipper = Pack.primary_zipper(tenant, source, pk)
           data_object = Fields.to_front(data_object, pk_field)
-          TxInsert.do_set(acc, tx, {zipper, data_object}, :not_found)
+          kv = %DecodedKV{zipper: zipper, data_object: data_object}
+          TxInsert.do_set(acc, tx, kv, nil)
         end)
 
         length(entries)
@@ -134,7 +136,9 @@ defmodule EctoFoundationDB.Layer.Tx do
 
           zipper
           |> KVZipper.async_get(tenant, tx, future)
-          |> Future.apply(&TxInsert.do_set(acc, tx, {zipper, data_object}, &1))
+          |> Future.apply(
+            &TxInsert.do_set(acc, tx, %DecodedKV{zipper: zipper, data_object: data_object}, &1)
+          )
         end)
         |> Future.await_stream()
         |> Stream.map(&Future.result/1)
@@ -176,16 +180,16 @@ defmodule EctoFoundationDB.Layer.Tx do
         future = KVZipper.async_get(zipper, tenant, tx, future)
 
         Future.apply(future, fn
-          :not_found ->
+          nil ->
             nil
 
-          data_object ->
+          decoded_kv ->
             update_data_object(
               tenant,
               tx,
               schema,
               pk_field,
-              {zipper, data_object},
+              decoded_kv,
               [set: set_data],
               {idxs, partial_idxs},
               write_primary,
@@ -210,12 +214,13 @@ defmodule EctoFoundationDB.Layer.Tx do
         tx,
         schema,
         pk_field,
-        {zipper, orig_data_object},
+        decoded_kv,
         updates,
         {idxs, partial_idxs},
         write_primary,
         options
       ) do
+    %DecodedKV{zipper: zipper, data_object: orig_data_object} = decoded_kv
     orig_data_object = Fields.to_front(orig_data_object, pk_field)
     data_object = Keyword.merge(orig_data_object, updates[:set])
 
@@ -225,9 +230,8 @@ defmodule EctoFoundationDB.Layer.Tx do
     {fdb_key, clear_end} = KVZipper.range(zipper)
 
     if write_primary do
-      # @todo: clear_range can be avoided in most cases. We would need to know whether `orig_data_object`
-      # was zipped or not. If it was not zipped, there's no need to do the clear_range
-      :erlfdb.clear_range(tx, fdb_key <> <<0>>, clear_end)
+      # If the original object was not zipped, there's no need to do the clear_range
+      if decoded_kv.zipped?, do: :erlfdb.clear_range(tx, fdb_key <> <<0>>, clear_end)
       for {k, v} <- kvs, do: :erlfdb.set(tx, k, v)
     else
       :erlfdb.clear_range(tx, fdb_key, clear_end)
@@ -243,15 +247,15 @@ defmodule EctoFoundationDB.Layer.Tx do
         future = KVZipper.async_get(zipper, tenant, tx, future)
 
         Future.apply(future, fn
-          :not_found ->
+          nil ->
             nil
 
-          data_object ->
+          decoded_kv ->
             delete_data_object(
               tenant,
               tx,
               schema,
-              {zipper, data_object},
+              decoded_kv,
               {idxs, partial_idxs}
             )
 
@@ -272,11 +276,18 @@ defmodule EctoFoundationDB.Layer.Tx do
         tenant,
         tx,
         schema,
-        _kv = {zipper, v},
+        decoded_kv,
         {idxs, partial_idxs}
       ) do
+    %DecodedKV{zipper: zipper, data_object: v} = decoded_kv
+
     {start_key, end_key} = KVZipper.range(zipper)
-    :erlfdb.clear_range(tx, start_key, end_key)
+
+    if decoded_kv.zipped? do
+      :erlfdb.clear_range(tx, start_key, end_key)
+    else
+      :erlfdb.clear(tx, start_key)
+    end
 
     Indexer.clear(tenant, tx, idxs, partial_idxs, schema, {start_key, v})
   end

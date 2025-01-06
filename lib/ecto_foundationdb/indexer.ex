@@ -3,9 +3,11 @@ defmodule EctoFoundationDB.Indexer do
   Implement this behaviour to create a custom index.
   """
   alias EctoFoundationDB.Index
-  alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Tenant
+  alias EctoFoundationDB.Layer.DecodedKV
+  alias EctoFoundationDB.Layer.KVZipper
+  alias EctoFoundationDB.Layer.Pack
 
   @callback create_range(Tenant.t(), Index.t()) :: {:erlfdb.key(), :erlfdb.key()}
   @callback create(
@@ -70,15 +72,25 @@ defmodule EctoFoundationDB.Indexer do
   def unpack(idx, plan, fdb_kv),
     do: apply(idx[:indexer], :unpack, [idx, plan, fdb_kv], &_unpack/3)
 
-  # Default behavior for standard key-value response
-  defp _unpack(_idx, _plan, {fdb_key, fdb_value}), do: {fdb_key, Pack.from_fdb_value(fdb_value)}
+  ## Default behavior for standard key-value response
+  defp _unpack(_idx, plan, {fdb_key, fdb_value}),
+    do: %DecodedKV{
+      zipper: Pack.primary_write_key_to_zipper(plan.tenant, fdb_key),
+      data_object: Pack.from_fdb_value(fdb_value)
+    }
 
   # Default behavior for get_mapped_range response
-  defp _unpack(idx, plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, [fdb_kv]}),
-    do: _unpack(idx, plan, fdb_kv)
-
   defp _unpack(_idx, _plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, []}),
     do: nil
+
+  defp _unpack(_idx, plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, fdb_kvs}) do
+    [kv] =
+      fdb_kvs
+      |> KVZipper.stream_zip(plan.tenant)
+      |> Enum.to_list()
+
+    kv
+  end
 
   defp _update(tenant, tx, idx, schema, kv, updates) do
     if Keyword.get(idx[:options], :mapped?, true) do

@@ -174,9 +174,6 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.KVZipper, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
-             # clear all existing unzipped keys. @todo: this is unnecessary. See Tx.update_data_object for more.
-             {EctoFoundationDB.Layer.Tx, :clear_range},
-
              # set data in primary write
              {EctoFoundationDB.Layer.Tx, :set},
 
@@ -206,9 +203,6 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # get and wait for existing data from primary write
              {EctoFoundationDB.Layer.KVZipper, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
-
-             # clear all existing unzipped keys.
-             {EctoFoundationDB.Layer.Tx, :clear_range},
 
              # set data in primary write
              {EctoFoundationDB.Layer.Tx, :set},
@@ -305,8 +299,8 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.KVZipper, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
-             # clear primary write and unzipped keys
-             {EctoFoundationDB.Layer.Tx, :clear_range},
+             # clear primary
+             {EctoFoundationDB.Layer.Tx, :clear},
 
              # clear :name index
              {EctoFoundationDB.Indexer.Default, :clear},
@@ -357,13 +351,14 @@ defmodule Ecto.Integration.FdbApiCountingTest do
            ] == calls
 
     # =================================================================
-    # Update an non-indexed field on a Zipped Object
+    # Update an non-indexed field on a Zipped Object into a normal object
     # =================================================================
 
-    {calls, _} =
+    {calls, eve} =
       with_erlfdb_calls(fn ->
         changeset = User.changeset(eve, %{notes: "Hello world"})
-        {:ok, _} = TestRepo.update(changeset)
+        {:ok, eve} = TestRepo.update(changeset)
+        eve
       end)
 
     assert [
@@ -380,6 +375,65 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
              # set data in primary write
              {EctoFoundationDB.Layer.Tx, :set},
+
+             # wait for max_version and claim_key
+             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+           ] == calls
+
+    # =================================================================
+    # Update an non-indexed field on an normal object into a zipped object
+    # =================================================================
+
+    {calls, eve} =
+      with_erlfdb_calls(fn ->
+        changeset = User.changeset(eve, %{notes: Util.get_random_bytes(100_000)})
+        {:ok, eve} = TestRepo.update(changeset)
+        eve
+      end)
+
+    assert [
+             # get max_version and claim_key
+             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.IndexInventory, :get},
+
+             # get and wait for existing data from primary write
+             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+
+             # set data in primary write
+             {EctoFoundationDB.Layer.Tx, :set},
+
+             # unzipped writes
+             {EctoFoundationDB.Layer.Tx, :set},
+             {EctoFoundationDB.Layer.Tx, :set},
+
+             # wait for max_version and claim_key
+             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+           ] == calls
+
+    # =================================================================
+    # Delete a zipped object
+    # =================================================================
+
+    {calls, _eve} =
+      with_erlfdb_calls(fn ->
+        {:ok, _} = TestRepo.delete(eve)
+      end)
+
+    assert [
+             # get max_version and claim_key
+             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.IndexInventory, :get},
+
+             # check for existence
+             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+
+             # clear unzipped range
+             {EctoFoundationDB.Layer.Tx, :clear_range},
+
+             # clear :name index
+             {EctoFoundationDB.Indexer.Default, :clear},
 
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}

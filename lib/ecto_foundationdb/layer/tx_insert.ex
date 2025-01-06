@@ -1,5 +1,6 @@
 defmodule EctoFoundationDB.Layer.TxInsert do
   @moduledoc false
+  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.Pack
@@ -19,7 +20,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
     }
   end
 
-  def do_set(acc, tx, {zipper, data_object}, :not_found) do
+  def do_set(acc, tx, new_kv, nil) do
     %__MODULE__{
       tenant: tenant,
       schema: schema,
@@ -28,6 +29,8 @@ defmodule EctoFoundationDB.Layer.TxInsert do
       write_primary: write_primary,
       options: options
     } = acc
+
+    %DecodedKV{zipper: zipper, data_object: data_object} = new_kv
 
     {_, kvs} = KVZipper.unzip(zipper, Pack.to_fdb_value(data_object), options)
 
@@ -42,7 +45,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
     :ok
   end
 
-  def do_set(acc, tx, {zipper, data_object = [{pk_field, pk} | _]}, existing_object) do
+  def do_set(acc, tx, new_kv, existing_kv) do
     %__MODULE__{
       tenant: tenant,
       schema: schema,
@@ -51,6 +54,8 @@ defmodule EctoFoundationDB.Layer.TxInsert do
       write_primary: write_primary,
       options: options
     } = acc
+
+    %DecodedKV{data_object: data_object = [{pk_field, pk} | _]} = new_kv
 
     case options[:on_conflict] do
       :nothing ->
@@ -62,7 +67,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           tx,
           schema,
           pk_field,
-          {zipper, existing_object},
+          existing_kv,
           [set: data_object],
           {idxs, partial_idxs},
           write_primary,
@@ -77,7 +82,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           tx,
           schema,
           pk_field,
-          {zipper, existing_object},
+          existing_kv,
           [set: Keyword.drop(data_object, fields)],
           {idxs, partial_idxs},
           write_primary,
@@ -92,7 +97,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           tx,
           schema,
           pk_field,
-          {zipper, existing_object},
+          existing_kv,
           [set: Keyword.take(data_object, fields)],
           {idxs, partial_idxs},
           write_primary,
