@@ -1,8 +1,8 @@
 defmodule EctoFoundationDB.Layer.TxInsert do
   @moduledoc false
-  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
+  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.Tx
@@ -67,8 +67,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           tx,
           schema,
           pk_field,
-          existing_kv,
-          [set: data_object],
+          {existing_kv, [set: data_object]},
           {idxs, partial_idxs},
           write_primary,
           options
@@ -82,8 +81,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           tx,
           schema,
           pk_field,
-          existing_kv,
-          [set: Keyword.drop(data_object, fields)],
+          {existing_kv, [set: Keyword.drop(data_object, fields)]},
           {idxs, partial_idxs},
           write_primary,
           options
@@ -97,8 +95,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           tx,
           schema,
           pk_field,
-          existing_kv,
-          [set: Keyword.take(data_object, fields)],
+          {existing_kv, [set: Keyword.take(data_object, fields)]},
           {idxs, partial_idxs},
           write_primary,
           options

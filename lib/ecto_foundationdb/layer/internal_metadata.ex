@@ -1,4 +1,5 @@
 defmodule EctoFoundationDB.Layer.InternalMetadata do
+  @moduledoc false
   @magic_key :__ectofdb_internal_metadata__
   def new(module) do
     [{@magic_key, module}]

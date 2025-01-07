@@ -3,11 +3,11 @@ defmodule EctoFoundationDB.Indexer do
   Implement this behaviour to create a custom index.
   """
   alias EctoFoundationDB.Index
+  alias EctoFoundationDB.Layer.DecodedKV
+  alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Tenant
-  alias EctoFoundationDB.Layer.DecodedKV
-  alias EctoFoundationDB.Layer.PrimaryKVCodec
-  alias EctoFoundationDB.Layer.Pack
 
   @callback create_range(Tenant.t(), Index.t()) :: {:erlfdb.key(), :erlfdb.key()}
   @callback create(

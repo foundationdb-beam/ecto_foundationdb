@@ -138,7 +138,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         Use `prefix: tenant` in your query.
         """
 
-      {true, tenant=%Tenant{}} ->
+      {true, tenant = %Tenant{}} ->
         {context, %Ecto.Query{query | prefix: tenant}}
     end
   end

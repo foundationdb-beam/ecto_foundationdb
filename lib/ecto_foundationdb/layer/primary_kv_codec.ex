@@ -1,4 +1,5 @@
 defmodule EctoFoundationDB.Layer.PrimaryKVCodec do
+  @moduledoc false
   alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.InternalMetadata
   alias EctoFoundationDB.Layer.Pack

@@ -1,10 +1,10 @@
 defmodule EctoFoundationDB.Layer.Tx do
   @moduledoc false
-  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Exception.IncorrectTenancy
   alias EctoFoundationDB.Exception.Unsupported
-  alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Future
+  alias EctoFoundationDB.Indexer
+  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.PrimaryKVCodec
@@ -118,7 +118,7 @@ defmodule EctoFoundationDB.Layer.Tx do
         # but can result in inconsistent indexes if objects do exist in
         # the database that are being blindly overwritten.
 
-        Enum.map(entries, fn {{pk_field, pk}, _future, data_object} ->
+        Enum.each(entries, fn {{pk_field, pk}, _future, data_object} ->
           kv_codec = Pack.primary_codec(tenant, source, pk)
           data_object = Fields.to_front(data_object, pk_field)
           kv = %DecodedKV{codec: kv_codec, data_object: data_object}
@@ -189,8 +189,7 @@ defmodule EctoFoundationDB.Layer.Tx do
               tx,
               schema,
               pk_field,
-              decoded_kv,
-              [set: set_data],
+              {decoded_kv, [set: set_data]},
               {idxs, partial_idxs},
               write_primary,
               options
@@ -214,8 +213,7 @@ defmodule EctoFoundationDB.Layer.Tx do
         tx,
         schema,
         pk_field,
-        decoded_kv,
-        updates,
+        {decoded_kv, updates},
         {idxs, partial_idxs},
         write_primary,
         options

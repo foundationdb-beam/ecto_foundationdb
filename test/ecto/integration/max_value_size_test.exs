@@ -1,10 +1,13 @@
 defmodule Ecto.Integration.MaxValueSizeTest do
   use Ecto.Integration.Case, async: true
-  alias Ecto.Integration.TestRepo
+
   alias Ecto.Adapters.FoundationDB
+
+  alias Ecto.Integration.TestRepo
+
+  alias EctoFoundationDB.Future
   alias EctoFoundationDB.Schemas.User
   alias EctoFoundationDB.Test.Util
-  alias EctoFoundationDB.Future
 
   describe "insert" do
     test "fdb:value_too_large", context do

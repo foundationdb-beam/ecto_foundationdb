@@ -173,7 +173,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         Or use the option `prefix: tenant` on the call to your Repo.
         """
 
-      {true, tenant=%Tenant{}} ->
+      {true, tenant = %Tenant{}} ->
         Map.put(schema_meta, :prefix, tenant)
     end
   end

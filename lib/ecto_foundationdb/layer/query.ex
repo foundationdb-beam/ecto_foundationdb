@@ -147,8 +147,7 @@ defmodule EctoFoundationDB.Layer.Query do
         tx,
         plan.schema,
         pk_field,
-        &1,
-        updates,
+        {&1, updates},
         {idxs, partial_idxs},
         write_primary,
         options
