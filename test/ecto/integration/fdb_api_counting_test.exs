@@ -89,7 +89,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :wait_for_all_interleaving},
 
              # check for existence of primary write
-             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Layer.Tx, :get_range},
 
              # wait for existence check
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
@@ -122,7 +122,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # check for existence of primary write
-             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Layer.Tx, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # primary write, index write
@@ -171,7 +171,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Layer.Tx, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # set data in primary write
@@ -201,7 +201,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Layer.Tx, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # set data in primary write
@@ -296,7 +296,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # check for existence
-             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Layer.Tx, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # clear primary
@@ -310,7 +310,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
            ] == calls
 
     # =================================================================
-    # Insert Unzipped Object
+    # Insert Large Object
     # =================================================================
 
     {calls, eve} =
@@ -331,7 +331,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # check for existence of primary write
-             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Layer.Tx, :get_range},
 
              # wait for existence check
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
@@ -339,7 +339,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # primary write
              {EctoFoundationDB.Layer.TxInsert, :set},
 
-             # unzipped writes
+             # multikey writes
              {EctoFoundationDB.Layer.TxInsert, :set},
              {EctoFoundationDB.Layer.TxInsert, :set},
 
@@ -351,7 +351,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
            ] == calls
 
     # =================================================================
-    # Update an non-indexed field on a Zipped Object into a normal object
+    # Update an non-indexed field on a Large Object into a normal object
     # =================================================================
 
     {calls, eve} =
@@ -367,10 +367,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Layer.Tx, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
-             # clear all existing unzipped keys
+             # clear all existing multikey keys
              {EctoFoundationDB.Layer.Tx, :clear_range},
 
              # set data in primary write
@@ -381,7 +381,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
            ] == calls
 
     # =================================================================
-    # Update an non-indexed field on an normal object into a zipped object
+    # Update an non-indexed field on an normal object into a multikey object
     # =================================================================
 
     {calls, eve} =
@@ -397,13 +397,13 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Layer.Tx, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # set data in primary write
              {EctoFoundationDB.Layer.Tx, :set},
 
-             # unzipped writes
+             # multikey writes
              {EctoFoundationDB.Layer.Tx, :set},
              {EctoFoundationDB.Layer.Tx, :set},
 
@@ -412,7 +412,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
            ] == calls
 
     # =================================================================
-    # Delete a zipped object
+    # Delete a multikey object
     # =================================================================
 
     {calls, _eve} =
@@ -426,10 +426,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.IndexInventory, :get},
 
              # check for existence
-             {EctoFoundationDB.Layer.KVZipper, :get_range},
+             {EctoFoundationDB.Layer.Tx, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
-             # clear unzipped range
+             # clear multikey range
              {EctoFoundationDB.Layer.Tx, :clear_range},
 
              # clear :name index

@@ -4,7 +4,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.Pack
-  alias EctoFoundationDB.Layer.KVZipper
+  alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.Tx
 
   defstruct [:tenant, :schema, :idxs, :partial_idxs, :write_primary, :options]
@@ -30,16 +30,16 @@ defmodule EctoFoundationDB.Layer.TxInsert do
       options: options
     } = acc
 
-    %DecodedKV{zipper: zipper, data_object: data_object} = new_kv
+    %DecodedKV{codec: kv_codec, data_object: data_object} = new_kv
 
-    {_, kvs} = KVZipper.unzip(zipper, Pack.to_fdb_value(data_object), options)
+    {_, kvs} = PrimaryKVCodec.encode(kv_codec, Pack.to_fdb_value(data_object), options)
 
     if write_primary do
       for {k, v} <- kvs, do: :erlfdb.set(tx, k, v)
     end
 
     # The indexer is not informed of the object splitting
-    fdb_key = KVZipper.pack_key(zipper, nil)
+    fdb_key = PrimaryKVCodec.pack_key(kv_codec, nil)
 
     Indexer.set(tenant, tx, idxs, partial_idxs, schema, {fdb_key, data_object})
     :ok

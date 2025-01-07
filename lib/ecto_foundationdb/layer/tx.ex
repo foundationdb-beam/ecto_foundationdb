@@ -7,7 +7,7 @@ defmodule EctoFoundationDB.Layer.Tx do
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Pack
-  alias EctoFoundationDB.Layer.KVZipper
+  alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.TxInsert
   alias EctoFoundationDB.Schema
   alias EctoFoundationDB.Tenant
@@ -119,9 +119,9 @@ defmodule EctoFoundationDB.Layer.Tx do
         # the database that are being blindly overwritten.
 
         Enum.map(entries, fn {{pk_field, pk}, _future, data_object} ->
-          zipper = Pack.primary_zipper(tenant, source, pk)
+          kv_codec = Pack.primary_codec(tenant, source, pk)
           data_object = Fields.to_front(data_object, pk_field)
-          kv = %DecodedKV{zipper: zipper, data_object: data_object}
+          kv = %DecodedKV{codec: kv_codec, data_object: data_object}
           TxInsert.do_set(acc, tx, kv, nil)
         end)
 
@@ -132,12 +132,12 @@ defmodule EctoFoundationDB.Layer.Tx do
         |> Enum.map(fn {{pk_field, pk}, future, data_object} ->
           data_object = Fields.to_front(data_object, pk_field)
 
-          zipper = Pack.primary_zipper(tenant, source, pk)
+          kv_codec = Pack.primary_codec(tenant, source, pk)
 
-          zipper
-          |> KVZipper.async_get(tenant, tx, future)
+          kv_codec
+          |> then(&async_get(tenant, tx, &1, future))
           |> Future.apply(
-            &TxInsert.do_set(acc, tx, %DecodedKV{zipper: zipper, data_object: data_object}, &1)
+            &TxInsert.do_set(acc, tx, %DecodedKV{codec: kv_codec, data_object: data_object}, &1)
           )
         end)
         |> Future.await_stream()
@@ -176,8 +176,8 @@ defmodule EctoFoundationDB.Layer.Tx do
 
     futures =
       Enum.map(pk_futures, fn {pk, future} ->
-        zipper = Pack.primary_zipper(tenant, source, pk)
-        future = KVZipper.async_get(zipper, tenant, tx, future)
+        kv_codec = Pack.primary_codec(tenant, source, pk)
+        future = async_get(tenant, tx, kv_codec, future)
 
         Future.apply(future, fn
           nil ->
@@ -220,18 +220,18 @@ defmodule EctoFoundationDB.Layer.Tx do
         write_primary,
         options
       ) do
-    %DecodedKV{zipper: zipper, data_object: orig_data_object} = decoded_kv
+    %DecodedKV{codec: kv_codec, data_object: orig_data_object} = decoded_kv
     orig_data_object = Fields.to_front(orig_data_object, pk_field)
     data_object = Keyword.merge(orig_data_object, updates[:set])
 
-    {_, kvs} = KVZipper.unzip(zipper, Pack.to_fdb_value(data_object), options)
+    {_, kvs} = PrimaryKVCodec.encode(kv_codec, Pack.to_fdb_value(data_object), options)
 
-    # For unzipped object, metadata is in the key, so the key will always change and must be cleared.
-    {fdb_key, clear_end} = KVZipper.range(zipper)
+    # For multikey object, metadata is in the key, so the key will always change and must be cleared.
+    {fdb_key, clear_end} = PrimaryKVCodec.range(kv_codec)
 
     if write_primary do
-      # If the original object was not zipped, there's no need to do the clear_range
-      if decoded_kv.zipped?, do: :erlfdb.clear_range(tx, fdb_key <> <<0>>, clear_end)
+      # If the original object was not multikey, there's no need to do the clear_range
+      if decoded_kv.multikey?, do: :erlfdb.clear_range(tx, fdb_key <> <<0>>, clear_end)
       for {k, v} <- kvs, do: :erlfdb.set(tx, k, v)
     else
       :erlfdb.clear_range(tx, fdb_key, clear_end)
@@ -243,8 +243,8 @@ defmodule EctoFoundationDB.Layer.Tx do
   def delete_pks(tenant, tx, {schema, source, _context}, pk_futures, {idxs, partial_idxs}) do
     futures =
       Enum.map(pk_futures, fn {pk, future} ->
-        zipper = Pack.primary_zipper(tenant, source, pk)
-        future = KVZipper.async_get(zipper, tenant, tx, future)
+        kv_codec = Pack.primary_codec(tenant, source, pk)
+        future = async_get(tenant, tx, kv_codec, future)
 
         Future.apply(future, fn
           nil ->
@@ -279,11 +279,11 @@ defmodule EctoFoundationDB.Layer.Tx do
         decoded_kv,
         {idxs, partial_idxs}
       ) do
-    %DecodedKV{zipper: zipper, data_object: v} = decoded_kv
+    %DecodedKV{codec: kv_codec, data_object: v} = decoded_kv
 
-    {start_key, end_key} = KVZipper.range(zipper)
+    {start_key, end_key} = PrimaryKVCodec.range(kv_codec)
 
-    if decoded_kv.zipped? do
+    if decoded_kv.multikey? do
       :erlfdb.clear_range(tx, start_key, end_key)
     else
       :erlfdb.clear(tx, start_key)
@@ -307,8 +307,8 @@ defmodule EctoFoundationDB.Layer.Tx do
       raise Unsupported, "Watches on schemas with `write_primary: false` are not supported."
     end
 
-    zipper = Pack.primary_zipper(tenant, source, pk)
-    key = KVZipper.pack_key(zipper, nil)
+    kv_codec = Pack.primary_codec(tenant, source, pk)
+    key = PrimaryKVCodec.pack_key(kv_codec, nil)
 
     fut = :erlfdb.watch(tx, key)
     fut
@@ -316,5 +316,31 @@ defmodule EctoFoundationDB.Layer.Tx do
 
   defp count_range(tx, key_start, key_end) do
     :erlfdb.fold_range(tx, key_start, key_end, fn _kv, acc -> acc + 1 end, 0)
+  end
+
+  defp async_get(tenant, tx, kv_codec, future) do
+    {start_key, end_key} = PrimaryKVCodec.range(kv_codec)
+    future_ref = :erlfdb.get_range(tx, start_key, end_key, wait: false)
+
+    f = fn
+      [] ->
+        nil
+
+      [{k, v}] ->
+        %DecodedKV{
+          codec: Pack.primary_write_key_to_codec(tenant, k),
+          data_object: Pack.from_fdb_value(v)
+        }
+
+      kvs ->
+        [kv] =
+          kvs
+          |> PrimaryKVCodec.stream_decode(tenant)
+          |> Enum.to_list()
+
+        kv
+    end
+
+    Future.set(future, tx, future_ref, f)
   end
 end

@@ -7,7 +7,7 @@ defmodule EctoFoundationDB.Layer.Query do
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.IndexInventory
   alias EctoFoundationDB.Layer.Pack
-  alias EctoFoundationDB.Layer.KVZipper
+  alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
@@ -178,7 +178,7 @@ defmodule EctoFoundationDB.Layer.Query do
   end
 
   defp unpack_and_filter(kvs, plan) do
-    KVZipper.stream_zip(kvs, plan.tenant)
+    PrimaryKVCodec.stream_decode(kvs, plan.tenant)
   end
 
   defp make_datakey_range(
@@ -198,9 +198,9 @@ defmodule EctoFoundationDB.Layer.Query do
          },
          _options
        ) do
-    zipper = Pack.primary_zipper(tenant, plan.source, param)
+    kv_codec = Pack.primary_codec(tenant, plan.source, param)
 
-    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, KVZipper.range(zipper))}
+    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, PrimaryKVCodec.range(kv_codec))}
   end
 
   defp make_datakey_range(
@@ -223,10 +223,10 @@ defmodule EctoFoundationDB.Layer.Query do
     param_right =
       if between.inclusive_right?, do: :erlfdb_key.strinc(param_right), else: param_right
 
-    zipper_left = Pack.primary_zipper(tenant, plan.source, param_left)
-    zipper_right = Pack.primary_zipper(tenant, plan.source, param_right)
-    {start_key, _} = KVZipper.range(zipper_left)
-    {_, end_key} = KVZipper.range(zipper_right)
+    codec_left = Pack.primary_codec(tenant, plan.source, param_left)
+    codec_right = Pack.primary_codec(tenant, plan.source, param_right)
+    {start_key, _} = PrimaryKVCodec.range(codec_left)
+    {_, end_key} = PrimaryKVCodec.range(codec_right)
 
     start_key = options[:start_key] || start_key
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}

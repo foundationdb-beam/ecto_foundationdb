@@ -33,7 +33,7 @@ defmodule EctoFoundationDB.Tenant do
 
   alias Ecto.Adapters.FoundationDB, as: FDB
 
-  alias EctoFoundationDB.Layer.KVZipper
+  alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Migrator
   alias EctoFoundationDB.Options
   alias EctoFoundationDB.Tenant
@@ -164,13 +164,13 @@ defmodule EctoFoundationDB.Tenant do
   keyspace.
   """
   def pack(tenant, tuple) when is_tuple(tuple) do
-    zipper = zipper(tenant, tuple)
-    KVZipper.pack_key(zipper, nil)
+    tuple = tenant.backend.extend_tuple(tuple, tenant.meta)
+    :erlfdb_tuple.pack(tuple)
   end
 
-  def zipper(tenant, tuple) when is_tuple(tuple) do
+  def primary_codec(tenant, tuple) when is_tuple(tuple) do
     tuple = tenant.backend.extend_tuple(tuple, tenant.meta)
-    KVZipper.new(tuple)
+    PrimaryKVCodec.new(tuple)
   end
 
   def unpack(tenant, tuple) do

@@ -6,7 +6,7 @@ defmodule EctoFoundationDB.Indexer do
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Tenant
   alias EctoFoundationDB.Layer.DecodedKV
-  alias EctoFoundationDB.Layer.KVZipper
+  alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.Pack
 
   @callback create_range(Tenant.t(), Index.t()) :: {:erlfdb.key(), :erlfdb.key()}
@@ -75,7 +75,7 @@ defmodule EctoFoundationDB.Indexer do
   ## Default behavior for standard key-value response
   defp _unpack(_idx, plan, {fdb_key, fdb_value}),
     do: %DecodedKV{
-      zipper: Pack.primary_write_key_to_zipper(plan.tenant, fdb_key),
+      codec: Pack.primary_write_key_to_codec(plan.tenant, fdb_key),
       data_object: Pack.from_fdb_value(fdb_value)
     }
 
@@ -86,7 +86,7 @@ defmodule EctoFoundationDB.Indexer do
   defp _unpack(_idx, plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, fdb_kvs}) do
     [kv] =
       fdb_kvs
-      |> KVZipper.stream_zip(plan.tenant)
+      |> PrimaryKVCodec.stream_decode(plan.tenant)
       |> Enum.to_list()
 
     kv

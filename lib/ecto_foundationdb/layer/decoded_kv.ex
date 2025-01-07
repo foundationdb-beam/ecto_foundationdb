@@ -1,3 +1,3 @@
 defmodule EctoFoundationDB.Layer.DecodedKV do
-  defstruct zipper: nil, data_object: nil, zipped?: false
+  defstruct codec: nil, data_object: nil, multikey?: false
 end
