@@ -8,6 +8,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   alias EctoFoundationDB.Layer.IndexInventory
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.Schema
+  alias EctoFoundationDB.Tenant
 
   @impl Ecto.Adapter.Schema
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
@@ -33,7 +34,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       Enum.map(entries, fn data_object ->
         pk_field = Fields.get_pk_field!(schema)
         pk = data_object[pk_field]
-        {{pk_field, pk}, data_object}
+        future = Future.before_transactional(schema)
+        {{pk_field, pk}, future, data_object}
       end)
 
     num_ins =
@@ -75,13 +77,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         update_data,
         filters,
         _returning,
-        _options
+        options
       ) do
     %{source: source, schema: schema, prefix: tenant, context: context} =
       assert_tenancy!(schema_meta)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
+    future = Future.before_transactional(schema)
 
     res =
       IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
@@ -90,9 +93,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
           tx,
           {schema, source, context},
           pk_field,
-          [pk],
+          [{pk, future}],
           update_data,
-          {idxs, partial_idxs}
+          {idxs, partial_idxs},
+          options
         )
       end)
 
@@ -118,10 +122,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
+    future = Future.before_transactional(schema)
 
     res =
       IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
-        Tx.delete_pks(tenant, tx, {schema, source, context}, [pk], {idxs, partial_idxs})
+        Tx.delete_pks(tenant, tx, {schema, source, context}, [{pk, future}], {idxs, partial_idxs})
       end)
 
     case res do
@@ -168,7 +173,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         Or use the option `prefix: tenant` on the call to your Repo.
         """
 
-      {true, tenant} ->
+      {true, tenant = %Tenant{}} ->
         Map.put(schema_meta, :prefix, tenant)
     end
   end

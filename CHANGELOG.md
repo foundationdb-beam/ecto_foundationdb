@@ -1,5 +1,13 @@
 # Changelog for v0.x
 
+## v0.4 (TBD)
+
+### Enhancements
+
+* [Large Structs](Ecto.Adapters.FoundationDB.html#module-advanced-options): If your struct encodes to a size larger than 100,000 Bytes, it will now be split across several FDB key-values automatically.
+  Previously, EctoFDB did not attempt to detect this and allowed FoundationDB to throw error code 2103: "value_too_large - Value length exceeds limit".
+  See documentation for configuration options.
+
 ## v0.3.1 (2024-10-24)
 
 ### Bug fixes

@@ -222,6 +222,7 @@ defmodule EctoFoundationDB.Indexer.Default do
     if Keyword.get(index_options, :mapped?, true) do
       {index_key, fdb_key}
     else
+      # unmapped index values do not support key/value splitting
       {index_key, Pack.to_fdb_value(data_object)}
     end
   end

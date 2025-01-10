@@ -26,7 +26,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ```elixir
   defp deps do
     [
-      {:ecto_foundationdb, "~> 0.3"}
+      {:ecto_foundationdb, "~> 0.4"}
     ]
   end
   ```
@@ -641,6 +641,16 @@ defmodule Ecto.Adapters.FoundationDB do
     * `:idx_cache` - When set to `:enabled`, the Ecto ets cache is used to store the
       available indexes per tenant. This speeds up all database operations.
       Defaults to `:enabled`.
+    * `:max_single_value_size` - Number of Bytes above which an encoded struct will
+      be split into multiple FDB key-value pairs upon insert and update. Defaults to `100_000`.
+      Any value beyond `100_000` is unsupported by FoundationDB. You probably do not
+      want to change this value. Also see `:max_value_size`.
+    * `:max_value_size` - Number of Bytes above which an encoded struct will be
+      rejected by EctoFDB upon insert and update. Defaults to `:infinity`, which
+      means that a single encoded struct of any size can be written to any number of
+      keys. Please remember that FDB's transaction size limit of 10MB still applies.
+      The maximum number of key-value pairs for a given encoded struct, not counting
+      indexes, is computed by `1 + ceil(:max_value_size / :max_single_value_size)`.
 
   ## Optimizing for throughput and latency
 
@@ -818,8 +828,9 @@ defmodule Ecto.Adapters.FoundationDB do
 
       def await(futures) when is_list(futures) do
         futures
-        |> Future.await_all()
-        |> Enum.map(&Future.result/1)
+        |> Future.await_stream()
+        |> Stream.map(&Future.result/1)
+        |> Enum.to_list()
       end
 
       def await(future) do

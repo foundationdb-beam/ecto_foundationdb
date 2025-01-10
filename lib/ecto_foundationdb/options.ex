@@ -9,6 +9,10 @@ defmodule EctoFoundationDB.Options do
           | {:migrator, module()}
           | {:cluster_file, :erlfdb.cluster_filename()}
           | {:migration_step, integer()}
+          | {:max_single_value_size, integer()}
+          | {:max_value_size, integer()}
+
+  @fdb_max_single_value_size_bytes 100_000
 
   @type t() :: [option()]
 
@@ -38,6 +42,12 @@ defmodule EctoFoundationDB.Options do
 
   def get(options, :idx_cache),
     do: Keyword.get(options, :idx_cache, :enabled)
+
+  def get(options, :max_single_value_size),
+    do: Keyword.get(options, :max_single_value_size, @fdb_max_single_value_size_bytes)
+
+  def get(options, :max_value_size),
+    do: Keyword.get(options, :max_value_size, :infinity)
 
   def get(options, key),
     do:

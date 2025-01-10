@@ -2,9 +2,12 @@ defmodule EctoFoundationDB.Layer.Tx do
   @moduledoc false
   alias EctoFoundationDB.Exception.IncorrectTenancy
   alias EctoFoundationDB.Exception.Unsupported
+  alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer
+  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.TxInsert
   alias EctoFoundationDB.Schema
   alias EctoFoundationDB.Tenant
@@ -105,30 +108,49 @@ defmodule EctoFoundationDB.Layer.Tx do
   end
 
   def insert_all(tenant, tx, {schema, source, context}, entries, {idxs, partial_idxs}, options) do
-    entries =
-      entries
-      |> Enum.map(fn {{pk_field, pk}, data_object} ->
-        key = Pack.primary_pack(tenant, source, pk)
-
-        data_object = Fields.to_front(data_object, pk_field)
-        {key, data_object}
-      end)
-
     write_primary = Schema.get_option(context, :write_primary)
 
-    acc = TxInsert.new(schema, idxs, partial_idxs, write_primary, options)
+    tx_insert = TxInsert.new(tenant, schema, idxs, partial_idxs, write_primary, options)
 
     case options[:conflict_target] do
       [] ->
         # We pretend that the data doesn't exist. This speeds up data loading
         # but can result in inconsistent indexes if objects do exist in
         # the database that are being blindly overwritten.
-        acc = Enum.reduce(entries, acc, &TxInsert.set_stage(tenant, tx, &1, :not_found, &2))
-        acc.count
+
+        Enum.each(entries, fn {{pk_field, pk}, _future, data_object} ->
+          kv_codec = Pack.primary_codec(tenant, source, pk)
+          data_object = Fields.to_front(data_object, pk_field)
+          kv = %DecodedKV{codec: kv_codec, data_object: data_object}
+          TxInsert.do_set(tx_insert, tx, kv, nil)
+        end)
+
+        length(entries)
 
       nil ->
-        acc = pipeline(tenant, tx, entries, &TxInsert.get_stage/2, acc, &TxInsert.set_stage/5)
-        acc.count
+        entries
+        |> Enum.map(fn {{pk_field, pk}, future, data_object} ->
+          data_object = Fields.to_front(data_object, pk_field)
+
+          kv_codec = Pack.primary_codec(tenant, source, pk)
+
+          kv_codec
+          |> then(&async_get(tenant, tx, &1, future))
+          |> Future.apply(
+            &TxInsert.do_set(
+              tx_insert,
+              tx,
+              %DecodedKV{codec: kv_codec, data_object: data_object},
+              &1
+            )
+          )
+        end)
+        |> Future.await_stream()
+        |> Stream.map(&Future.result/1)
+        |> Enum.reduce(0, fn
+          nil, sum -> sum
+          :ok, sum -> sum + 1
+        end)
 
       unsupported_conflict_target ->
         raise Unsupported, """
@@ -150,38 +172,45 @@ defmodule EctoFoundationDB.Layer.Tx do
         tx,
         {schema, source, context},
         pk_field,
-        pks,
+        pk_futures,
         set_data,
-        {idxs, partial_idxs}
+        {idxs, partial_idxs},
+        options
       ) do
-    keys = for pk <- pks, do: Pack.primary_pack(tenant, source, pk)
-
     write_primary = Schema.get_option(context, :write_primary)
 
-    get_stage = &:erlfdb.get/2
+    futures =
+      Enum.map(pk_futures, fn {pk, future} ->
+        kv_codec = Pack.primary_codec(tenant, source, pk)
+        future = async_get(tenant, tx, kv_codec, future)
 
-    update_stage = fn
-      _tenant, _tx, _key, :not_found, acc ->
-        acc
+        Future.apply(future, fn
+          nil ->
+            nil
 
-      _tenant, tx, fdb_key, fdb_value, acc ->
-        data_object = Pack.from_fdb_value(fdb_value)
+          decoded_kv ->
+            update_data_object(
+              tenant,
+              tx,
+              schema,
+              pk_field,
+              {decoded_kv, [set: set_data]},
+              {idxs, partial_idxs},
+              write_primary,
+              options
+            )
 
-        update_data_object(
-          tenant,
-          tx,
-          schema,
-          pk_field,
-          {fdb_key, data_object},
-          [set: set_data],
-          {idxs, partial_idxs},
-          write_primary
-        )
+            :ok
+        end)
+      end)
 
-        acc + 1
-    end
-
-    pipeline(tenant, tx, keys, get_stage, 0, update_stage)
+    futures
+    |> Future.await_stream()
+    |> Stream.map(&Future.result/1)
+    |> Enum.reduce(0, fn
+      nil, sum -> sum
+      :ok, sum -> sum + 1
+    end)
   end
 
   def update_data_object(
@@ -189,47 +218,81 @@ defmodule EctoFoundationDB.Layer.Tx do
         tx,
         schema,
         pk_field,
-        {fdb_key, orig_data_object},
-        updates,
+        {decoded_kv, updates},
         {idxs, partial_idxs},
-        write_primary
+        write_primary,
+        options
       ) do
+    %DecodedKV{codec: kv_codec, data_object: orig_data_object} = decoded_kv
     orig_data_object = Fields.to_front(orig_data_object, pk_field)
     data_object = Keyword.merge(orig_data_object, updates[:set])
 
-    if write_primary, do: :erlfdb.set(tx, fdb_key, Pack.to_fdb_value(data_object))
+    {_, kvs} = PrimaryKVCodec.encode(kv_codec, Pack.to_fdb_value(data_object), options)
+
+    # For multikey object, metadata is in the key, so the key will always change and must be cleared.
+    {fdb_key, clear_end} = PrimaryKVCodec.range(kv_codec)
+
+    if write_primary do
+      # If the original object was not multikey, there's no need to do the clear_range
+      if decoded_kv.multikey?, do: :erlfdb.clear_range(tx, fdb_key <> <<0>>, clear_end)
+      for {k, v} <- kvs, do: :erlfdb.set(tx, k, v)
+    else
+      :erlfdb.clear_range(tx, fdb_key, clear_end)
+    end
 
     Indexer.update(tenant, tx, idxs, partial_idxs, schema, {fdb_key, orig_data_object}, updates)
   end
 
-  def delete_pks(tenant, tx, {schema, source, _context}, pks, {idxs, partial_idxs}) do
-    keys = for pk <- pks, do: Pack.primary_pack(tenant, source, pk)
+  def delete_pks(tenant, tx, {schema, source, _context}, pk_futures, {idxs, partial_idxs}) do
+    futures =
+      Enum.map(pk_futures, fn {pk, future} ->
+        kv_codec = Pack.primary_codec(tenant, source, pk)
+        future = async_get(tenant, tx, kv_codec, future)
 
-    get_stage = &:erlfdb.get/2
+        Future.apply(future, fn
+          nil ->
+            nil
 
-    clear_stage = fn
-      _tenant, _tx, _key, :not_found, acc ->
-        acc
+          decoded_kv ->
+            delete_data_object(
+              tenant,
+              tx,
+              schema,
+              decoded_kv,
+              {idxs, partial_idxs}
+            )
 
-      _tenant, tx, fdb_key, fdb_value, acc ->
-        delete_data_object(
-          tenant,
-          tx,
-          schema,
-          {fdb_key, Pack.from_fdb_value(fdb_value)},
-          {idxs, partial_idxs}
-        )
+            :ok
+        end)
+      end)
 
-        acc + 1
-    end
-
-    pipeline(tenant, tx, keys, get_stage, 0, clear_stage)
+    futures
+    |> Future.await_stream()
+    |> Stream.map(&Future.result/1)
+    |> Enum.reduce(0, fn
+      nil, sum -> sum
+      :ok, sum -> sum + 1
+    end)
   end
 
-  def delete_data_object(tenant, tx, schema, kv = {fdb_key, _}, {idxs, partial_idxs}) do
-    :erlfdb.clear(tx, fdb_key)
+  def delete_data_object(
+        tenant,
+        tx,
+        schema,
+        decoded_kv,
+        {idxs, partial_idxs}
+      ) do
+    %DecodedKV{codec: kv_codec, data_object: v} = decoded_kv
 
-    Indexer.clear(tenant, tx, idxs, partial_idxs, schema, kv)
+    {start_key, end_key} = PrimaryKVCodec.range(kv_codec)
+
+    if decoded_kv.multikey? do
+      :erlfdb.clear_range(tx, start_key, end_key)
+    else
+      :erlfdb.clear(tx, start_key)
+    end
+
+    Indexer.clear(tenant, tx, idxs, partial_idxs, schema, {start_key, v})
   end
 
   def clear_all(tenant, tx, %{opts: _adapter_opts}, source) do
@@ -247,7 +310,10 @@ defmodule EctoFoundationDB.Layer.Tx do
       raise Unsupported, "Watches on schemas with `write_primary: false` are not supported."
     end
 
-    fut = :erlfdb.watch(tx, Pack.primary_pack(tenant, source, pk))
+    kv_codec = Pack.primary_codec(tenant, source, pk)
+    key = PrimaryKVCodec.pack_key(kv_codec, nil)
+
+    fut = :erlfdb.watch(tx, key)
     fut
   end
 
@@ -255,55 +321,29 @@ defmodule EctoFoundationDB.Layer.Tx do
     :erlfdb.fold_range(tx, key_start, key_end, fn _kv, acc -> acc + 1 end, 0)
   end
 
-  @doc false
-  # A multi-stage pipeline to be executed within a transaction where
-  # the first stage induces a list of futures, and the second stage
-  # handles those futures as they arrive (using :erlfdb.wait_for_any/1).
+  defp async_get(tenant, tx, kv_codec, future) do
+    {start_key, end_key} = PrimaryKVCodec.range(kv_codec)
+    future_ref = :erlfdb.get_range(tx, start_key, end_key, wait: false)
 
-  # tenant: Tenant.t()
-  # tx: The erlfdb tx
-  # input_list: a list of items to be handled by your stages
-  # fun_stage_1: a 2-arity function accepting as args (tx, x) where
-  # tx is the same erlfdb tx and x is an entry from input_list. This function
-  # must return an erlfdb future.
-  # acc: Starting accumulator for fun_stage_2
-  # fun_stage_2: a 4-arity function acceptiong as aargs (tx, x, result, acc)
-  # where tx is the same erlfdb tx, x is the corresponding entry in your
-  # input_list, result is the result of the future from stage_1, and acc is
-  # the accumulator. This function returns the updated acc.
-  defp pipeline(tenant, tx, input_list, fun_stage_1, acc, fun_stage_2) do
-    futures_map =
-      input_list
-      |> Enum.map(fn x ->
-        fut = fun_stage_1.(tx, x)
-        {fut, x}
-      end)
-      |> Enum.into(%{})
+    f = fn
+      [] ->
+        nil
 
-    result = fold_futures(tenant, tx, futures_map, acc, fun_stage_2)
+      [{k, v}] ->
+        %DecodedKV{
+          codec: Pack.primary_write_key_to_codec(tenant, k),
+          data_object: Pack.from_fdb_value(v)
+        }
 
-    result
-  end
+      kvs ->
+        [kv] =
+          kvs
+          |> PrimaryKVCodec.stream_decode(tenant)
+          |> Enum.to_list()
 
-  defp fold_futures(tenant, tx, futures_map, acc, fun) do
-    fold_futures(tenant, tx, Map.keys(futures_map), futures_map, acc, fun)
-  end
-
-  defp fold_futures(_tenant, _tx, [], _futures_map, acc, _fun) do
-    acc
-  end
-
-  defp fold_futures(tenant, tx, futures, futures_map, acc, fun) do
-    fut = :erlfdb.wait_for_any(futures)
-
-    case Map.get(futures_map, fut, nil) do
-      nil ->
-        :erlang.error(:badarg)
-
-      map_entry ->
-        futures = futures -- [fut]
-        acc = fun.(tenant, tx, map_entry, :erlfdb.get(fut), acc)
-        fold_futures(tenant, tx, futures, futures_map, acc, fun)
+        kv
     end
+
+    Future.set(future, tx, future_ref, f)
   end
 end

@@ -2,107 +2,109 @@ defmodule EctoFoundationDB.Layer.TxInsert do
   @moduledoc false
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
+  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.Tx
 
-  defstruct [:schema, :idxs, :partial_idxs, :write_primary, :options, :count]
+  defstruct [:tenant, :schema, :idxs, :partial_idxs, :write_primary, :options]
 
-  def new(schema, idxs, partial_idxs, write_primary, options) do
+  def new(tenant, schema, idxs, partial_idxs, write_primary, options) do
     %__MODULE__{
+      tenant: tenant,
       schema: schema,
       idxs: idxs,
       partial_idxs: partial_idxs,
       write_primary: write_primary,
-      options: options,
-      count: 0
+      options: options
     }
   end
 
-  def get_stage(tx, {key, _data_object}) do
-    :erlfdb.get(tx, key)
-  end
-
-  def set_stage(tenant, tx, {fdb_key, data_object}, :not_found, acc) do
+  def do_set(acc, tx, new_kv, nil) do
     %__MODULE__{
+      tenant: tenant,
       schema: schema,
       idxs: idxs,
       partial_idxs: partial_idxs,
       write_primary: write_primary,
-      options: _options,
-      count: count
+      options: options
     } = acc
 
-    fdb_value = Pack.to_fdb_value(data_object)
+    %DecodedKV{codec: kv_codec, data_object: data_object} = new_kv
 
-    if write_primary, do: :erlfdb.set(tx, fdb_key, fdb_value)
+    {_, kvs} = PrimaryKVCodec.encode(kv_codec, Pack.to_fdb_value(data_object), options)
+
+    if write_primary do
+      for {k, v} <- kvs, do: :erlfdb.set(tx, k, v)
+    end
+
+    # The indexer is not informed of the object splitting
+    fdb_key = PrimaryKVCodec.pack_key(kv_codec, nil)
+
     Indexer.set(tenant, tx, idxs, partial_idxs, schema, {fdb_key, data_object})
-    %__MODULE__{acc | count: count + 1}
+    :ok
   end
 
-  def set_stage(tenant, tx, {fdb_key, data_object = [{pk_field, _} | _]}, result, acc) do
+  def do_set(acc, tx, new_kv, existing_kv) do
     %__MODULE__{
+      tenant: tenant,
       schema: schema,
       idxs: idxs,
       partial_idxs: partial_idxs,
       write_primary: write_primary,
-      options: options,
-      count: count
+      options: options
     } = acc
+
+    %DecodedKV{data_object: data_object = [{pk_field, pk} | _]} = new_kv
 
     case options[:on_conflict] do
       :nothing ->
-        acc
+        nil
 
       :replace_all ->
-        existing_object = Pack.from_fdb_value(result)
-
         Tx.update_data_object(
           tenant,
           tx,
           schema,
           pk_field,
-          {fdb_key, existing_object},
-          [set: data_object],
+          {existing_kv, [set: data_object]},
           {idxs, partial_idxs},
-          write_primary
+          write_primary,
+          options
         )
 
-        %__MODULE__{acc | count: count + 1}
+        :ok
 
       {:replace_all_except, fields} ->
-        existing_object = Pack.from_fdb_value(result)
-
         Tx.update_data_object(
           tenant,
           tx,
           schema,
           pk_field,
-          {fdb_key, existing_object},
-          [set: Keyword.drop(data_object, fields)],
+          {existing_kv, [set: Keyword.drop(data_object, fields)]},
           {idxs, partial_idxs},
-          write_primary
+          write_primary,
+          options
         )
 
-        %__MODULE__{acc | count: count + 1}
+        :ok
 
       {:replace, fields} ->
-        existing_object = Pack.from_fdb_value(result)
-
         Tx.update_data_object(
           tenant,
           tx,
           schema,
           pk_field,
-          {fdb_key, existing_object},
-          [set: Keyword.take(data_object, fields)],
+          {existing_kv, [set: Keyword.take(data_object, fields)]},
           {idxs, partial_idxs},
-          write_primary
+          write_primary,
+          options
         )
 
-        %__MODULE__{acc | count: count + 1}
+        :ok
 
       val when is_nil(val) or val == :raise ->
-        raise Unsupported, "Key exists: #{inspect(fdb_key, binaries: :as_strings)}"
+        raise Unsupported, "Key exists: #{inspect(schema)} #{inspect(pk)}"
 
       unsupported_on_conflict ->
         raise Unsupported, """

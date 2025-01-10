@@ -3,9 +3,11 @@ defmodule EctoFoundationDB.Layer.Query do
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer
+  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.IndexInventory
   alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
@@ -43,7 +45,7 @@ defmodule EctoFoundationDB.Layer.Query do
       objs =
         kvs
         |> unpack_and_filter(plan)
-        |> Stream.map(fn {_k, v} -> v end)
+        |> Stream.map(fn %DecodedKV{data_object: v} -> v end)
 
       {objs, continuation}
     end)
@@ -52,10 +54,10 @@ defmodule EctoFoundationDB.Layer.Query do
   @doc """
   Executes a query for updating data.
   """
-  def update(tenant, adapter_meta, plan) do
+  def update(tenant, adapter_meta, plan, options) do
     IndexInventory.transactional(tenant, adapter_meta, plan.source, fn tx, idxs, partial_idxs ->
       plan = make_range(idxs, plan, [])
-      tx_update_range(tx, plan, idxs, partial_idxs)
+      tx_update_range(tx, plan, idxs, partial_idxs, options)
     end)
   end
 
@@ -113,18 +115,6 @@ defmodule EctoFoundationDB.Layer.Query do
     end
   end
 
-  defp tx_get_range(tx, %{layer_data: %{range: {fdb_key, nil}}}, future, _options) do
-    future_ref = :erlfdb.get(tx, fdb_key)
-
-    Future.set(future, tx, future_ref, fn res ->
-      if res == :not_found do
-        []
-      else
-        [{fdb_key, res}]
-      end
-    end)
-  end
-
   defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key}}}, future, options) do
     get_options = Keyword.take(options, [:limit]) |> Keyword.put(:wait, false)
     future_ref = :erlfdb.get_range(tx, start_key, end_key, get_options)
@@ -137,7 +127,13 @@ defmodule EctoFoundationDB.Layer.Query do
     Future.set(future, tx, future_ref)
   end
 
-  defp tx_update_range(tx, plan = %QueryPlan{updates: updates}, idxs, partial_idxs) do
+  defp tx_update_range(
+         tx,
+         plan = %QueryPlan{updates: updates},
+         idxs,
+         partial_idxs,
+         options
+       ) do
     pk_field = Fields.get_pk_field!(plan.schema)
     write_primary = Schema.get_option(plan.context, :write_primary)
 
@@ -151,10 +147,10 @@ defmodule EctoFoundationDB.Layer.Query do
         tx,
         plan.schema,
         pk_field,
-        &1,
-        updates,
+        {&1, updates},
         {idxs, partial_idxs},
-        write_primary
+        write_primary,
+        options
       )
     )
     |> Enum.to_list()
@@ -180,8 +176,8 @@ defmodule EctoFoundationDB.Layer.Query do
     end)
   end
 
-  defp unpack_and_filter(kvs, _plan) do
-    Stream.map(kvs, fn {k, v} -> {k, Pack.from_fdb_value(v)} end)
+  defp unpack_and_filter(kvs, plan) do
+    PrimaryKVCodec.stream_decode(kvs, plan.tenant)
   end
 
   defp make_datakey_range(
@@ -201,8 +197,9 @@ defmodule EctoFoundationDB.Layer.Query do
          },
          _options
        ) do
-    fdb_key = Pack.primary_pack(tenant, plan.source, param)
-    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {fdb_key, nil})}
+    kv_codec = Pack.primary_codec(tenant, plan.source, param)
+
+    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, PrimaryKVCodec.range(kv_codec))}
   end
 
   defp make_datakey_range(
@@ -225,8 +222,11 @@ defmodule EctoFoundationDB.Layer.Query do
     param_right =
       if between.inclusive_right?, do: :erlfdb_key.strinc(param_right), else: param_right
 
-    start_key = Pack.primary_pack(tenant, plan.source, param_left)
-    end_key = Pack.primary_pack(tenant, plan.source, param_right)
+    codec_left = Pack.primary_codec(tenant, plan.source, param_left)
+    codec_right = Pack.primary_codec(tenant, plan.source, param_right)
+    {start_key, _} = PrimaryKVCodec.range(codec_left)
+    {_, end_key} = PrimaryKVCodec.range(codec_right)
+
     start_key = options[:start_key] || start_key
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end

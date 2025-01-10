@@ -8,7 +8,7 @@ defmodule EctoFoundationDB.Future do
   internal use only.
   """
   alias EctoFoundationDB.Layer.Tx
-  defstruct [:schema, :tx, :ref, :result, :handler, :must_wait?]
+  defstruct [:ref, :schema, :tx, :erlfdb_future, :result, :handler, :must_wait?]
 
   @token :__ectofdbfuture__
 
@@ -17,13 +17,24 @@ defmodule EctoFoundationDB.Future do
   # Before entering a transactional that uses this Future module, we must know whether or not
   # we are required to wait on the Future upon leaving the transactional (`must_wait?`).
   def before_transactional(schema) do
-    %__MODULE__{schema: schema, handler: &Function.identity/1, must_wait?: not Tx.in_tx?()}
+    %__MODULE__{
+      ref: nil,
+      schema: schema,
+      handler: &Function.identity/1,
+      must_wait?: not Tx.in_tx?()
+    }
   end
 
   # Upon leaving a transactional that uses this Future module, `leaving_transactional` must
   # be called so that any Futures have a change to wait on their results if necessary.
   def leaving_transactional(fut = %__MODULE__{must_wait?: true}) do
-    %__MODULE__{fut | tx: nil, ref: nil, result: result(fut), handler: &Function.identity/1}
+    %__MODULE__{
+      fut
+      | tx: nil,
+        erlfdb_future: nil,
+        result: result(fut),
+        handler: &Function.identity/1
+    }
   end
 
   def leaving_transactional(fut = %__MODULE__{must_wait?: false}) do
@@ -36,52 +47,66 @@ defmodule EctoFoundationDB.Future do
     %__MODULE__{schema: schema, handler: &Function.identity/1, must_wait?: true}
   end
 
-  def new_watch(schema, future_ref, handler \\ &Function.identity/1) do
+  def ref(%__MODULE__{ref: ref}), do: ref
+
+  def new_watch(schema, erlfdb_future, handler \\ &Function.identity/1) do
     # The future for a watch is fulfilled outside of a transaction, so there is no tx val
     %__MODULE__{
       schema: schema,
       tx: :watch,
-      ref: future_ref,
+      ref: get_ref(erlfdb_future),
+      erlfdb_future: erlfdb_future,
       handler: handler,
       must_wait?: false
     }
   end
 
-  def set(fut, tx, future_ref, f \\ &Function.identity/1) do
+  def set(fut, tx, erlfdb_future, f \\ &Function.identity/1) do
+    ref = get_ref(erlfdb_future)
     %__MODULE__{handler: g} = fut
-    %__MODULE__{fut | tx: tx, ref: future_ref, handler: &f.(g.(&1))}
+    %__MODULE__{fut | ref: ref, tx: tx, erlfdb_future: erlfdb_future, handler: &f.(g.(&1))}
   end
 
-  def result(fut = %__MODULE__{ref: nil, handler: f}) do
+  def result(fut = %__MODULE__{erlfdb_future: nil, handler: f}) do
     f.(fut.result)
   end
 
   def result(fut = %__MODULE__{tx: :watch}) do
-    %__MODULE__{ref: ref, handler: handler} = fut
-    res = :erlfdb.wait(ref)
+    %__MODULE__{erlfdb_future: erlfdb_future, handler: handler} = fut
+    res = :erlfdb.wait(erlfdb_future)
     handler.(res)
   end
 
   def result(fut) do
-    %__MODULE__{tx: tx, ref: ref, handler: handler} = fut
-    [res] = :erlfdb.wait_for_all_interleaving(tx, [ref])
+    %__MODULE__{tx: tx, erlfdb_future: erlfdb_future, handler: handler} = fut
+    [res] = :erlfdb.wait_for_all_interleaving(tx, [erlfdb_future])
     handler.(res)
   end
 
-  # Future: If there is a wrapping transaction with an `async_*` qualifier, the wait happens here
   def await_all(futs) do
+    futs
+    |> await_stream()
+    |> Enum.to_list()
+  end
+
+  # Future: If there is a wrapping transaction with an `async_*` qualifier, the wait happens here
+  def await_stream(futs) do
     # important to maintain order of the input futures
-    tx_refs = for %__MODULE__{tx: tx, ref: ref} <- futs, not is_nil(ref), do: {tx, ref}
+    reffed_futures =
+      for %__MODULE__{ref: ref, erlfdb_future: erlfdb_future} <- futs,
+          not is_nil(erlfdb_future),
+          do: {ref, erlfdb_future}
 
     results =
-      if length(tx_refs) > 0 do
-        {[tx | _], refs} = Enum.unzip(tx_refs)
-        Enum.zip(refs, :erlfdb.wait_for_all_interleaving(tx, refs)) |> Enum.into(%{})
+      if length(reffed_futures) > 0 do
+        [%__MODULE__{tx: tx} | _] = futs
+        {refs, erlfdb_futures} = Enum.unzip(reffed_futures)
+        Enum.zip(refs, :erlfdb.wait_for_all_interleaving(tx, erlfdb_futures)) |> Enum.into(%{})
       else
         %{}
       end
 
-    Enum.map(
+    Stream.map(
       futs,
       fn fut = %__MODULE__{ref: ref, result: result, handler: f} ->
         case Map.get(results, ref, nil) do
@@ -89,7 +114,7 @@ defmodule EctoFoundationDB.Future do
             %__MODULE__{
               fut
               | tx: nil,
-                ref: nil,
+                erlfdb_future: nil,
                 result: f.(result),
                 handler: &Function.identity/1
             }
@@ -98,7 +123,7 @@ defmodule EctoFoundationDB.Future do
             %__MODULE__{
               fut
               | tx: nil,
-                ref: nil,
+                erlfdb_future: nil,
                 result: f.(new_result),
                 handler: &Function.identity/1
             }
@@ -107,7 +132,7 @@ defmodule EctoFoundationDB.Future do
     )
   end
 
-  def apply(fut = %__MODULE__{ref: nil}, f) do
+  def apply(fut = %__MODULE__{erlfdb_future: nil}, f) do
     %__MODULE__{handler: g, result: result} = fut
     %__MODULE__{result: f.(g.(result)), handler: &Function.identity/1}
   end
@@ -127,12 +152,20 @@ defmodule EctoFoundationDB.Future do
   defp find_ready([], _ready_ref, acc), do: {nil, Enum.reverse(acc)}
 
   defp find_ready([h | t], ready_ref, acc) do
-    %__MODULE__{ref: ref} = h
+    %__MODULE__{erlfdb_future: erlfdb_future} = h
 
-    if match?({:erlfdb_future, ^ready_ref, _}, ref) do
-      {%__MODULE__{h | ref: nil}, Enum.reverse(acc) ++ t}
+    if match_ref?(erlfdb_future, ready_ref) do
+      {h, Enum.reverse(acc) ++ t}
     else
       find_ready(t, ready_ref, [h | acc])
     end
   end
+
+  defp match_ref?({:erlfdb_future, ref1, _}, ref2) when ref1 === ref2, do: true
+  defp match_ref?({:fold_future, _, erlfdb_future}, ref2), do: match_ref?(erlfdb_future, ref2)
+  defp match_ref?(_, _), do: false
+
+  defp get_ref({:erlfdb_future, ref, _}), do: ref
+  defp get_ref({:fold_future, _, {:erlfdb_future, ref, _}}), do: ref
+  defp get_ref(_), do: :erlang.error(:badarg)
 end
