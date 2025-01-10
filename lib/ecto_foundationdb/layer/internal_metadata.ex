@@ -1,17 +1,14 @@
 defmodule EctoFoundationDB.Layer.InternalMetadata do
   @moduledoc false
-  @magic_key :__ectofdb_internal_metadata__
-  def new(module) do
-    [{@magic_key, module}]
+  def new(metadata, data) do
+    {metadata, data}
+  end
+
+  def fetch({metadata, data}) do
+    {:ok, {metadata, data}}
   end
 
   def fetch(obj) when is_list(obj) do
-    case Keyword.fetch(obj, @magic_key) do
-      {:ok, val} ->
-        {true, val}
-
-      :error ->
-        {false, nil}
-    end
+    :error
   end
 end

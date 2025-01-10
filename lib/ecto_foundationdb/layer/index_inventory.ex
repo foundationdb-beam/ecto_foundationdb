@@ -2,7 +2,6 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
   @moduledoc false
   alias EctoFoundationDB.Indexer.Default
   alias EctoFoundationDB.Indexer.MaxValue
-  alias EctoFoundationDB.Layer.InternalMetadata
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.Migration.SchemaMigration
@@ -13,7 +12,6 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
   @index_inventory_source "indexes"
   @max_version_name "version"
   @idx_operation_failed {:erlfdb_error, 1020}
-  @magic_key :index
 
   def source(), do: @index_inventory_source
 
@@ -42,20 +40,19 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
     iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
     iex> {key, obj} = EctoFoundationDB.Layer.IndexInventory.new_index(tenant, "users", "users_name_index", [:name], [])
     iex> {EctoFoundationDB.Tenant.unpack(tenant, key), obj}
-    {{"\\xFE", "indexes", "users", "users_name_index"}, [__ectofdb_internal_metadata__: :index, id: "users_name_index", indexer: EctoFoundationDB.Indexer.Default, source: "users", fields: [:name], options: []]}
+    {{"\\xFE", "indexes", "users", "users_name_index"}, [id: "users_name_index", indexer: EctoFoundationDB.Indexer.Default, source: "users", fields: [:name], options: []]}
 
   """
   def new_index(tenant, source, index_name, index_fields, options) do
     inventory_key = inventory_key(tenant, source, index_name)
 
-    idx =
-      Keyword.merge(InternalMetadata.new(@magic_key),
-        id: index_name,
-        indexer: get_indexer(options),
-        source: source,
-        fields: index_fields,
-        options: options
-      )
+    idx = [
+      id: index_name,
+      indexer: get_indexer(options),
+      source: source,
+      fields: index_fields,
+      options: options
+    ]
 
     {inventory_key, idx}
   end

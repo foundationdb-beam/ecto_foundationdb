@@ -110,7 +110,7 @@ defmodule EctoFoundationDB.Layer.Tx do
   def insert_all(tenant, tx, {schema, source, context}, entries, {idxs, partial_idxs}, options) do
     write_primary = Schema.get_option(context, :write_primary)
 
-    acc = TxInsert.new(tenant, schema, idxs, partial_idxs, write_primary, options)
+    tx_insert = TxInsert.new(tenant, schema, idxs, partial_idxs, write_primary, options)
 
     case options[:conflict_target] do
       [] ->
@@ -122,7 +122,7 @@ defmodule EctoFoundationDB.Layer.Tx do
           kv_codec = Pack.primary_codec(tenant, source, pk)
           data_object = Fields.to_front(data_object, pk_field)
           kv = %DecodedKV{codec: kv_codec, data_object: data_object}
-          TxInsert.do_set(acc, tx, kv, nil)
+          TxInsert.do_set(tx_insert, tx, kv, nil)
         end)
 
         length(entries)
@@ -137,7 +137,12 @@ defmodule EctoFoundationDB.Layer.Tx do
           kv_codec
           |> then(&async_get(tenant, tx, &1, future))
           |> Future.apply(
-            &TxInsert.do_set(acc, tx, %DecodedKV{codec: kv_codec, data_object: data_object}, &1)
+            &TxInsert.do_set(
+              tx_insert,
+              tx,
+              %DecodedKV{codec: kv_codec, data_object: data_object},
+              &1
+            )
           )
         end)
         |> Future.await_stream()

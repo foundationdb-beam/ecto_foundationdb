@@ -8,7 +8,7 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec do
 
   defstruct [:tuple]
 
-  @magic_key :multikey
+  @metadata_key :multikey
 
   def new(tuple) do
     %__MODULE__{tuple: tuple}
@@ -55,8 +55,7 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec do
       # Write metadata to the DB. This ensures the "primary write key"
       # is always updated (crc), which is required for watches to work as expected.
       meta_fdb_value =
-        InternalMetadata.new(@magic_key)
-        |> Keyword.merge(meta: codec_metadata_tuple(n, -1, crc))
+        InternalMetadata.new(@metadata_key, codec_metadata_tuple(n, -1, crc))
         |> Pack.to_fdb_value()
 
       {true, [{fdb_key, meta_fdb_value} | multikey_kvs]}
@@ -124,20 +123,19 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec do
     v = Pack.from_fdb_value(v)
 
     case InternalMetadata.fetch(v) do
-      {true, @magic_key} ->
+      {:ok, {@metadata_key, meta}} ->
         # Found a multikey object, so we start processing it
         key_tuple = Tenant.unpack(tenant, k)
-        meta = Keyword.fetch!(v, :meta)
         {[], %{acc | key_tuple: key_tuple, values: [], meta: meta}}
 
-      {true, module} ->
+      {:ok, metadata} ->
         raise ArgumentError, """
-        EctoFoundationDB encountered metadata from #{module}. We don't know how to process this.
+        EctoFoundationDB encountered metadata #{metadata}. We don't know how to process this.
 
         Data: #{inspect(v)}
         """
 
-      {false, nil} ->
+      :error ->
         item = %DecodedKV{codec: Pack.primary_write_key_to_codec(tenant, k), data_object: v}
         {[item], %{acc | key_tuple: nil, values: [], meta: nil}}
     end
