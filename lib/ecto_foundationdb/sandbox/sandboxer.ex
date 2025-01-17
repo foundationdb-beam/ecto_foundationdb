@@ -19,9 +19,9 @@ defmodule EctoFoundationDB.Sandbox.Sandboxer do
 
   @impl true
   def handle_call(:get_or_create_test_db, _from, state = %__MODULE__{db: nil}) do
-    # :erlfdb_util.get_test_db/1 has a wide-open receive block, so we have to insulate
+    # :erlfdb_sandbox.open/0 has a wide-open receive block, so we have to insulate
     # it from the GenServer
-    task = Task.async(fn -> :erlfdb_util.get_test_db([]) end)
+    task = Task.async(fn -> :erlfdb_sandbox.open() end)
     db = Task.await(task)
 
     {:reply, db, %__MODULE__{state | db: db}}
