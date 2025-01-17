@@ -25,4 +25,4 @@ ecto_foundationdb-*.tar
 # Temporary files, for example, from tests.
 /tmp/
 
-.erlfdb
+.erlfdb_sandbox
