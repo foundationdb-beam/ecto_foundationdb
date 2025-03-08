@@ -1,4 +1,4 @@
-defmodule EctoFoundationDB.Layer.IndexInventory do
+defmodule EctoFoundationDB.Layer.Metadata do
   @moduledoc false
   alias EctoFoundationDB.Indexer.Default
   alias EctoFoundationDB.Indexer.MaxValue
@@ -9,26 +9,50 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
   alias EctoFoundationDB.Options
   alias EctoFoundationDB.QueryPlan
 
-  @index_inventory_source "indexes"
+  # @todo: Ideally we change this, but it's a breaking change
+  @metadata_source "indexes"
   @max_version_name "version"
-  @idx_operation_failed {:erlfdb_error, 1020}
+  @metadata_operation_failed {:erlfdb_error, 1020}
 
-  def source(), do: @index_inventory_source
-
-  def builtin_indexes() do
-    migration_source = SchemaMigration.source()
-
-    %{
-      migration_source => [
+  @builtin_metadata %{
+    SchemaMigration.source() => [
+      indexes: [
         [
           id: @max_version_name,
+          type: :index,
           indexer: MaxValue,
-          source: migration_source,
+          source: SchemaMigration.source(),
           fields: [:version],
           options: []
         ]
       ]
-    }
+    ]
+  }
+
+  defstruct indexes: [], partial_indexes: [], other: []
+
+  def source(), do: @metadata_source
+
+  def new(metadata_kwl) do
+    new(%__MODULE__{}, metadata_kwl)
+  end
+
+  defp new(struct, []) do
+    %__MODULE__{indexes: indexes, other: other} = struct
+    %__MODULE__{struct | indexes: Enum.reverse(indexes), other: Enum.reverse(other)}
+  end
+
+  defp new(struct, [meta | metadata_kwl]) do
+    %__MODULE__{indexes: indexes, other: other} = struct
+
+    # Default type is index for historical reasons
+    case meta[:type] || :index do
+      :index ->
+        new(%__MODULE__{struct | indexes: [meta | indexes]}, metadata_kwl)
+
+      _ ->
+        new(%__MODULE__{struct | other: [meta | other]}, metadata_kwl)
+    end
   end
 
   @doc """
@@ -38,26 +62,27 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
   ## Examples
 
     iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
-    iex> {key, obj} = EctoFoundationDB.Layer.IndexInventory.new_index(tenant, "users", "users_name_index", [:name], [])
+    iex> {key, obj} = EctoFoundationDB.Layer.Metadata.new_index(tenant, "users", "users_name_index", [:name], [])
     iex> {EctoFoundationDB.Tenant.unpack(tenant, key), obj}
-    {{"\\xFE", "indexes", "users", "users_name_index"}, [id: "users_name_index", indexer: EctoFoundationDB.Indexer.Default, source: "users", fields: [:name], options: []]}
+    {{"\\xFE", "indexes", "users", "users_name_index"}, [id: "users_name_index", type: :index, indexer: EctoFoundationDB.Indexer.Default, source: "users", fields: [:name], options: []]}
 
   """
   def new_index(tenant, source, index_name, index_fields, options) do
-    inventory_key = inventory_key(tenant, source, index_name)
+    metadata_key = metadata_key(tenant, source, index_name)
 
     idx = [
       id: index_name,
+      type: :index,
       indexer: get_indexer(options),
       source: source,
       fields: index_fields,
       options: options
     ]
 
-    {inventory_key, idx}
+    {metadata_key, idx}
   end
 
-  def inventory_key(tenant, source, index_name) do
+  def metadata_key(tenant, source, index_name) do
     Pack.namespaced_pack(tenant, source(), source, ["#{index_name}"])
   end
 
@@ -68,8 +93,10 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
     end
   end
 
-  def select_index(idxs, constraints) do
-    case Enum.min(idxs, &choose_a_over_b_or_throw(&1, &2, constraints), fn -> nil end) do
+  def select_index(metadata, constraints) do
+    %__MODULE__{indexes: indexes} = metadata
+
+    case Enum.min(indexes, &choose_a_over_b_or_throw(&1, &2, constraints), fn -> nil end) do
       nil -> nil
       idx -> if(sufficient?(idx, constraints), do: idx, else: nil)
     end
@@ -210,49 +237,57 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
   that the cache is consistent with transactional semantics.
   """
   def transactional(tenant, %{cache: cache, opts: adapter_opts}, source, fun) do
-    cache? = :enabled == Options.get(adapter_opts, :idx_cache)
+    cache? = :enabled == Options.get(adapter_opts, :metadata_cache)
     cache_key = {__MODULE__, tenant, source}
 
     Tx.transactional(tenant, fn tx ->
-      tx_with_idxs_cache(tenant, tx, cache?, cache, adapter_opts, source, cache_key, fun)
+      tx_with_metadata_cache(tenant, tx, cache?, cache, adapter_opts, source, cache_key, fun)
     end)
   end
 
-  defp tx_with_idxs_cache(tenant, tx, cache?, cache, adapter_opts, source, cache_key, fun) do
+  defp tx_with_metadata_cache(tenant, tx, cache?, cache, adapter_opts, source, cache_key, fun) do
     now = System.monotonic_time(:millisecond)
 
-    {_, {cvsn, cidxs}, ts} = cache_lookup(cache?, cache, cache_key, now)
+    {_, {cvsn, cmetadata}, ts} = cache_lookup(cache?, cache, cache_key, now)
 
-    {vsn, idxs, partial_idxs, validator} =
-      tx_idxs(tenant, tx, adapter_opts, source, {cvsn, cidxs})
+    {vsn, metadata, validator} =
+      tx_metadata(tenant, tx, adapter_opts, source, {cvsn, cmetadata})
 
-    cache_update(cache?, cache, cache_key, {cvsn, cidxs}, {vsn, idxs}, partial_idxs, ts, now)
+    cache_update(
+      cache?,
+      cache,
+      cache_key,
+      {cvsn, cmetadata},
+      {vsn, metadata},
+      ts,
+      now
+    )
 
     try do
-      fun.(tx, idxs, partial_idxs)
+      fun.(tx, metadata)
     after
       unless validator.() do
         :ets.delete(cache, cache_key)
-        :erlang.error(@idx_operation_failed)
+        :erlang.error(@metadata_operation_failed)
       end
     end
   end
 
-  defp tx_idxs(tenant, tx, adapter_opts, source, cache_val) do
-    case Map.get(builtin_indexes(), source, nil) do
+  defp tx_metadata(tenant, tx, adapter_opts, source, cache_val) do
+    case Map.get(@builtin_metadata, source, nil) do
       nil ->
-        tx_idxs_get(tenant, tx, adapter_opts, source, cache_val)
+        tx_metadata_get(tenant, tx, adapter_opts, source, cache_val)
 
-      idxs ->
-        {-1, idxs, [], fn -> true end}
+      metadata ->
+        {-1, struct(__MODULE__, metadata), fn -> true end}
     end
   end
 
-  defp tx_idxs_get(tenant, tx, adapter_opts, source, {vsn, idxs}) do
+  defp tx_metadata_get(tenant, tx, adapter_opts, source, {vsn, metadata}) do
     # Every transaction performs a 'get' on these two keys, which **does** have an impact
     # on performance. The cost of the 'get' is worth it because
     #
-    # 1. the max_version allows us to cache the idxs in ets so that we don't have to read
+    # 1. the max_version allows us to cache the metadata in ets so that we don't have to read
     #    them as a blocking operation before doing actual index queries.
     # 2. The claim key allows us to implement concurrently created indexes. With it,
     #    we inspect the indexes that are partially created and use them accordingly.
@@ -264,16 +299,16 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
     max_version_future = MaxValue.get(tenant, tx, SchemaMigration.source(), @max_version_name)
     claim_future = :erlfdb.get(tx, MigrationsPJ.claim_key(tenant, source))
 
-    case idxs do
-      idxs when is_list(idxs) ->
-        tx_idxs_try_cache({vsn, idxs}, max_version_future, claim_future)
+    case metadata do
+      metadata = %__MODULE__{} ->
+        tx_metadata_try_cache({vsn, metadata}, max_version_future, claim_future)
 
-      _idxs ->
-        tx_idxs_get_wait(tenant, tx, adapter_opts, source, max_version_future, claim_future)
+      _metadata ->
+        tx_metadata_get_wait(tenant, tx, adapter_opts, source, max_version_future, claim_future)
     end
   end
 
-  defp tx_idxs_try_cache({vsn, idxs}, max_version_future, claim_future) do
+  defp tx_metadata_try_cache({vsn, metadata}, max_version_future, claim_future) do
     vsn_validator = fn ->
       [max_version, claim] =
         [max_version_future, claim_future]
@@ -283,69 +318,71 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
         :not_found == claim
     end
 
-    {vsn, idxs, [], vsn_validator}
+    {vsn, metadata, vsn_validator}
   end
 
-  defp tx_idxs_get_wait(tenant, tx, _adapter_opts, source, max_version_future, claim_future) do
-    {start_key, end_key} = idx_range(tenant, source)
+  defp tx_metadata_get_wait(tenant, tx, _adapter_opts, source, max_version_future, claim_future) do
+    {start_key, end_key} = metadata_range(tenant, source)
 
-    idxs_future = :erlfdb.get_range(tx, start_key, end_key, wait: false)
+    metadata_future = :erlfdb.get_range(tx, start_key, end_key, wait: false)
 
-    [max_version, claim, idxs] =
-      :erlfdb.wait_for_all_interleaving(tx, [max_version_future, claim_future, idxs_future])
+    [max_version, claim, metadata] =
+      :erlfdb.wait_for_all_interleaving(tx, [max_version_future, claim_future, metadata_future])
 
-    idxs =
-      idxs
+    metadata =
+      metadata
       |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
       # high priority first
       |> Enum.sort(&(Keyword.get(&1, :priority, 0) > Keyword.get(&2, :priority, 0)))
+      |> new()
 
-    case get_partial_idxs(claim, source) do
+    case get_partial_metadata(claim, source) do
       {claim_active?, []} ->
-        {MaxValue.decode(max_version), idxs, [], fn -> not claim_active? end}
+        {MaxValue.decode(max_version), metadata, fn -> not claim_active? end}
 
-      {_, partial_idxs} ->
+      {_, partial_metadata} ->
         # Adding a write conflict here allows writes to commit at a lower latency
         # at the expense of migration taking longer, because we're not letting the
         # migration job starve us out
         :erlfdb.add_write_conflict_key(tx, MigrationsPJ.claim_key(tenant, source))
-        {MaxValue.decode(max_version), idxs, partial_idxs, fn -> true end}
+        metadata = %__MODULE__{partial_indexes: partial_metadata}
+        {MaxValue.decode(max_version), metadata, fn -> true end}
     end
   end
 
-  defp idx_range(tenant, source) do
+  defp metadata_range(tenant, source) do
     Pack.namespaced_range(tenant, source(), source, [])
   end
 
-  defp get_partial_idxs(:not_found, _), do: {false, []}
+  defp get_partial_metadata(:not_found, _), do: {false, []}
 
-  defp get_partial_idxs(claim, source) do
-    idx_being_created =
+  defp get_partial_metadata(claim, source) do
+    metadata_being_created =
       Pack.from_fdb_value(claim)
       |> MigrationsPJ.get_idx_being_created()
 
-    partial_idxs =
-      case idx_being_created do
+    partial_metadata =
+      case metadata_being_created do
         nil ->
           []
 
-        pidx = {partial_idx, _} ->
-          if partial_idx[:source] == source do
-            [pidx]
+        pmetadata = {partial_metadata, _} ->
+          if partial_metadata[:source] == source do
+            [pmetadata]
           else
             []
           end
       end
 
-    claim_active? = length(partial_idxs) > 0
+    claim_active? = length(partial_metadata) > 0
 
-    partial_idxs =
-      Enum.filter(partial_idxs, fn {idx, _} ->
-        pidx_options = idx[:options]
-        Keyword.get(pidx_options, :concurrently, true)
+    partial_metadata =
+      Enum.filter(partial_metadata, fn {metadata, _} ->
+        pmetadata_options = metadata[:options]
+        Keyword.get(pmetadata_options, :concurrently, true)
       end)
 
-    {claim_active?, partial_idxs}
+    {claim_active?, partial_metadata}
   end
 
   defp cache_lookup(cache?, cache, cache_key, now) do
@@ -358,10 +395,18 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
     end
   end
 
-  defp cache_update(cache?, cache, cache_key, {cvsn, cidxs}, {vsn, idxs}, [], ts, now) do
+  defp cache_update(
+         cache?,
+         cache,
+         cache_key,
+         {cvsn, cmetadata},
+         {vsn, metadata = %__MODULE__{partial_indexes: []}},
+         ts,
+         now
+       ) do
     cond do
-      cache? and vsn >= 0 and {vsn, idxs} != {cvsn, cidxs} ->
-        :ets.insert(cache, {cache_key, {vsn, idxs}, System.monotonic_time(:millisecond)})
+      cache? and vsn >= 0 and {vsn, metadata} != {cvsn, cmetadata} ->
+        :ets.insert(cache, {cache_key, {vsn, metadata}, System.monotonic_time(:millisecond)})
 
       cache? and cvsn >= 0 ->
         diff = now - ts
@@ -383,13 +428,12 @@ defmodule EctoFoundationDB.Layer.IndexInventory do
          _cache?,
          cache,
          cache_key,
-         {_cvsn, _cidxs},
-         {_vsn, _idxs},
-         _partial_idxs,
+         {_cvsn, _cmetadata},
+         {_vsn, _metadata},
          _ts,
          _now
        ) do
-    # partial idxs cannot be cached
+    # partial metadata cannot be cached
     :ets.delete(cache, cache_key)
   end
 end

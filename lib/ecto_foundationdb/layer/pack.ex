@@ -5,7 +5,7 @@ defmodule EctoFoundationDB.Layer.Pack do
   # Primary writes are stored in
   #     {@adapter_prefix, source, @data_namespace, id}
 
-  # Default indexes are stored in
+  # Default indexes and other metadata are stored in
   #     {@adapter_prefix, source, @index_namespace, index_name, length(index_values), [...index_values...], id}
 
   # Schema migrations are stored as primary writes and default indexes with

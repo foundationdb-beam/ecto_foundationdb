@@ -5,7 +5,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   alias EctoFoundationDB.Exception.IncorrectTenancy
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
-  alias EctoFoundationDB.Layer.IndexInventory
+  alias EctoFoundationDB.Layer.Metadata
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.Schema
   alias EctoFoundationDB.Tenant
@@ -39,13 +39,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       end)
 
     num_ins =
-      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
+      Metadata.transactional(tenant, adapter_meta, source, fn tx, metadata ->
         Tx.insert_all(
           tenant,
           tx,
           {schema, source, context},
           entries,
-          {idxs, partial_idxs},
+          metadata,
           options
         )
       end)
@@ -87,7 +87,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     future = Future.before_transactional(schema)
 
     res =
-      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
+      Metadata.transactional(tenant, adapter_meta, source, fn tx, metadata ->
         Tx.update_pks(
           tenant,
           tx,
@@ -95,7 +95,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
           pk_field,
           [{pk, future}],
           update_data,
-          {idxs, partial_idxs},
+          metadata,
           options
         )
       end)
@@ -125,8 +125,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     future = Future.before_transactional(schema)
 
     res =
-      IndexInventory.transactional(tenant, adapter_meta, source, fn tx, idxs, partial_idxs ->
-        Tx.delete_pks(tenant, tx, {schema, source, context}, [{pk, future}], {idxs, partial_idxs})
+      Metadata.transactional(tenant, adapter_meta, source, fn tx, metadata ->
+        Tx.delete_pks(
+          tenant,
+          tx,
+          {schema, source, context},
+          [{pk, future}],
+          metadata
+        )
       end)
 
     case res do
@@ -152,7 +158,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     pk_field = Fields.get_pk_field!(schema)
     pk = Map.get(struct, pk_field)
 
-    IndexInventory.transactional(tenant, adapter_meta, source, fn tx, _idxs, _partial_idxs ->
+    Metadata.transactional(tenant, adapter_meta, source, fn tx, _metadata ->
       future_ref = Tx.watch(tenant, tx, {schema, source, context}, {pk_field, pk}, options)
       Future.new_watch(schema, future_ref, fn _ -> {schema, pk, options} end)
     end)

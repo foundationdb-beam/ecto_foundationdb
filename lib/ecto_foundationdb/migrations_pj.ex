@@ -1,7 +1,7 @@
 defmodule EctoFoundationDB.MigrationsPJ do
   @moduledoc false
   alias EctoFoundationDB.Indexer
-  alias EctoFoundationDB.Layer.IndexInventory
+  alias EctoFoundationDB.Layer.Metadata
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Migration.Index
   alias EctoFoundationDB.Migration.SchemaMigration
@@ -94,8 +94,8 @@ defmodule EctoFoundationDB.MigrationsPJ do
         {[], [{vsn, [{command_kv, command_cursor} | commands]} | new_migrations], state}
 
       {:done, _command_cursor} ->
-        {_command, {inventory_key, idx}} = command_kv
-        :erlfdb.set(tx, inventory_key, Pack.to_fdb_value(idx))
+        {_command, {metadata_key, idx}} = command_kv
+        :erlfdb.set(tx, metadata_key, Pack.to_fdb_value(idx))
         {[], [{vsn, commands} | new_migrations], state}
     end
   end
@@ -114,8 +114,8 @@ defmodule EctoFoundationDB.MigrationsPJ do
        ) do
     index_options = Keyword.merge(index_options, concurrently: concurrently)
 
-    {inventory_key, idx} =
-      IndexInventory.new_index(
+    {metadata_key, idx} =
+      Metadata.new_index(
         tenant,
         Schema.get_source(schema),
         index_name,
@@ -123,7 +123,7 @@ defmodule EctoFoundationDB.MigrationsPJ do
         index_options
       )
 
-    command_kv = {command, {inventory_key, idx}}
+    command_kv = {command, {metadata_key, idx}}
     {start_key, end_key} = Indexer.create_range(tenant, idx)
     {command_kv, {start_key, start_key, end_key}}
   end

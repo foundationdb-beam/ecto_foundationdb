@@ -4,6 +4,7 @@ defmodule EctoFoundationDB.Indexer do
   """
   alias EctoFoundationDB.Index
   alias EctoFoundationDB.Layer.DecodedKV
+  alias EctoFoundationDB.Layer.Metadata
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.QueryPlan
@@ -39,21 +40,24 @@ defmodule EctoFoundationDB.Indexer do
   def create(tenant, tx, idx, schema, range, limit),
     do: idx[:indexer].create(tenant, tx, idx, schema, range, limit)
 
-  def set(tenant, tx, idxs, partial_idxs, schema, kv = {k, _}) do
+  def set(tenant, tx, metadata, schema, kv = {k, _}) do
+    %Metadata{indexes: idxs, partial_indexes: partial_idxs} = metadata
     idxs = idxs ++ filter_partials(partial_idxs, k, [])
 
     for idx <- idxs,
         do: idx[:indexer].set(tenant, tx, idx, schema, kv)
   end
 
-  def clear(tenant, tx, idxs, partial_idxs, schema, kv = {k, _}) do
+  def clear(tenant, tx, metadata, schema, kv = {k, _}) do
+    %Metadata{indexes: idxs, partial_indexes: partial_idxs} = metadata
     idxs = idxs ++ filter_partials(partial_idxs, k, [])
 
     for idx <- idxs,
         do: idx[:indexer].clear(tenant, tx, idx, schema, kv)
   end
 
-  def update(tenant, tx, idxs, partial_idxs, schema, kv = {k, _}, updates) do
+  def update(tenant, tx, metadata, schema, kv = {k, _}, updates) do
+    %Metadata{indexes: idxs, partial_indexes: partial_idxs} = metadata
     idxs = idxs ++ filter_partials(partial_idxs, k, [])
 
     for idx <- idxs do
