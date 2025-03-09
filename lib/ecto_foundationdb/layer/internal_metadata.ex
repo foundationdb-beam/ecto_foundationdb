@@ -1,5 +1,8 @@
 defmodule EctoFoundationDB.Layer.InternalMetadata do
   @moduledoc false
+
+  # InternalMetadata is metadata stored alongside data to guide retrieval.
+
   def new(metadata, data) do
     {metadata, data}
   end

@@ -664,7 +664,7 @@ defmodule Ecto.Adapters.FoundationDB do
     * `:migration_step` - The maximum number of keys to process in a single transaction
       when running migrations. Defaults to `1000`. If you use a number that is
       too large, the FDB transactions run by the Migrator will fail.
-    * `:idx_cache` - When set to `:enabled`, the Ecto ets cache is used to store the
+    * `:metadata_cache` - When set to `:enabled`, the Ecto ets cache is used to store the
       available indexes per tenant. This speeds up all database operations.
       Defaults to `:enabled`.
     * `:max_single_value_size` - Number of Bytes above which an encoded struct will

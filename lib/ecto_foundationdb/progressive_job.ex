@@ -20,7 +20,7 @@ defmodule EctoFoundationDB.ProgressiveJob do
 
     `claim_keys` is a list of keys that will be written to FDB and used by `ProgressiveJob` to maintain
     transactional isolation. They will will be cleared after the successful execution of the job.
-    Note: `IndexInventory` uses these keys to manage concurrent index creation for each `source`.
+    Note: `Metadata` uses these keys to manage concurrent index creation for each `source`.
 
     The `cursor` terms define the range of terms that will be processed. Each iteration of the job
     must change the cursor to ensure that observers of the job can see progress.

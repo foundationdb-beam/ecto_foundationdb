@@ -107,10 +107,10 @@ defmodule EctoFoundationDB.Layer.Tx do
     end
   end
 
-  def insert_all(tenant, tx, {schema, source, context}, entries, {idxs, partial_idxs}, options) do
+  def insert_all(tenant, tx, {schema, source, context}, entries, metadata, options) do
     write_primary = Schema.get_option(context, :write_primary)
 
-    tx_insert = TxInsert.new(tenant, schema, idxs, partial_idxs, write_primary, options)
+    tx_insert = TxInsert.new(tenant, schema, metadata, write_primary, options)
 
     case options[:conflict_target] do
       [] ->
@@ -174,7 +174,7 @@ defmodule EctoFoundationDB.Layer.Tx do
         pk_field,
         pk_futures,
         set_data,
-        {idxs, partial_idxs},
+        metadata,
         options
       ) do
     write_primary = Schema.get_option(context, :write_primary)
@@ -195,7 +195,7 @@ defmodule EctoFoundationDB.Layer.Tx do
               schema,
               pk_field,
               {decoded_kv, [set: set_data]},
-              {idxs, partial_idxs},
+              metadata,
               write_primary,
               options
             )
@@ -219,7 +219,7 @@ defmodule EctoFoundationDB.Layer.Tx do
         schema,
         pk_field,
         {decoded_kv, updates},
-        {idxs, partial_idxs},
+        metadata,
         write_primary,
         options
       ) do
@@ -240,10 +240,10 @@ defmodule EctoFoundationDB.Layer.Tx do
       :erlfdb.clear_range(tx, fdb_key, clear_end)
     end
 
-    Indexer.update(tenant, tx, idxs, partial_idxs, schema, {fdb_key, orig_data_object}, updates)
+    Indexer.update(tenant, tx, metadata, schema, {fdb_key, orig_data_object}, updates)
   end
 
-  def delete_pks(tenant, tx, {schema, source, _context}, pk_futures, {idxs, partial_idxs}) do
+  def delete_pks(tenant, tx, {schema, source, _context}, pk_futures, metadata) do
     futures =
       Enum.map(pk_futures, fn {pk, future} ->
         kv_codec = Pack.primary_codec(tenant, source, pk)
@@ -259,7 +259,7 @@ defmodule EctoFoundationDB.Layer.Tx do
               tx,
               schema,
               decoded_kv,
-              {idxs, partial_idxs}
+              metadata
             )
 
             :ok
@@ -280,7 +280,7 @@ defmodule EctoFoundationDB.Layer.Tx do
         tx,
         schema,
         decoded_kv,
-        {idxs, partial_idxs}
+        metadata
       ) do
     %DecodedKV{codec: kv_codec, data_object: v} = decoded_kv
 
@@ -292,7 +292,7 @@ defmodule EctoFoundationDB.Layer.Tx do
       :erlfdb.clear(tx, start_key)
     end
 
-    Indexer.clear(tenant, tx, idxs, partial_idxs, schema, {start_key, v})
+    Indexer.clear(tenant, tx, metadata, schema, {start_key, v})
   end
 
   def clear_all(tenant, tx, %{opts: _adapter_opts}, source) do

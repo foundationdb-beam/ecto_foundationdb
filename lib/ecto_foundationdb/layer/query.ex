@@ -5,7 +5,7 @@ defmodule EctoFoundationDB.Layer.Query do
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Fields
-  alias EctoFoundationDB.Layer.IndexInventory
+  alias EctoFoundationDB.Layer.Metadata
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.Tx
@@ -29,10 +29,8 @@ defmodule EctoFoundationDB.Layer.Query do
     future = Future.before_transactional(plan.schema)
 
     {plan, future} =
-      IndexInventory.transactional(tenant, adapter_meta, plan.source, fn tx,
-                                                                         idxs,
-                                                                         _partial_idxs ->
-        plan = make_range(idxs, plan, options)
+      Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
+        plan = make_range(metadata, plan, options)
         future = tx_get_range(tx, plan, future, options)
 
         # Future: If there is no wrapping transaction, the wait happens here
@@ -55,9 +53,9 @@ defmodule EctoFoundationDB.Layer.Query do
   Executes a query for updating data.
   """
   def update(tenant, adapter_meta, plan, options) do
-    IndexInventory.transactional(tenant, adapter_meta, plan.source, fn tx, idxs, partial_idxs ->
-      plan = make_range(idxs, plan, [])
-      tx_update_range(tx, plan, idxs, partial_idxs, options)
+    Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
+      plan = make_range(metadata, plan, [])
+      tx_update_range(tx, plan, metadata, options)
     end)
   end
 
@@ -74,14 +72,14 @@ defmodule EctoFoundationDB.Layer.Query do
   end
 
   def delete(tenant, adapter_meta, plan) do
-    IndexInventory.transactional(tenant, adapter_meta, plan.source, fn tx, idxs, partial_idxs ->
-      plan = make_range(idxs, plan, [])
-      tx_delete_range(tx, plan, idxs, partial_idxs)
+    Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
+      plan = make_range(metadata, plan, [])
+      tx_delete_range(tx, plan, metadata)
     end)
   end
 
   defp make_range(
-         _idxs,
+         _metadata,
          plan = %QueryPlan{constraints: [%{is_pk?: true}]},
          options
        ) do
@@ -89,11 +87,11 @@ defmodule EctoFoundationDB.Layer.Query do
   end
 
   defp make_range(
-         idxs,
+         metadata,
          plan = %QueryPlan{constraints: constraints, layer_data: layer_data},
          options
        ) do
-    case IndexInventory.select_index(idxs, constraints) do
+    case Metadata.select_index(metadata, constraints) do
       nil ->
         raise Unsupported,
               """
@@ -102,7 +100,7 @@ defmodule EctoFoundationDB.Layer.Query do
               """
 
       idx ->
-        constraints = IndexInventory.arrange_constraints(constraints, idx)
+        constraints = Metadata.arrange_constraints(constraints, idx)
         plan = %QueryPlan{plan | constraints: constraints}
         range = Indexer.range(idx, plan, options)
 
@@ -130,8 +128,7 @@ defmodule EctoFoundationDB.Layer.Query do
   defp tx_update_range(
          tx,
          plan = %QueryPlan{updates: updates},
-         idxs,
-         partial_idxs,
+         metadata,
          options
        ) do
     pk_field = Fields.get_pk_field!(plan.schema)
@@ -148,7 +145,7 @@ defmodule EctoFoundationDB.Layer.Query do
         plan.schema,
         pk_field,
         {&1, updates},
-        {idxs, partial_idxs},
+        metadata,
         write_primary,
         options
       )
@@ -157,12 +154,12 @@ defmodule EctoFoundationDB.Layer.Query do
     |> length()
   end
 
-  defp tx_delete_range(tx, plan, idxs, partial_idxs) do
+  defp tx_delete_range(tx, plan, metadata) do
     tx
     |> tx_get_range(plan, Future.new(plan.schema), [])
     |> Future.result()
     |> unpack_and_filter(plan)
-    |> Stream.map(&Tx.delete_data_object(plan.tenant, tx, plan.schema, &1, {idxs, partial_idxs}))
+    |> Stream.map(&Tx.delete_data_object(plan.tenant, tx, plan.schema, &1, metadata))
     |> Enum.to_list()
     |> length()
   end

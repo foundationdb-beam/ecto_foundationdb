@@ -40,8 +40,8 @@ defmodule EctoFoundationDB.Options do
   def get(options, :migration_step),
     do: Keyword.get(options, :migration_step, 1000)
 
-  def get(options, :idx_cache),
-    do: Keyword.get(options, :idx_cache, :enabled)
+  def get(options, :metadata_cache),
+    do: Keyword.get(options, :metadata_cache, :enabled)
 
   def get(options, :max_single_value_size),
     do: Keyword.get(options, :max_single_value_size, @fdb_max_single_value_size_bytes)

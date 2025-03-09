@@ -62,7 +62,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     tenant = context[:tenant]
 
     # =================================================================
-    # Insert (no index inventory cache)
+    # Insert (no metadata cache)
     # =================================================================
 
     {calls, alice} =
@@ -77,16 +77,16 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # get max_version
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # get source claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
-             # there is no cache, so get idxs
-             {EctoFoundationDB.Layer.IndexInventory, :get_range},
+             # there is no cache, so get metadata
+             {EctoFoundationDB.Layer.Metadata, :get_range},
 
-             # wait for max_version, claim_key, and idxs range
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all_interleaving},
+             # wait for max_version, claim_key, and metadata range
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all_interleaving},
 
              # check for existence of primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -102,7 +102,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
            ] == calls
 
     # =================================================================
-    # Insert (with index inventory cache)
+    # Insert (with metadata cache)
     # =================================================================
 
     {calls, _bob} =
@@ -116,10 +116,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key. We have cached the inventory, so
+             # get max_version and claim_key. We have cached the metadata, so
              # these waits are deferred optimistically.
-             {EctoFoundationDB.Layer.IndexInventory, :get},
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # check for existence of primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -130,7 +130,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Indexer.Default, :set},
 
              # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
 
     # =================================================================
@@ -144,15 +144,15 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # get max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # get and wait primary write key
              {EctoFoundationDB.Layer.Query, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] = calls
 
     # =================================================================
@@ -167,8 +167,8 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # get max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # get and wait for existing data from primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -182,7 +182,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Indexer.Default, :set},
 
              # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
 
     # =================================================================
@@ -197,8 +197,8 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # get max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # get and wait for existing data from primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -208,7 +208,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.Tx, :set},
 
              # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
 
     # =================================================================
@@ -222,8 +222,8 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # get max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # get_mapped_range for :name index. The call to :get_range shown here
              # is a tail call from get_mapped_range, so it's expected and harmless
@@ -234,7 +234,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
 
     # =================================================================
@@ -255,19 +255,19 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # get max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # get_mapped_range for :name index
              {EctoFoundationDB.Layer.Query, :get_mapped_range},
              {EctoFoundationDB.Layer.Query, :get_range},
 
              # wait for max_version and claim_key, @todo ideally this happens at the very end (#26)
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all},
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all},
 
              # get max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # get_mapped_range for :name index
              {EctoFoundationDB.Layer.Query, :get_mapped_range},
@@ -275,7 +275,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
              # max_version and claim_key again. FDB implements a RWY-transaction, so
              # this trivially reads from local memory
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all},
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all},
 
              # wait for results of both get_mapped_range calls
              {EctoFoundationDB.Future, :wait_for_all_interleaving}
@@ -292,8 +292,8 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # get max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # check for existence
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -306,7 +306,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Indexer.Default, :clear},
 
              # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
 
     # =================================================================
@@ -325,10 +325,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # get max_version
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # get source claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # check for existence of primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -347,7 +347,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Indexer.Default, :set},
 
              # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
 
     # =================================================================
@@ -363,8 +363,8 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # get max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # get and wait for existing data from primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -377,7 +377,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.Tx, :set},
 
              # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
 
     # =================================================================
@@ -393,8 +393,8 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # get max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # get and wait for existing data from primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -408,7 +408,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.Tx, :set},
 
              # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
 
     # =================================================================
@@ -422,8 +422,8 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # get max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :get},
-             {EctoFoundationDB.Layer.IndexInventory, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
 
              # check for existence
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -436,7 +436,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Indexer.Default, :clear},
 
              # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.IndexInventory, :wait_for_all}
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
   end
 end

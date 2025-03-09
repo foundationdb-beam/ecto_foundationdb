@@ -1,6 +1,7 @@
 defmodule EctoFoundationDB.Schema do
   @moduledoc false
-  def get_context!(_source, schema) do
+
+  def get_context!(_source, schema) when is_atom(schema) and not is_nil(schema) do
     %{__meta__: _meta = %{context: context}} = Kernel.struct!(schema)
     context
   end

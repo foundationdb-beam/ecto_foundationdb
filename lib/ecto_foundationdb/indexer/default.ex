@@ -266,7 +266,7 @@ defmodule EctoFoundationDB.Indexer.Default do
   #   1. For example when a `set/4` comes in, if the next index is mapped, then we
   #      need to compute the key for the `:from` index, but we don't have the information
   #      to do so.
-  #   2. During migrations, partial_idxs are managed in the Indexer and they suffer the
+  #   2. During migrations, partial indexes are managed in the Indexer and they suffer the
   #       same problem as above.
   #
   # case options[:from] do

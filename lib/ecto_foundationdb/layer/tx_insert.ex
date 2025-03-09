@@ -7,14 +7,13 @@ defmodule EctoFoundationDB.Layer.TxInsert do
   alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.Tx
 
-  defstruct [:tenant, :schema, :idxs, :partial_idxs, :write_primary, :options]
+  defstruct [:tenant, :schema, :metadata, :write_primary, :options]
 
-  def new(tenant, schema, idxs, partial_idxs, write_primary, options) do
+  def new(tenant, schema, metadata, write_primary, options) do
     %__MODULE__{
       tenant: tenant,
       schema: schema,
-      idxs: idxs,
-      partial_idxs: partial_idxs,
+      metadata: metadata,
       write_primary: write_primary,
       options: options
     }
@@ -24,8 +23,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
     %__MODULE__{
       tenant: tenant,
       schema: schema,
-      idxs: idxs,
-      partial_idxs: partial_idxs,
+      metadata: metadata,
       write_primary: write_primary,
       options: options
     } = acc
@@ -41,7 +39,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
     # The indexer is not informed of the object splitting
     fdb_key = PrimaryKVCodec.pack_key(kv_codec, nil)
 
-    Indexer.set(tenant, tx, idxs, partial_idxs, schema, {fdb_key, data_object})
+    Indexer.set(tenant, tx, metadata, schema, {fdb_key, data_object})
     :ok
   end
 
@@ -49,8 +47,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
     %__MODULE__{
       tenant: tenant,
       schema: schema,
-      idxs: idxs,
-      partial_idxs: partial_idxs,
+      metadata: metadata,
       write_primary: write_primary,
       options: options
     } = acc
@@ -68,7 +65,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           schema,
           pk_field,
           {existing_kv, [set: data_object]},
-          {idxs, partial_idxs},
+          metadata,
           write_primary,
           options
         )
@@ -82,7 +79,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           schema,
           pk_field,
           {existing_kv, [set: Keyword.drop(data_object, fields)]},
-          {idxs, partial_idxs},
+          metadata,
           write_primary,
           options
         )
@@ -96,7 +93,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           schema,
           pk_field,
           {existing_kv, [set: Keyword.take(data_object, fields)]},
-          {idxs, partial_idxs},
+          metadata,
           write_primary,
           options
         )
