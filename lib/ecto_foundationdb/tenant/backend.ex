@@ -64,13 +64,17 @@ defmodule EctoFoundationDB.Tenant.Backend do
     tenant_name = module.get_name(id, options)
     opened = module.open(db, tenant_name, options)
     meta = module.make_meta(opened)
+    ref = module.ref(opened, meta)
 
     %Tenant{
       id: id,
       backend: meta.__struct__,
-      ref: module.ref(opened, meta),
+      ref: ref,
       txobj: module.txobj(db, opened, meta),
-      meta: meta
+      meta: meta,
+      options: [
+        metadata_cache: Options.get(options, :metadata_cache)
+      ]
     }
   end
 

@@ -2,11 +2,11 @@ defmodule EctoFoundationDB.Layer.Metadata do
   @moduledoc false
   alias EctoFoundationDB.Indexer.Default
   alias EctoFoundationDB.Indexer.MaxValue
+  alias EctoFoundationDB.Layer.Metadata.Cache
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.Migration.SchemaMigration
   alias EctoFoundationDB.MigrationsPJ
-  alias EctoFoundationDB.Options
   alias EctoFoundationDB.QueryPlan
 
   # @todo: Ideally we change this, but it's a breaking change
@@ -15,7 +15,9 @@ defmodule EctoFoundationDB.Layer.Metadata do
   @metadata_operation_failed {:erlfdb_error, 1020}
 
   @builtin_metadata %{
-    SchemaMigration.source() => [
+    SchemaMigration.source() => %{
+      partial_indexes: [],
+      other: [],
       indexes: [
         [
           id: @max_version_name,
@@ -26,10 +28,12 @@ defmodule EctoFoundationDB.Layer.Metadata do
           options: []
         ]
       ]
-    ]
+    }
   }
 
   defstruct indexes: [], partial_indexes: [], other: []
+
+  @type t() :: %__MODULE__{}
 
   def source(), do: @metadata_source
 
@@ -236,32 +240,26 @@ defmodule EctoFoundationDB.Layer.Metadata do
   This function uses the Ecto cache and clever use of FDB constructs to guarantee
   that the cache is consistent with transactional semantics.
   """
-  def transactional(tenant, %{cache: cache, opts: adapter_opts}, source, fun) do
-    cache? = :enabled == Options.get(adapter_opts, :metadata_cache)
-    cache_key = {__MODULE__, tenant, source}
+  def transactional(tenant, %{cache: cache}, source, fun) do
+    cache? = :enabled == (tenant.options[:metadata_cache] || :enabled)
+    cache = if cache?, do: cache, else: nil
+    cache_key = Cache.key(tenant, source)
 
     Tx.transactional(tenant, fn tx ->
-      tx_with_metadata_cache(tenant, tx, cache?, cache, adapter_opts, source, cache_key, fun)
+      tx_with_metadata_cache(tenant, tx, cache, source, cache_key, fun)
     end)
   end
 
-  defp tx_with_metadata_cache(tenant, tx, cache?, cache, adapter_opts, source, cache_key, fun) do
+  defp tx_with_metadata_cache(tenant, tx, cache, source, cache_key, fun) do
     now = System.monotonic_time(:millisecond)
 
-    {_, {cvsn, cmetadata}, ts} = cache_lookup(cache?, cache, cache_key, now)
+    cache_item = Cache.lookup(cache, cache_key)
 
-    {vsn, metadata, validator} =
-      tx_metadata(tenant, tx, adapter_opts, source, {cvsn, cmetadata})
+    {vsn, metadata, validator} = tx_metadata_get(tenant, tx, source, cache_item)
 
-    cache_update(
-      cache?,
-      cache,
-      cache_key,
-      {cvsn, cmetadata},
-      {vsn, metadata},
-      ts,
-      now
-    )
+    new_cache_item = Cache.CacheItem.new(cache_key, vsn, metadata, now)
+
+    Cache.update(cache, cache_item, new_cache_item)
 
     try do
       fun.(tx, metadata)
@@ -273,55 +271,53 @@ defmodule EctoFoundationDB.Layer.Metadata do
     end
   end
 
-  defp tx_metadata(tenant, tx, adapter_opts, source, cache_val) do
+  defp tx_metadata_get(tenant, tx, source, cache_item) do
     case Map.get(@builtin_metadata, source, nil) do
       nil ->
-        tx_metadata_get(tenant, tx, adapter_opts, source, cache_val)
+        # Every transaction performs a 'get' on these two keys, which **does** have an impact
+        # on performance. The cost of the 'get' is worth it because
+        #
+        # 1. the max_version allows us to cache the metadata in ets so that we don't have to read
+        #    them as a blocking operation before doing actual index queries.
+        # 2. The claim key allows us to implement concurrently created indexes. With it,
+        #    we inspect the indexes that are partially created and use them accordingly.
+        #
+        # In both cases, we only wait for the result at the end of the rest of the transaction
+        # which gives FDB the opportunity to select the keys in the background while the user's
+        # more interesting work is being executed. If something is found to be violated at the end
+        # of the transaction, the entire transaction is retried.
+        max_version_future = MaxValue.get(tenant, tx, SchemaMigration.source(), @max_version_name)
+        claim_future = :erlfdb.get(tx, MigrationsPJ.claim_key(tenant, source))
+
+        case cache_item do
+          nil ->
+            tx_metadata_get_wait(tenant, tx, source, max_version_future, claim_future)
+
+          _ ->
+            tx_metadata_try_cache(cache_item, max_version_future, claim_future)
+        end
 
       metadata ->
         {-1, struct(__MODULE__, metadata), fn -> true end}
     end
   end
 
-  defp tx_metadata_get(tenant, tx, adapter_opts, source, {vsn, metadata}) do
-    # Every transaction performs a 'get' on these two keys, which **does** have an impact
-    # on performance. The cost of the 'get' is worth it because
-    #
-    # 1. the max_version allows us to cache the metadata in ets so that we don't have to read
-    #    them as a blocking operation before doing actual index queries.
-    # 2. The claim key allows us to implement concurrently created indexes. With it,
-    #    we inspect the indexes that are partially created and use them accordingly.
-    #
-    # In both cases, we only wait for the result at the end of the rest of the transaction
-    # which gives FDB the opportunity to select the keys in the background while the user's
-    # more interesting work is being executed. If something is found to be violated at the end
-    # of the transaction, the entire transaction is retried.
-    max_version_future = MaxValue.get(tenant, tx, SchemaMigration.source(), @max_version_name)
-    claim_future = :erlfdb.get(tx, MigrationsPJ.claim_key(tenant, source))
+  defp tx_metadata_try_cache(cache_item, max_version_future, claim_future) do
+    cache_vsn = Cache.CacheItem.get_version(cache_item)
 
-    case metadata do
-      metadata = %__MODULE__{} ->
-        tx_metadata_try_cache({vsn, metadata}, max_version_future, claim_future)
-
-      _metadata ->
-        tx_metadata_get_wait(tenant, tx, adapter_opts, source, max_version_future, claim_future)
-    end
-  end
-
-  defp tx_metadata_try_cache({vsn, metadata}, max_version_future, claim_future) do
     vsn_validator = fn ->
       [max_version, claim] =
         [max_version_future, claim_future]
         |> :erlfdb.wait_for_all()
 
-      MaxValue.decode(max_version) <= vsn and
+      MaxValue.decode(max_version) <= cache_vsn and
         :not_found == claim
     end
 
-    {vsn, metadata, vsn_validator}
+    {cache_vsn, Cache.CacheItem.get_metadata(cache_item), vsn_validator}
   end
 
-  defp tx_metadata_get_wait(tenant, tx, _adapter_opts, source, max_version_future, claim_future) do
+  defp tx_metadata_get_wait(tenant, tx, source, max_version_future, claim_future) do
     {start_key, end_key} = metadata_range(tenant, source)
 
     metadata_future = :erlfdb.get_range(tx, start_key, end_key, wait: false)
@@ -331,7 +327,7 @@ defmodule EctoFoundationDB.Layer.Metadata do
 
     metadata =
       metadata
-      |> Enum.map(fn {_, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
+      |> Enum.map(fn {_key, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
       # high priority first
       |> Enum.sort(&(Keyword.get(&1, :priority, 0) > Keyword.get(&2, :priority, 0)))
       |> new()
@@ -383,57 +379,5 @@ defmodule EctoFoundationDB.Layer.Metadata do
       end)
 
     {claim_active?, partial_metadata}
-  end
-
-  defp cache_lookup(cache?, cache, cache_key, now) do
-    case {cache?, :ets.lookup(cache, cache_key)} do
-      {true, [item]} ->
-        item
-
-      _ ->
-        {cache_key, {-1, nil}, now}
-    end
-  end
-
-  defp cache_update(
-         cache?,
-         cache,
-         cache_key,
-         {cvsn, cmetadata},
-         {vsn, metadata = %__MODULE__{partial_indexes: []}},
-         ts,
-         now
-       ) do
-    cond do
-      cache? and vsn >= 0 and {vsn, metadata} != {cvsn, cmetadata} ->
-        :ets.insert(cache, {cache_key, {vsn, metadata}, System.monotonic_time(:millisecond)})
-
-      cache? and cvsn >= 0 ->
-        diff = now - ts
-
-        try do
-          :ets.update_counter(cache, cache_key, {3, diff})
-        catch
-          _, _ ->
-            # Someone else removed the cache entry
-            :ok
-        end
-
-      true ->
-        :ok
-    end
-  end
-
-  defp cache_update(
-         _cache?,
-         cache,
-         cache_key,
-         {_cvsn, _cmetadata},
-         {_vsn, _metadata},
-         _ts,
-         _now
-       ) do
-    # partial metadata cannot be cached
-    :ets.delete(cache, cache_key)
   end
 end

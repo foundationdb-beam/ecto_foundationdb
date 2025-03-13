@@ -1,5 +1,7 @@
 defmodule Ecto.Integration.FdbApiCountingTest do
-  use Ecto.Integration.Case, async: false
+  use Ecto.Integration.Case, async: true
+
+  alias EctoFoundationDB.Tenant
 
   alias Ecto.Adapters.FoundationDB
   alias Ecto.Integration.TestRepo
@@ -58,14 +60,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     {traced_calls, res}
   end
 
-  test "counting", context do
+  test "insert with no metadata cache", context do
     tenant = context[:tenant]
 
-    # =================================================================
-    # Insert (no metadata cache)
-    # =================================================================
-
-    {calls, alice} =
+    {calls, _alice} =
       with_erlfdb_calls(fn ->
         {:ok, alice} =
           %User{name: "Alice"}
@@ -100,10 +98,13 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # index write
              {EctoFoundationDB.Indexer.Default, :set}
            ] == calls
+  end
 
-    # =================================================================
-    # Insert (with metadata cache)
-    # =================================================================
+  test "insert with metadata cache", context do
+    tenant = context[:tenant]
+
+    # Prime metadata cache
+    _alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _bob} =
       with_erlfdb_calls(fn ->
@@ -132,10 +133,47 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
+  end
 
-    # =================================================================
-    # Get using primary id
-    # =================================================================
+  test "insert with shared metadata cache across open tenants", context do
+    tenant = context[:tenant]
+    # Prime metadata cache
+    _alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+
+    newly_opened_tenant = Tenant.open(TestRepo, tenant.id)
+
+    {calls, _bob} =
+      with_erlfdb_calls(fn ->
+        {:ok, bob} =
+          %User{name: "Charlie"}
+          |> FoundationDB.usetenant(newly_opened_tenant)
+          |> TestRepo.insert()
+
+        bob
+      end)
+
+    assert [
+             # get max_version and claim_key. We have cached the metadata, so
+             # these waits are deferred optimistically.
+             {EctoFoundationDB.Layer.Metadata, :get},
+             {EctoFoundationDB.Layer.Metadata, :get},
+
+             # check for existence of primary write
+             {EctoFoundationDB.Layer.Tx, :get_range},
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+
+             # primary write, index write
+             {EctoFoundationDB.Layer.TxInsert, :set},
+             {EctoFoundationDB.Indexer.Default, :set},
+
+             # wait for max_version and claim_key
+             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+           ] == calls
+  end
+
+  test "get using primary id", context do
+    tenant = context[:tenant]
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _} =
       with_erlfdb_calls(fn ->
@@ -154,10 +192,11 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] = calls
+  end
 
-    # =================================================================
-    # Update an indexed field
-    # =================================================================
+  test "update an indexed field", context do
+    tenant = context[:tenant]
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _} =
       with_erlfdb_calls(fn ->
@@ -184,10 +223,11 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
+  end
 
-    # =================================================================
-    # Update an non-indexed field
-    # =================================================================
+  test "update a non-indexed field", context do
+    tenant = context[:tenant]
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _} =
       with_erlfdb_calls(fn ->
@@ -210,14 +250,15 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
+  end
 
-    # =================================================================
-    # Get by indexed field
-    # =================================================================
+  test "get by indexed field", context do
+    tenant = context[:tenant]
+    _alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _} =
       with_erlfdb_calls(fn ->
-        TestRepo.get_by(User, [name: "Alicia"], prefix: tenant)
+        TestRepo.get_by(User, [name: "Alice"], prefix: tenant)
       end)
 
     assert [
@@ -236,16 +277,18 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
+  end
 
-    # =================================================================
-    # Async get by indexed field
-    # =================================================================
+  test "async get by indexed field", context do
+    tenant = context[:tenant]
+    _alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+    _bob = TestRepo.insert!(%User{name: "Bob"}, prefix: tenant)
 
     {calls, _} =
       with_erlfdb_calls(fn ->
         TestRepo.transaction(
           fn ->
-            f1 = TestRepo.async_get_by(User, name: "Alicia")
+            f1 = TestRepo.async_get_by(User, name: "Alice")
             f2 = TestRepo.async_get_by(User, name: "Bob")
             TestRepo.await([f1, f2])
           end,
@@ -280,10 +323,11 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # wait for results of both get_mapped_range calls
              {EctoFoundationDB.Future, :wait_for_all_interleaving}
            ] == calls
+  end
 
-    # =================================================================
-    # Delete
-    # =================================================================
+  test "delete", context do
+    tenant = context[:tenant]
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _} =
       with_erlfdb_calls(fn ->
@@ -308,12 +352,15 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
+  end
 
-    # =================================================================
-    # Insert Large Object
-    # =================================================================
+  test "insert large object", context do
+    tenant = context[:tenant]
 
-    {calls, eve} =
+    # Prime the cache
+    _alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+
+    {calls, _eve} =
       with_erlfdb_calls(fn ->
         {:ok, alice} =
           %User{name: "Eve", notes: Util.get_random_bytes(100_000)}
@@ -349,12 +396,15 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
+  end
 
-    # =================================================================
-    # Update an non-indexed field on a Large Object into a normal object
-    # =================================================================
+  test "update a non-indexed field on a large object into a normal object", context do
+    tenant = context[:tenant]
 
-    {calls, eve} =
+    eve =
+      TestRepo.insert!(%User{name: "Eve", notes: Util.get_random_bytes(100_000)}, prefix: tenant)
+
+    {calls, _eve} =
       with_erlfdb_calls(fn ->
         changeset = User.changeset(eve, %{notes: "Hello world"})
         {:ok, eve} = TestRepo.update(changeset)
@@ -379,12 +429,15 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
+  end
 
-    # =================================================================
-    # Update an non-indexed field on an normal object into a multikey object
-    # =================================================================
+  test "update a non-indexed field on a normal object into a large object", context do
+    tenant = context[:tenant]
 
-    {calls, eve} =
+    eve =
+      TestRepo.insert!(%User{name: "Eve", notes: "Hello world"}, prefix: tenant)
+
+    {calls, _eve} =
       with_erlfdb_calls(fn ->
         changeset = User.changeset(eve, %{notes: Util.get_random_bytes(100_000)})
         {:ok, eve} = TestRepo.update(changeset)
@@ -410,10 +463,13 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # wait for max_version and claim_key
              {EctoFoundationDB.Layer.Metadata, :wait_for_all}
            ] == calls
+  end
 
-    # =================================================================
-    # Delete a multikey object
-    # =================================================================
+  test "delete a large object", context do
+    tenant = context[:tenant]
+
+    eve =
+      TestRepo.insert!(%User{name: "Eve", notes: Util.get_random_bytes(100_000)}, prefix: tenant)
 
     {calls, _eve} =
       with_erlfdb_calls(fn ->
