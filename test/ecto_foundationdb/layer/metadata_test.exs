@@ -1,5 +1,5 @@
 defmodule EctoFoundationDBLayerMetadataTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   doctest EctoFoundationDB.Layer.Metadata
 
   alias EctoFoundationDB.Layer.Metadata

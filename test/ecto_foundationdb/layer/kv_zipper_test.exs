@@ -1,5 +1,5 @@
 defmodule EctoFoundationDBPrimaryKVCodecTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.PrimaryKVCodec

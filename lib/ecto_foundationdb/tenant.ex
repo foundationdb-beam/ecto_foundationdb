@@ -29,7 +29,7 @@ defmodule EctoFoundationDB.Tenant do
   """
 
   @derive {Inspect, only: [:id, :ref]}
-  defstruct [:id, :backend, :ref, :txobj, :meta]
+  defstruct [:id, :backend, :ref, :txobj, :meta, :options]
 
   alias Ecto.Adapters.FoundationDB, as: FDB
 

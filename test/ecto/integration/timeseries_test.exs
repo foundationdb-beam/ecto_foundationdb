@@ -1,5 +1,5 @@
 defmodule Ecto.Integration.TimeSeriesTest do
-  use Ecto.Integration.Case, async: false
+  use Ecto.Integration.Case, async: true
 
   alias Ecto.Adapters.FoundationDB
 

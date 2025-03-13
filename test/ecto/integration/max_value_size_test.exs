@@ -61,7 +61,6 @@ defmodule Ecto.Integration.MaxValueSizeTest do
 
       assert %User{} = TestRepo.get(User, user.id, prefix: tenant)
 
-      # @todo: fix this failure
       assert %User{} = TestRepo.get_by(User, [name: "Bob"], prefix: tenant)
 
       assert {:ok, _} = TestRepo.delete(user)
