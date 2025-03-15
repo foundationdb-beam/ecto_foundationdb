@@ -7,12 +7,12 @@ defmodule Ecto.Integration.MigrationsTest do
 
   alias Ecto.Adapters.FoundationDB
 
+  alias EctoFoundationDB.CLI
   alias EctoFoundationDB.Exception.Unsupported
-  alias EctoFoundationDB.Migrator
 
   import Ecto.Query
 
-  describe "Migrator.up_all/1" do
+  describe "CLI.migrate!/1" do
     test "migrates all tenants", context do
       tenant = context[:tenant]
 
@@ -39,7 +39,7 @@ defmodule Ecto.Integration.MigrationsTest do
       assert_raise(Unsupported, ~r/FoundationDB Adapter supports either/, query_fun)
 
       # Ecto.Integration.MigrationsCase skips the migrations on purpose, so now we'll apply them manually.
-      :ok = Migrator.up_all(TestRepo)
+      :ok = CLI.migrate!(TestRepo)
 
       assert [%User{name: "John"}, %User{name: "John"}] = query_fun.()
     end

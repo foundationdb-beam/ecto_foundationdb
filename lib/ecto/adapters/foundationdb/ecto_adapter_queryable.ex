@@ -2,6 +2,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   @moduledoc false
   @behaviour Ecto.Adapter.Queryable
 
+  alias Ecto.Adapters.FoundationDB
   alias EctoFoundationDB.Exception.IncorrectTenancy
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
@@ -56,7 +57,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
             objs
             |> ordering_fn.()
             |> limit_fn.()
-            |> select(Fields.parse_select_fields(select_fields))
+            |> select(Fields.parse_select_fields(select_fields), nil)
           end)
 
         handle_returning(future, options)
@@ -194,21 +195,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     Query.update(tenant, adapter_meta, plan, options)
   end
 
-  defp stream_all(
-         tenant,
-         adapter_meta,
-         context,
-         %Ecto.Query{
-           select: %Ecto.Query.SelectExpr{
-             fields: select_fields
-           },
-           from: %Ecto.Query.FromExpr{source: {source, schema}},
-           wheres: wheres
-         },
-         params,
-         options
-       ) do
-    field_names = Fields.parse_select_fields(select_fields)
+  defp stream_all(tenant, adapter_meta, context, query, params, options) do
+    %Ecto.Query{
+      select: %Ecto.Query.SelectExpr{
+        fields: select_fields
+      },
+      from: %Ecto.Query.FromExpr{source: {source, schema}},
+      wheres: wheres
+    } = query
 
     # :max_rows - The number of rows to load from the database as we stream.
     # It is supported at least by Postgres and MySQL and defaults to 500.
@@ -231,45 +225,64 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       %{
         adapter_meta: adapter_meta,
         tenant: tenant,
+        query_options: query_options,
+        user_callback: options[:tx_callback],
         plan: plan,
+        field_names: Fields.parse_select_fields(select_fields),
         select_fields: select_fields,
         continuation: nil
       }
     end
 
-    next_fun =
-      fn
-        acc = %{continuation: %Query.Continuation{more?: false}} ->
-          {:halt, acc}
-
-        acc = %{plan: plan, continuation: continuation} ->
-          future = Query.all(tenant, adapter_meta, plan, query_options.(continuation))
-
-          future =
-            Future.apply(future, fn {objs, continuation} ->
-              {[select(objs, field_names)], %{acc | continuation: continuation}}
-            end)
-
-          # We can't carry the future beyond this point, because we need the continuation.
-          # It would be unusual to use stream inside a transaction anyway.
-          Future.result(future)
-      end
-
-    after_fun = fn _acc ->
-      :ok
-    end
-
-    Stream.resource(start_fun, next_fun, after_fun)
+    Stream.resource(start_fun, &stream_all_next/1, &stream_all_after/1)
   end
 
-  defp select(objs, []) do
+  defp stream_all_next(acc = %{continuation: %Query.Continuation{more?: false}}) do
+    {:halt, acc}
+  end
+
+  defp stream_all_next(acc) do
+    %{
+      tenant: tenant,
+      adapter_meta: adapter_meta,
+      query_options: query_options,
+      field_names: field_names,
+      user_callback: user_callback,
+      plan: plan,
+      continuation: continuation
+    } = acc
+
+    future =
+      FoundationDB.transactional(tenant, fn tx ->
+        future = Query.all(tenant, adapter_meta, plan, query_options.(continuation))
+
+        tx_callback = if is_nil(user_callback), do: nil, else: &user_callback.(tx, &1)
+
+        Future.apply(future, fn {objs, continuation} ->
+          {[select(objs, field_names, tx_callback)], %{acc | continuation: continuation}}
+        end)
+      end)
+
+    # We can't carry the future beyond this point, because we need the continuation.
+    # It would be unusual to use stream inside a transaction anyway.
+    Future.result(future)
+  end
+
+  defp stream_all_after(_acc), do: :ok
+
+  defp select(objs, [], _callback) do
     Enum.to_list(objs)
   end
 
-  defp select(objs, select_field_names) do
-    rows =
+  defp select(objs, select_field_names, callback) do
+    stream =
       objs
       |> Stream.map(fn data_object -> Fields.arrange(data_object, select_field_names) end)
+
+    stream = if is_nil(callback), do: stream, else: callback.(stream)
+
+    rows =
+      stream
       |> Fields.strip_field_names_for_ecto()
       |> Enum.to_list()
 

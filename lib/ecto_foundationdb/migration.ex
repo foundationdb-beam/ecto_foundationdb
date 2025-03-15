@@ -94,6 +94,10 @@ defmodule EctoFoundationDB.Migration do
     {:create, index}
   end
 
+  def drop(index = %Index{}) do
+    {:drop, index}
+  end
+
   def index(schema, columns, opts \\ [])
 
   def index(schema, column, opts) when is_atom(schema) and is_atom(column) do

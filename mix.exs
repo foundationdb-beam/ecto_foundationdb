@@ -59,7 +59,7 @@ defmodule EctoFoundationdb.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:erlfdb, "~> 0.2"},
+      {:erlfdb, github: "foundationdb-beam/erlfdb"},
       {:ecto, "~> 3.12"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.6", only: [:dev, :test, :docs]},

@@ -376,11 +376,11 @@ defmodule Ecto.Adapters.FoundationDB do
   ### Executing all migrations immediately
 
   Migrations can be completed in full at any time with a call to
-  `EctoFoundationDB.Migrator.up_all/1`, which accepts your repo module (e.g. `MyApp.Repo`).
+  `EctoFoundationDB.CLI.migrate!/1`, which accepts your repo module (e.g. `MyApp.Repo`).
 
   ```elixir
   # May take a while to complete
-  EctoFoundationDB.Migrator.up_all(MyApp.Repo)
+  EctoFoundationDB.CLI.migrate!(MyApp.Repo)
   ```
 
   Depending on how many tenants you have in your database, and the size of the data for each tenant,
