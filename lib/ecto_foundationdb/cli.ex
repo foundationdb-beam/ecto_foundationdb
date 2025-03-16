@@ -16,6 +16,19 @@ defmodule EctoFoundationDB.CLI do
   @default_copy_fields_max_rows 500
   @default_delete_fields_max_rows 500
 
+  @doc """
+  Runs the provided 1-arity function for each tenant in the database concurrently.
+
+  ## Arguments
+
+  - `repo`: The Ecto repository to use.
+  - `caller_fun`: A 1-arity function; the argument is the tenant.
+  - `options`: Optional keyword list of options.
+
+  ## Options
+
+  - `:async_stream_options`: Options to be passed to `Task.async_stream/3`. Defaults to `ordered: false, max_concurrency: System.schedulers_online() * 2, timeout: :infinity`.
+  """
   def run_concurrently_for_all_tenants!(repo, caller_fun, options \\ []) do
     options = Keyword.merge(repo.config(), options)
     db = FoundationDB.db(repo)
@@ -41,6 +54,20 @@ defmodule EctoFoundationDB.CLI do
     Task.async_stream(ids, fun, async_stream_options)
   end
 
+  @doc """
+  Ensures all tenants in the database are migrated to the latest version.
+
+  ## Arguments
+
+  - `repo`: The repository to use.
+  - `options`: Options to pass to the migration function.
+
+  ## Options
+
+  - `:prefix`: If provided, only this tenant will be migrated. If not provided, then all tenants concurrently.
+
+  Also supports options from `run_concurrently_for_all_tenants!/3` and `EctoFoundationDB.Tenant.open/3`.
+  """
   def migrate!(repo, options \\ []) do
     case options[:prefix] do
       nil ->
@@ -63,9 +90,52 @@ defmodule EctoFoundationDB.CLI do
     end
   end
 
+  @doc """
+  For each schema item in the database, copies the contents of one field to another.
+
+  ## Arguments
+
+  - `repo`: The repository to use.
+  - `schema`: The schema to copy from.
+  - `from`: The field to copy from.
+  - `to`: The field to copy to.
+  - `options`: Options for the operation.
+
+  ## Requirements
+
+  - Both fields must exist on the Schema.
+
+  ## Options
+
+  - `:prefix`: If provided, only this tenant will be processed. If not provided, then all tenants concurrently.
+  - `:max_rows`: Maximum number of items to process in a single transaction.
+
+  Also supports options from `run_concurrently_for_all_tenants!/3` and `EctoFoundationDB.Tenant.open/3`.
+  """
   def copy_field!(repo, schema, from, to, options \\ []),
     do: copy_fields!(repo, schema, [{from, to}], options)
 
+  @doc """
+  For each schema item in the database, copies the contents of a set of fields to another set of fields.
+
+  ## Arguments
+
+  - `repo`: The repository to use.
+  - `schema`: The schema to copy from.
+  - `copies`: A Keyword list of fields to copy from and to.
+  - `options`: Options for the operation.
+
+  ## Requirements
+
+  - All fields must exist on the Schema.
+
+  ## Options
+
+  - `:prefix`: If provided, only this tenant will be processed. If not provided, then all tenants concurrently.
+  - `:max_rows`: Maximum number of items to process in a single transaction.
+
+  Also supports options from `run_concurrently_for_all_tenants!/3` and `EctoFoundationDB.Tenant.open/3`.
+  """
   def copy_fields!(repo, schema, copies, options \\ []) do
     assert_copy_fields!(schema, copies)
 
@@ -100,11 +170,55 @@ defmodule EctoFoundationDB.CLI do
     |> Enum.count()
   end
 
+  @doc """
+  For each schema item in the database, deletes the given field.
+
+  ## Arguments
+
+  - `repo`: The repository to use.
+  - `schema`: The schema to copy from.
+  - `field`: The field to delete.
+  - `options`: Options for the operation.
+
+  ## Requirements
+
+  - The field must not exist on the Schema.
+  - The field must not be used in any registered metadata (indexes).
+
+  ## Options
+
+  - `:prefix`: If provided, only this tenant will be processed. If not provided, then all tenants concurrently.
+  - `:max_rows`: Maximum number of items to process in a single transaction.
+
+  Also supports options from `run_concurrently_for_all_tenants!/3` and `EctoFoundationDB.Tenant.open/3`.
+  """
   def delete_field!(repo, schema, field, options \\ []) do
     delete_fields!(repo, schema, [field], options)
   end
 
-  def delete_fields!(repo, schema, deletes, options) do
+  @doc """
+  For each schema item in the database, deletes the given fields.
+
+  ## Arguments
+
+  - `repo`: The repository to use.
+  - `schema`: The schema to copy from.
+  - `fields`: The list of fields to delete.
+  - `options`: Options for the operation.
+
+  ## Requirements
+
+  - Each field must not exist on the Schema.
+  - Each field must not be used in any registered metadata (indexes).
+
+  ## Options
+
+  - `:prefix`: If provided, only this tenant will be processed. If not provided, then all tenants concurrently.
+  - `:max_rows`: Maximum number of items to process in a single transaction.
+
+  Also supports options from `run_concurrently_for_all_tenants!/3` and `EctoFoundationDB.Tenant.open/3`.
+  """
+  def delete_fields!(repo, schema, deletes, options \\ []) do
     if not (options[:skip_schema_assertions] || false) do
       assert_delete_fields_for_schema!(schema, deletes)
     end
@@ -159,7 +273,10 @@ defmodule EctoFoundationDB.CLI do
           {nil, _} ->
             acc
 
-          {from_val, nil} when is_nil(acc) ->
+          {from_val, from_val} ->
+            acc
+
+          {from_val, _} when is_nil(acc) ->
             # Read-your-writes transaction guarantees that this get is fully
             # retrieved from the transaction state in memory. Alternatively,
             # we could use the `:noop` trick, but I think this is fine.
@@ -167,7 +284,7 @@ defmodule EctoFoundationDB.CLI do
             struct = repo.get!(schema, pk, prefix: tenant)
             Ecto.Changeset.change(struct, %{to => from_val})
 
-          {from_val, nil} when not is_nil(acc) ->
+          {from_val, _} when not is_nil(acc) ->
             Ecto.Changeset.change(acc, %{to => from_val})
 
           _ ->
