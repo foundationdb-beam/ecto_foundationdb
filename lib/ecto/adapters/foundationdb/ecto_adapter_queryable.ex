@@ -252,20 +252,22 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       continuation: continuation
     } = acc
 
-    future =
-      FoundationDB.transactional(tenant, fn tx ->
-        future = Query.all(tenant, adapter_meta, plan, query_options.(continuation))
+    # Note for future: wrapping Query.all in a transaction is tricky because it creates the
+    # future internally, which doesn't allow us to use the before_transactional test.
+    # To work around this, we make sure we resolve the future inside the transactional.
+    # It doesn't matter because the 'stream' API doesn't support async_* APIs.
+    FoundationDB.transactional(tenant, fn tx ->
+      future = Query.all(tenant, adapter_meta, plan, query_options.(continuation))
 
-        tx_callback = if is_nil(user_callback), do: nil, else: &user_callback.(tx, &1)
+      tx_callback = if is_nil(user_callback), do: nil, else: &user_callback.(tx, &1)
 
+      future =
         Future.apply(future, fn {objs, continuation} ->
           {[select(objs, field_names, tx_callback)], %{acc | continuation: continuation}}
         end)
-      end)
 
-    # We can't carry the future beyond this point, because we need the continuation.
-    # It would be unusual to use stream inside a transaction anyway.
-    Future.result(future)
+      Future.result(future)
+    end)
   end
 
   defp stream_all_after(_acc), do: :ok
@@ -275,14 +277,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   end
 
   defp select(objs, select_field_names, callback) do
-    stream =
-      objs
-      |> Stream.map(fn data_object -> Fields.arrange(data_object, select_field_names) end)
-
-    stream = if is_nil(callback), do: stream, else: callback.(stream)
+    stream = if is_nil(callback), do: objs, else: callback.(objs)
 
     rows =
       stream
+      |> Stream.map(fn data_object -> Fields.arrange(data_object, select_field_names) end)
       |> Fields.strip_field_names_for_ecto()
       |> Enum.to_list()
 

@@ -86,7 +86,8 @@ defmodule EctoFoundationDBProgressiveJobTest.TestJob do
           end_key
       end
 
-    {emit, {start_key, end_key}, %{state | count: count + length(kvs)}}
+    after_tx = fn -> :ok end
+    {after_tx, emit, {start_key, end_key}, %{state | count: count + length(kvs)}}
   end
 end
 

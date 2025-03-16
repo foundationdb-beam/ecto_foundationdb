@@ -28,7 +28,7 @@ defmodule EctoFoundationDB.ProgressiveJob do
     The `state` is a term that is passed to each callback.
 
   - `done?/2` - Determines if the job is complete. This function is called multiple times as
-    necessary to maintain tranactional isolation. It's critical that the job reads a permanent
+    necessary to maintain transactional isolation. It's critical that the job reads a permanent
     key from the databases to determine if the job is complete.
 
     The input terms are the `state` and the `:erlfdb.transaction()`.
@@ -48,7 +48,10 @@ defmodule EctoFoundationDB.ProgressiveJob do
 
     It should return a tuple with the following elements:
 
-    `{emit, cursor, state}`
+    `{after_tx, emit, cursor, state}`
+
+    `after_tx` is a function that is called after the transaction is committed. It's used to perform
+    any side effects the caller wishes to perform, such as logging.
 
     `emit` is either an empty list, or a list of values to be emitted on the `Stream`. The `ProgressiveJob`
     does not inspect this term. It's passed directly to the `Stream` implementation.
@@ -69,7 +72,7 @@ defmodule EctoFoundationDB.ProgressiveJob do
   @callback done?(term(), :erlfdb.transaction()) :: {boolean(), term()}
 
   @callback next(term(), :erlfdb.transaction(), term()) ::
-              {list(), {:erlfdb.key(), :erlfdb.key()}, term()}
+              {function(), list(), term(), term()}
 
   @claim_stale_msec 5100
   @claim_watch_timeout 5120
@@ -177,21 +180,16 @@ defmodule EctoFoundationDB.ProgressiveJob do
   defp tx_stream_next(job = %__MODULE__{done?: true}), do: {:halt, job}
 
   defp tx_stream_next(job = %__MODULE__{tenant: tenant}) do
-    case FoundationDB.transactional(tenant, &in_tx_stream_next(job, &1)) do
-      {after_tx, emit, job} ->
-        after_tx.()
-        {emit, job}
-
-      {emit, job} ->
-        {emit, job}
-    end
+    {after_tx, emit, job} = FoundationDB.transactional(tenant, &in_tx_stream_next(job, &1))
+    after_tx.()
+    {emit, job}
   end
 
   defp in_tx_stream_next(job = %__MODULE__{module: module, state: state}, tx) do
     {done?, state} = module.done?(state, tx)
 
     if done? do
-      {:halt, %__MODULE__{job | done?: true, state: state}}
+      {fn -> :ok end, :halt, %__MODULE__{job | done?: true, state: state}}
     else
       in_tx_stream_next_exec(job, tx)
     end
@@ -201,8 +199,8 @@ defmodule EctoFoundationDB.ProgressiveJob do
     now = now()
     {claimed?, claimed_by, cursor} = claimed?(job, tx)
 
-    {emit, cursor, state} =
-      if claimed?, do: module.next(state, tx, cursor), else: {[], cursor, state}
+    {after_tx, emit, cursor, state} =
+      if claimed?, do: module.next(state, tx, cursor), else: {fn -> :ok end, [], cursor, state}
 
     {done?, state} = module.done?(state, tx)
 
@@ -216,6 +214,7 @@ defmodule EctoFoundationDB.ProgressiveJob do
     }
 
     in_tx_stream_finish_iteration(
+      after_tx,
       {emit, job},
       tx,
       now,
@@ -226,26 +225,26 @@ defmodule EctoFoundationDB.ProgressiveJob do
   end
 
   # claimed? and done?
-  defp in_tx_stream_finish_iteration({emit, job}, tx, _now, true, true, _) do
+  defp in_tx_stream_finish_iteration(after_tx, {emit, job}, tx, _now, true, true, _) do
     for claim_key <- job.claim_keys, do: :erlfdb.clear(tx, claim_key)
-    {emit, job}
+    {after_tx, emit, job}
   end
 
   # claimed? and not done?
-  defp in_tx_stream_finish_iteration({emit, job}, tx, _now, true, false, _) do
+  defp in_tx_stream_finish_iteration(after_tx, {emit, job}, tx, _now, true, false, _) do
     for claim_key <- job.claim_keys,
         do: :erlfdb.set(tx, claim_key, Pack.to_fdb_value({job.ref, job.cursor}))
 
-    {emit, job}
+    {after_tx, emit, job}
   end
 
   # not claimed? and done?
-  defp in_tx_stream_finish_iteration({emit, job}, _tx, _now, false, true, _) do
-    {emit, job}
+  defp in_tx_stream_finish_iteration(after_tx, {emit, job}, _tx, _now, false, true, _) do
+    {after_tx, emit, job}
   end
 
   # not claimed? and not done? and claim_age > claim_stale_msec()
-  defp in_tx_stream_finish_iteration({_emit, job}, tx, now, false, false, true) do
+  defp in_tx_stream_finish_iteration(_after_tx, {_emit, job}, tx, now, false, false, true) do
     for claim_key <- job.claim_keys,
         do: :erlfdb.set(tx, claim_key, Pack.to_fdb_value({job.ref, job.cursor}))
 
@@ -253,11 +252,16 @@ defmodule EctoFoundationDB.ProgressiveJob do
   end
 
   # not claimed? and not done? and claim_age <= claim_stale_msec()
-  defp in_tx_stream_finish_iteration({emit, job}, tx, _now, false, false, false) do
+  defp in_tx_stream_finish_iteration(after_tx0, {emit, job}, tx, _now, false, false, false) do
     # Using a watch avoids busy-looping on workers that do not have a claim
     wclaims = for claim_key <- job.claim_keys, do: :erlfdb.watch(tx, claim_key)
-    after_tx = fn -> await_watched_claims(wclaims) end
-    {after_tx, emit, job}
+
+    after_tx1 = fn ->
+      after_tx0.()
+      await_watched_claims(wclaims)
+    end
+
+    {after_tx1, emit, job}
   end
 
   defp await_watched_claims(wclaims) do

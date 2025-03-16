@@ -4,7 +4,7 @@ defmodule Ecto.Integration.MigrationsCase do
   alias Ecto.Integration.TestRepo
 
   setup do
-    context = TenantsForCase.setup(TestRepo, migrator: nil)
+    context = TenantsForCase.setup(TestRepo, migrator: nil, log: false)
 
     on_exit(fn ->
       TenantsForCase.exit(TestRepo, context[:tenant_id], context[:other_tenant_id])

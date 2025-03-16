@@ -12,15 +12,25 @@ defmodule Ecto.Integration.IndexerTest do
   alias EctoFoundationDB.Schemas.User
 
   alias Ecto.Integration.IndexerTest.NameStartsWithJ
+  alias Ecto.Integration.IndexerTest.TestDropMigration
   alias Ecto.Integration.IndexerTest.TestMigration
-  alias Ecto.Integration.IndexerTest.TestMigrator
+  alias Ecto.Integration.IndexerTest.TestMigrator1
+  alias Ecto.Integration.IndexerTest.TestMigrator2
 
-  defmodule TestMigrator do
+  defmodule TestMigrator1 do
     @moduledoc false
 
     use EctoFoundationDB.Migrator
 
     def migrations(), do: [{0, TestMigration}]
+  end
+
+  defmodule TestMigrator2 do
+    @moduledoc false
+
+    use EctoFoundationDB.Migrator
+
+    def migrations(), do: [{0, TestMigration}, {1, TestDropMigration}]
   end
 
   defmodule TestMigration do
@@ -29,6 +39,15 @@ defmodule Ecto.Integration.IndexerTest do
 
     def change() do
       [create(index(User, [:name], options: [indexer: NameStartsWithJ]))]
+    end
+  end
+
+  defmodule TestDropMigration do
+    @moduledoc false
+    use EctoFoundationDB.Migration
+
+    def change() do
+      [drop(index(User, [:name], options: [indexer: NameStartsWithJ]))]
     end
   end
 
@@ -44,6 +63,9 @@ defmodule Ecto.Integration.IndexerTest do
     # omitted for brevity. A complete Indexer must implement all functions
     @impl true
     def create_range(_tenant, _idx), do: {"", "\xFF"}
+
+    @impl true
+    def drop_ranges(tenant, _idx), do: [count_key(tenant), index_range(tenant)]
 
     @impl true
     def create(_tenant, _tx, _idx, _schema, _range, _limit), do: {0, {"\xFF", "\xFF"}}
@@ -66,25 +88,36 @@ defmodule Ecto.Integration.IndexerTest do
     @impl true
     def range(_idx, plan, _options) do
       %QueryPlan{constraints: [%QueryPlan.Equal{field: :name, param: "J"}]} = plan
-      Tenant.range(plan.tenant, {@index_key})
+      index_range(plan.tenant)
     end
 
     def get_count(tenant) do
       FoundationDB.transactional(tenant, fn tx ->
         tx
-        |> :erlfdb.get(Tenant.pack(tenant, {@count_key}))
+        |> :erlfdb.get(count_key(tenant))
         |> :erlfdb.wait()
-        |> :binary.decode_unsigned(:little)
+        |> decode()
       end)
+    end
+
+    defp decode(:not_found), do: -1
+    defp decode(x), do: :binary.decode_unsigned(x, :little)
+
+    defp count_key(tenant) do
+      Tenant.pack(tenant, {@count_key})
+    end
+
+    defp index_range(tenant) do
+      Tenant.range(tenant, {@index_key})
     end
   end
 
   @moduletag :integration
   describe "indexer" do
-    test "name starts with J", context do
+    test ":create/drop: name starts with J", context do
       tenant = context[:tenant]
 
-      :ok = Migrator.up(TestRepo, tenant, migrator: TestMigrator)
+      :ok = Migrator.up(TestRepo, tenant, migrator: TestMigrator1, log: false)
 
       assert {:ok, _} = TestRepo.insert(%User{name: "Jesse"}, prefix: tenant)
 
@@ -93,6 +126,10 @@ defmodule Ecto.Integration.IndexerTest do
       assert %User{name: "Jesse"} = TestRepo.get_by!(User, [name: "J"], prefix: tenant)
 
       assert 1 == NameStartsWithJ.get_count(tenant)
+
+      :ok = Migrator.up(TestRepo, tenant, migrator: TestMigrator2, log: false)
+
+      assert -1 == NameStartsWithJ.get_count(tenant)
     end
   end
 end

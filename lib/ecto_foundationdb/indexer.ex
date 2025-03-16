@@ -1,6 +1,9 @@
 defmodule EctoFoundationDB.Indexer do
   @moduledoc """
   Implement this behaviour to create a custom index.
+
+  Each Indexer has access to read, write, and **clear** any and all data in the database.
+  A faulty implementation may lead to data loss or corruption.
   """
   alias EctoFoundationDB.Index
   alias EctoFoundationDB.Layer.DecodedKV
@@ -11,6 +14,8 @@ defmodule EctoFoundationDB.Indexer do
   alias EctoFoundationDB.Tenant
 
   @callback create_range(Tenant.t(), Index.t()) :: {:erlfdb.key(), :erlfdb.key()}
+  @callback drop_ranges(Tenant.t(), Index.t()) ::
+              list(:erlfdb.key()) | list({:erlfdb.key(), :erlfdb.key()})
   @callback create(
               Tenant.t(),
               :erlfdb.transaction(),
@@ -36,6 +41,9 @@ defmodule EctoFoundationDB.Indexer do
 
   def create_range(tenant, idx),
     do: idx[:indexer].create_range(tenant, idx)
+
+  def drop_ranges(tenant, idx),
+    do: idx[:indexer].drop_ranges(tenant, idx)
 
   def create(tenant, tx, idx, schema, range, limit),
     do: idx[:indexer].create(tenant, tx, idx, schema, range, limit)
@@ -99,9 +107,14 @@ defmodule EctoFoundationDB.Indexer do
   defp _update(tenant, tx, idx, schema, kv, updates) do
     if Keyword.get(idx[:options], :mapped?, true) do
       index_fields = idx[:fields]
-      set_data = updates[:set]
+      set_data = updates[:set] || []
+      clear_data = updates[:clear] || []
 
-      x = MapSet.intersection(MapSet.new(Keyword.keys(set_data)), MapSet.new(index_fields))
+      x =
+        MapSet.intersection(
+          MapSet.new(clear_data ++ Keyword.keys(set_data)),
+          MapSet.new(index_fields)
+        )
 
       if MapSet.size(x) == 0 do
         :ok
@@ -114,9 +127,14 @@ defmodule EctoFoundationDB.Indexer do
   end
 
   defp __update(tenant, tx, idx, schema, kv = {k, v}, updates) do
-    set_data = updates[:set]
     idx[:indexer].clear(tenant, tx, idx, schema, kv)
-    kv = {k, Keyword.merge(v, set_data)}
+
+    kv =
+      {k,
+       v
+       |> Keyword.merge(updates[:set] || [])
+       |> Keyword.drop(updates[:clear] || [])}
+
     idx[:indexer].set(tenant, tx, idx, schema, kv)
   end
 

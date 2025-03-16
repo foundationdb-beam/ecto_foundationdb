@@ -3,11 +3,18 @@ defmodule EctoFoundationDB.CLI do
   This module provides functions that are to be run by an operator, and not
   part of application code.
   """
+  alias EctoFoundationDB.Future
+  alias EctoFoundationDB.Layer.Metadata
+  alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Layer.Tx
+  alias EctoFoundationDB.Schema
+
   alias Ecto.Adapters.FoundationDB
 
   alias EctoFoundationDB.Tenant
 
   @default_copy_fields_max_rows 500
+  @default_delete_fields_max_rows 500
 
   def run_concurrently_for_all_tenants!(repo, caller_fun, options \\ []) do
     options = Keyword.merge(repo.config(), options)
@@ -60,38 +67,82 @@ defmodule EctoFoundationDB.CLI do
     do: copy_fields!(repo, schema, [{from, to}], options)
 
   def copy_fields!(repo, schema, copies, options \\ []) do
+    assert_copy_fields!(schema, copies)
+
     case options[:prefix] do
       nil ->
         run_concurrently_for_all_tenants!(
           repo,
-          &copy_fields!(repo, schema, copies, prefix: &1),
+          &_copy_fields!(repo, schema, copies, Keyword.merge(options, prefix: &1)),
           options
         )
         |> Stream.map(fn {:ok, count} -> count end)
         |> Enum.sum()
 
       _ ->
-        tenant = options[:prefix]
-        default_options = [max_rows: @default_copy_fields_max_rows]
-
-        override_options = [
-          tx_callback: &tx_apply_copies_with_update!(tenant, &1, repo, schema, &2, copies)
-        ]
-
-        stream_options =
-          Keyword.merge(default_options, options)
-          |> Keyword.merge(override_options)
-
-        repo.stream(schema, stream_options)
-        |> Enum.count()
+        _copy_fields!(repo, schema, copies, options)
     end
   end
 
+  defp _copy_fields!(repo, schema, copies, options) do
+    tenant = options[:prefix]
+    default_options = [max_rows: @default_copy_fields_max_rows]
+
+    override_options = [
+      tx_callback: &tx_apply_copies_with_update!(tenant, &1, repo, schema, &2, copies)
+    ]
+
+    stream_options =
+      Keyword.merge(default_options, options)
+      |> Keyword.merge(override_options)
+
+    repo.stream(schema, stream_options)
+    |> Enum.count()
+  end
+
+  def delete_field!(repo, schema, field, options \\ []) do
+    delete_fields!(repo, schema, [field], options)
+  end
+
   def delete_fields!(repo, schema, deletes, options) do
-    # Pretty involved.
-    # 1. Make sure all indexes with the field are dropped.
-    # 2. Confirm that the field isn't on the schema
-    # 3. Delete the field from the item in the db -- accounting for InternalMetadata items
+    if not (options[:skip_schema_assertions] || false) do
+      assert_delete_fields_for_schema!(schema, deletes)
+    end
+
+    case options[:prefix] do
+      nil ->
+        run_concurrently_for_all_tenants!(
+          repo,
+          &_delete_fields!(repo, schema, deletes, Keyword.merge(options, prefix: &1)),
+          options
+        )
+        |> Stream.map(fn {:ok, count} -> count end)
+        |> Enum.sum()
+
+      _ ->
+        _delete_fields!(repo, schema, deletes, options)
+    end
+  end
+
+  defp _delete_fields!(repo, schema, deletes, options) do
+    assert_delete_fields_for_tenant!(options[:prefix], schema, deletes)
+
+    tenant = options[:prefix]
+    default_options = [max_rows: @default_delete_fields_max_rows]
+
+    adapter_opts = repo.config()
+
+    override_options = [
+      tx_callback:
+        &tx_apply_deletes_with_update!(tenant, &1, repo, schema, &2, deletes, adapter_opts)
+    ]
+
+    stream_options =
+      Keyword.merge(default_options, options)
+      |> Keyword.merge(override_options)
+
+    repo.stream(schema, stream_options)
+    |> Enum.count()
   end
 
   defp tx_apply_copies_with_update!(tenant, tx, repo, schema, data_object_stream, copies) do
@@ -131,6 +182,122 @@ defmodule EctoFoundationDB.CLI do
       _ ->
         repo.update!(changeset, prefix: tenant)
         true
+    end
+  end
+
+  defp tx_apply_deletes_with_update!(
+         tenant,
+         tx,
+         repo,
+         schema,
+         data_object_stream,
+         deletes,
+         adapter_opts
+       ) do
+    Stream.filter(
+      data_object_stream,
+      &tx_obj_apply_deletes_with_update!(tenant, tx, repo, schema, &1, deletes, adapter_opts)
+    )
+  end
+
+  defp tx_obj_apply_deletes_with_update!(
+         tenant,
+         tx,
+         _repo,
+         schema,
+         data_object,
+         deletes,
+         adapter_opts
+       ) do
+    obj_keys = Keyword.keys(data_object)
+
+    needs_update? =
+      0 < MapSet.size(MapSet.intersection(MapSet.new(obj_keys), MapSet.new(deletes)))
+
+    if needs_update? do
+      [{pk_field, pk} | _] = data_object
+      source = Schema.get_source(schema)
+      context = Schema.get_context!(source, schema)
+      write_primary = Schema.get_option(context, :write_primary)
+      kv_codec = Pack.primary_codec(tenant, source, pk)
+
+      # We need to perform the 'get' again for the DecodedKV. With the FDB RYW transaction,
+      # it should be retrieved from the transaction's in-memory state without performance penalty.
+      future = Future.new(schema)
+      future = Tx.async_get(tenant, tx, kv_codec, future)
+      decoded_kv = Future.result(future)
+
+      metadata =
+        Metadata.tx_with_metadata_cache(tenant, tx, nil, source, fn _, metadata -> metadata end)
+
+      Tx.update_data_object(
+        tenant,
+        tx,
+        schema,
+        pk_field,
+        {decoded_kv, [clear: deletes]},
+        metadata,
+        write_primary,
+        adapter_opts
+      )
+
+      true
+    else
+      false
+    end
+  end
+
+  defp assert_copy_fields!(schema, copies) do
+    fields = schema.__schema__(:fields)
+
+    Enum.each(copies, fn {from, to} ->
+      unless Enum.member?(fields, from) and Enum.member?(fields, to) do
+        raise ArgumentError, """
+        Invalid field names
+
+        #{inspect(from)} and #{inspect(to)} must both exist on #{inspect(schema)}
+        """
+      end
+    end)
+  end
+
+  defp assert_delete_fields_for_schema!(schema, deletes) do
+    fields = schema.__schema__(:fields)
+
+    Enum.each(deletes, fn field ->
+      if field in fields do
+        raise ArgumentError, """
+        Invalid field names
+
+        #{field} must not exist on #{inspect(schema)}
+        """
+      end
+    end)
+  end
+
+  defp assert_delete_fields_for_tenant!(tenant, schema, deletes) do
+    source = Schema.get_source(schema)
+
+    Metadata.transactional(tenant, source, fn _tx, metadata ->
+      Enum.each(deletes, fn field ->
+        assert_delete_field_for_tenant_metadata!(tenant, metadata, field)
+      end)
+    end)
+  end
+
+  defp assert_delete_field_for_tenant_metadata!(tenant, metadata, field) do
+    case Metadata.find_indexes_using_field(metadata, field) do
+      [] ->
+        :ok
+
+      idxs ->
+        raise ArgumentError, """
+        Invalid field name
+
+        #{inspect(field)} was found on indexes of tenant #{inspect(tenant.id)}. You must drop these indexes before deleting the field.
+
+        #{inspect(idxs)}
+        """
     end
   end
 end

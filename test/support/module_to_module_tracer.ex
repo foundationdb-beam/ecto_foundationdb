@@ -41,9 +41,9 @@ defmodule EctoFoundationDB.ModuleToModuleTracer do
   end
 
   def stop_trace(tracer, target) do
-    :erlang.trace(target, false, [:all])
-
     ret = get_traced_calls(tracer)
+
+    :erlang.trace(target, false, [:all])
 
     GenServer.stop(tracer)
 

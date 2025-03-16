@@ -140,7 +140,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     # Prime metadata cache
     _alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
-    newly_opened_tenant = Tenant.open(TestRepo, tenant.id)
+    newly_opened_tenant = Tenant.open(TestRepo, tenant.id, log: false)
 
     {calls, _bob} =
       with_erlfdb_calls(fn ->

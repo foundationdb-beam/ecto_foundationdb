@@ -70,7 +70,12 @@ defmodule Ecto.Integration.LargeMigrationTest do
 
         # A short migration step ensures that there are many opportunities between
         # transactions
-        Tenant.open(TestRepo, tenant_id, migrator: TestMigrator, migration_step: @migration_step)
+        Tenant.open(TestRepo, tenant_id,
+          migrator: TestMigrator,
+          migration_step: @migration_step,
+          log: false
+        )
+
         unless is_nil(task), do: Task.await(task)
       end)
 

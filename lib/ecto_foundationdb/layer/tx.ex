@@ -225,7 +225,11 @@ defmodule EctoFoundationDB.Layer.Tx do
       ) do
     %DecodedKV{codec: kv_codec, data_object: orig_data_object} = decoded_kv
     orig_data_object = Fields.to_front(orig_data_object, pk_field)
-    data_object = Keyword.merge(orig_data_object, updates[:set])
+
+    data_object =
+      orig_data_object
+      |> Keyword.merge(updates[:set] || [])
+      |> Keyword.drop(updates[:clear] || [])
 
     {_, kvs} = PrimaryKVCodec.encode(kv_codec, Pack.to_fdb_value(data_object), options)
 
@@ -321,7 +325,7 @@ defmodule EctoFoundationDB.Layer.Tx do
     :erlfdb.fold_range(tx, key_start, key_end, fn _kv, acc -> acc + 1 end, 0)
   end
 
-  defp async_get(tenant, tx, kv_codec, future) do
+  def async_get(tenant, tx, kv_codec, future) do
     {start_key, end_key} = PrimaryKVCodec.range(kv_codec)
     future_ref = :erlfdb.get_range(tx, start_key, end_key, wait: false)
 
