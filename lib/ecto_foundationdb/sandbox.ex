@@ -21,7 +21,7 @@ defmodule EctoFoundationDB.Sandbox do
     repo_children = Supervisor.which_children(sup)
     {Sandboxer, pid, :worker, _} = List.keyfind!(repo_children, Sandboxer, 0)
 
-    Sandboxer.get_or_create_test_db(pid)
+    Sandboxer.get_or_create_test_db(pid, "#{inspect(repo)}")
   end
 
   @spec checkout(Ecto.Repo.t(), Tenant.id(), Options.t()) :: Tenant.t()

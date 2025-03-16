@@ -59,6 +59,14 @@ defmodule EctoFoundationDB.Layer.Metadata do
     end
   end
 
+  def find_indexes_using_field(metadata, field) do
+    %__MODULE__{indexes: indexes, partial_indexes: partial_indexes} = metadata
+
+    indexes = indexes ++ for({idx, _} <- partial_indexes, do: idx)
+
+    Enum.filter(indexes, fn idx -> field in idx[:fields] end)
+  end
+
   @doc """
   Create an FDB kv to be stored in the schema_migrations source. This kv contains
   the information necessary to manage data objects' associated indexes.
@@ -240,18 +248,22 @@ defmodule EctoFoundationDB.Layer.Metadata do
   This function uses the Ecto cache and clever use of FDB constructs to guarantee
   that the cache is consistent with transactional semantics.
   """
+  def transactional(tenant, source, fun) do
+    transactional(tenant, %{cache: nil}, source, fun)
+  end
+
   def transactional(tenant, %{cache: cache}, source, fun) do
     cache? = :enabled == (tenant.options[:metadata_cache] || :enabled)
     cache = if cache?, do: cache, else: nil
-    cache_key = Cache.key(tenant, source)
 
     Tx.transactional(tenant, fn tx ->
-      tx_with_metadata_cache(tenant, tx, cache, source, cache_key, fun)
+      tx_with_metadata_cache(tenant, tx, cache, source, fun)
     end)
   end
 
-  defp tx_with_metadata_cache(tenant, tx, cache, source, cache_key, fun) do
+  def tx_with_metadata_cache(tenant, tx, cache, source, fun) do
     now = System.monotonic_time(:millisecond)
+    cache_key = Cache.key(tenant, source)
 
     cache_item = Cache.lookup(cache, cache_key)
 
@@ -332,16 +344,16 @@ defmodule EctoFoundationDB.Layer.Metadata do
       |> Enum.sort(&(Keyword.get(&1, :priority, 0) > Keyword.get(&2, :priority, 0)))
       |> new()
 
-    case get_partial_metadata(claim, source) do
+    case get_partial_idxs(claim, source) do
       {claim_active?, []} ->
         {MaxValue.decode(max_version), metadata, fn -> not claim_active? end}
 
-      {_, partial_metadata} ->
+      {_, partial_idxs} ->
         # Adding a write conflict here allows writes to commit at a lower latency
         # at the expense of migration taking longer, because we're not letting the
         # migration job starve us out
         :erlfdb.add_write_conflict_key(tx, MigrationsPJ.claim_key(tenant, source))
-        metadata = %__MODULE__{partial_indexes: partial_metadata}
+        metadata = %__MODULE__{partial_indexes: partial_idxs}
         {MaxValue.decode(max_version), metadata, fn -> true end}
     end
   end
@@ -350,34 +362,34 @@ defmodule EctoFoundationDB.Layer.Metadata do
     Pack.namespaced_range(tenant, source(), source, [])
   end
 
-  defp get_partial_metadata(:not_found, _), do: {false, []}
+  defp get_partial_idxs(:not_found, _), do: {false, []}
 
-  defp get_partial_metadata(claim, source) do
-    metadata_being_created =
+  defp get_partial_idxs(claim, source) do
+    idx_being_created =
       Pack.from_fdb_value(claim)
       |> MigrationsPJ.get_idx_being_created()
 
-    partial_metadata =
-      case metadata_being_created do
+    partial_idxs =
+      case idx_being_created do
         nil ->
           []
 
-        pmetadata = {partial_metadata, _} ->
-          if partial_metadata[:source] == source do
-            [pmetadata]
+        p_idx = {idx, _} ->
+          if idx[:source] == source do
+            [p_idx]
           else
             []
           end
       end
 
-    claim_active? = length(partial_metadata) > 0
+    claim_active? = length(partial_idxs) > 0
 
-    partial_metadata =
-      Enum.filter(partial_metadata, fn {metadata, _} ->
-        pmetadata_options = metadata[:options]
-        Keyword.get(pmetadata_options, :concurrently, true)
+    partial_idxs =
+      Enum.filter(partial_idxs, fn {idx, _} ->
+        p_options = idx[:options]
+        Keyword.get(p_options, :concurrently, true)
       end)
 
-    {claim_active?, partial_metadata}
+    {claim_active?, partial_idxs}
   end
 end

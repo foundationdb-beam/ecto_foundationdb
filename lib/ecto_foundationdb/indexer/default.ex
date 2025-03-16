@@ -110,6 +110,13 @@ defmodule EctoFoundationDB.Indexer.Default do
   end
 
   @impl true
+  def drop_ranges(tenant, idx) do
+    source = idx[:source]
+    index_name = idx[:id]
+    [Pack.default_index_range(tenant, source, index_name)]
+  end
+
+  @impl true
   def create(tenant, tx, idx, schema, {start_key, end_key}, limit) do
     keys =
       tx

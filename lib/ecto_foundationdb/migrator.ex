@@ -17,6 +17,7 @@ defmodule EctoFoundationDB.Migrator do
     quote location: :keep do
       import EctoFoundationDB.Migrator
       @before_compile EctoFoundationDB.Migrator
+      @behaviour EctoFoundationDB.Migrator
     end
   end
 
@@ -27,33 +28,6 @@ defmodule EctoFoundationDB.Migrator do
         []
       end
     end
-  end
-
-  @doc """
-
-  """
-  @spec up_all(Ecto.Repo.t(), Options.t()) :: :ok
-  def up_all(repo, options \\ []) do
-    options = Keyword.merge(repo.config(), options)
-    db = FoundationDB.db(repo)
-
-    ids = Tenant.Backend.list(db, options)
-
-    up_fun = fn id ->
-      tenant = Tenant.Backend.db_open(db, id, options)
-      up(repo, tenant, options)
-    end
-
-    max_concurrency = System.schedulers_online() * 2
-
-    stream =
-      Task.async_stream(ids, up_fun,
-        ordered: false,
-        max_concurrency: max_concurrency,
-        timeout: :infinity
-      )
-
-    Stream.run(stream)
   end
 
   @spec up(Ecto.Repo.t(), Tenant.t() | Tenant.id(), Options.t()) :: :ok
@@ -71,7 +45,7 @@ defmodule EctoFoundationDB.Migrator do
 
     if migrations? do
       limit = Options.get(options, :migration_step)
-      MigrationsPJ.transactional(repo, tenant, migrator, limit)
+      MigrationsPJ.transactional(repo, tenant, migrator, limit, options)
     else
       :ok
     end

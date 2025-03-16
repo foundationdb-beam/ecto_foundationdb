@@ -373,14 +373,32 @@ defmodule Ecto.Adapters.FoundationDB do
   included in your application release. This differs from traditional Ecto migrations (`:ecto_sql`), which
   are typically managed in `.exs` scripts executed outside the production application runtime.
 
+  ### Creating and dropping indexes
+
+  In your Migration, to create an index use `create index(table, columns)` and to drop an index use `drop index(table, columns)`.
+
+  Indexes are created and dropped in a manner that is safe for your application transactions.
+
+  ```elixir
+  defmodule MyApp.ExampleMigration do
+    use EctoFoundationDB.Migration
+    def change() do
+      [
+        create index(User, [:role]),
+        drop index(User, [:department]),
+      ]
+    end
+  end
+  ```
+
   ### Executing all migrations immediately
 
   Migrations can be completed in full at any time with a call to
-  `EctoFoundationDB.Migrator.up_all/1`, which accepts your repo module (e.g. `MyApp.Repo`).
+  `EctoFoundationDB.CLI.migrate!/1`, which accepts your repo module (e.g. `MyApp.Repo`).
 
   ```elixir
   # May take a while to complete
-  EctoFoundationDB.Migrator.up_all(MyApp.Repo)
+  EctoFoundationDB.CLI.migrate!(MyApp.Repo)
   ```
 
   Depending on how many tenants you have in your database, and the size of the data for each tenant,
@@ -388,6 +406,9 @@ defmodule Ecto.Adapters.FoundationDB do
   this operation, as migrations are performed transactionally. However, if you interrupt a migration, the next
   attempt for that tenant may have a brief delay (~5 sec) while the migrator ensures that the
   previous migration has indeed stopped executing.
+
+  Please refer to the documentation of `EctoFoundationDB.CLI` for other actions to be carried out
+  by a human operator.
 
   ## Data types
 

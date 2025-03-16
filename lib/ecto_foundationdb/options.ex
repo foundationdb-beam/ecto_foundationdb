@@ -11,6 +11,7 @@ defmodule EctoFoundationDB.Options do
           | {:migration_step, integer()}
           | {:max_single_value_size, integer()}
           | {:max_value_size, integer()}
+          | {:log, boolean()}
 
   @fdb_max_single_value_size_bytes 100_000
 
@@ -48,6 +49,9 @@ defmodule EctoFoundationDB.Options do
 
   def get(options, :max_value_size),
     do: Keyword.get(options, :max_value_size, :infinity)
+
+  def get(options, :log),
+    do: Keyword.get(options, :log, true)
 
   def get(options, key),
     do:

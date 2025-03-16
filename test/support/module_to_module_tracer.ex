@@ -21,29 +21,33 @@ defmodule EctoFoundationDB.ModuleToModuleTracer do
   when both a caller_spec and a call_spec are found, the function call is
   recorded in the trace.
   """
-  @spec with_traced_calls(list(caller_spec()), list(call_spec()), function()) ::
+  @spec with_traced_calls(atom(), list(caller_spec()), list(call_spec()), function()) ::
           {list(traced_calls()), any()}
-  def with_traced_calls(caller_specs, call_specs, fun) do
-    tracer = start_trace(self(), caller_specs, call_specs)
+  def with_traced_calls(name, caller_specs, call_specs, fun) do
+    trace_data = start_trace(name, self(), caller_specs, call_specs)
     res = fun.()
-    calls = stop_trace(tracer, self())
+    calls = stop_trace(trace_data)
     {calls, res}
   end
 
-  def start_trace(target, caller_specs, call_specs) do
+  def start_trace(name, target, caller_specs, call_specs) do
     {:ok, tracer} = start_link(caller_specs, call_specs)
-    trace_flags = [:call, :arity]
+
+    session = :trace.session_create(name, tracer, [])
+    :trace.process(session, target, true, [:call, :arity])
+
     match_spec = [{:_, [], [{:message, {{:cp, {:caller}}}}]}]
-    :erlang.trace_pattern(:on_load, match_spec, [:local])
-    :erlang.trace_pattern({:erlfdb, :_, :_}, match_spec, [:local])
-    :erlang.trace(target, true, [{:tracer, tracer} | trace_flags])
-    tracer
+
+    :trace.function(session, :on_load, match_spec, [:local])
+    :trace.function(session, {:erlfdb, :_, :_}, match_spec, [:local])
+
+    {tracer, session}
   end
 
-  def stop_trace(tracer, target) do
-    :erlang.trace(target, false, [:all])
-
+  def stop_trace({tracer, session}) do
     ret = get_traced_calls(tracer)
+
+    :trace.session_destroy(session)
 
     GenServer.stop(tracer)
 

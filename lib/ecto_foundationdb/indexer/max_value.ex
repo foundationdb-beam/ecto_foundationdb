@@ -23,6 +23,14 @@ defmodule EctoFoundationDB.Indexer.MaxValue do
   end
 
   @impl true
+  def drop_ranges(tenant, idx) do
+    source = idx[:source]
+    index_name = idx[:id]
+    key = key(tenant, source, index_name)
+    [key]
+  end
+
+  @impl true
   def create(tenant, tx, idx, _schema, {start_key, end_key}, limit) do
     index_name = idx[:id]
     source = idx[:source]
