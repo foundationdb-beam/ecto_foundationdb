@@ -32,7 +32,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     {:erlfdb, :wait_for_all_interleaving, 2}
   ]
 
-  def with_erlfdb_calls(fun) do
+  def with_erlfdb_calls(name, fun) do
     caller_spec = fn caller_module ->
       try do
         case Module.split(caller_module) do
@@ -49,7 +49,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     end
 
     {traced_calls, res} =
-      ModuleToModuleTracer.with_traced_calls([caller_spec], @traced_calls, fun)
+      ModuleToModuleTracer.with_traced_calls(name, [caller_spec], @traced_calls, fun)
 
     # clean up the traces for more concise assertions
     traced_calls =
@@ -64,7 +64,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     tenant = context[:tenant]
 
     {calls, _alice} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         {:ok, alice} =
           %User{name: "Alice"}
           |> FoundationDB.usetenant(tenant)
@@ -107,7 +107,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     _alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _bob} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         {:ok, bob} =
           %User{name: "Bob"}
           |> FoundationDB.usetenant(tenant)
@@ -143,7 +143,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     newly_opened_tenant = Tenant.open(TestRepo, tenant.id, log: false)
 
     {calls, _bob} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         {:ok, bob} =
           %User{name: "Charlie"}
           |> FoundationDB.usetenant(newly_opened_tenant)
@@ -176,7 +176,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         TestRepo.get(User, alice.id, prefix: tenant)
       end)
 
@@ -199,7 +199,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         changeset = User.changeset(alice, %{name: "Alicia"})
         {:ok, _} = TestRepo.update(changeset)
       end)
@@ -230,7 +230,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         changeset = User.changeset(alice, %{notes: "Hello world"})
         {:ok, _} = TestRepo.update(changeset)
       end)
@@ -257,7 +257,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     _alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         TestRepo.get_by(User, [name: "Alice"], prefix: tenant)
       end)
 
@@ -285,7 +285,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     _bob = TestRepo.insert!(%User{name: "Bob"}, prefix: tenant)
 
     {calls, _} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         TestRepo.transaction(
           fn ->
             f1 = TestRepo.async_get_by(User, name: "Alice")
@@ -330,7 +330,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         {:ok, _} = TestRepo.delete(alice)
       end)
 
@@ -361,7 +361,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     _alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
 
     {calls, _eve} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         {:ok, alice} =
           %User{name: "Eve", notes: Util.get_random_bytes(100_000)}
           |> FoundationDB.usetenant(tenant)
@@ -405,7 +405,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       TestRepo.insert!(%User{name: "Eve", notes: Util.get_random_bytes(100_000)}, prefix: tenant)
 
     {calls, _eve} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         changeset = User.changeset(eve, %{notes: "Hello world"})
         {:ok, eve} = TestRepo.update(changeset)
         eve
@@ -438,7 +438,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       TestRepo.insert!(%User{name: "Eve", notes: "Hello world"}, prefix: tenant)
 
     {calls, _eve} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         changeset = User.changeset(eve, %{notes: Util.get_random_bytes(100_000)})
         {:ok, eve} = TestRepo.update(changeset)
         eve
@@ -472,7 +472,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       TestRepo.insert!(%User{name: "Eve", notes: Util.get_random_bytes(100_000)}, prefix: tenant)
 
     {calls, _eve} =
-      with_erlfdb_calls(fn ->
+      with_erlfdb_calls(context.test, fn ->
         {:ok, _} = TestRepo.delete(eve)
       end)
 
