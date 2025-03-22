@@ -1,13 +1,16 @@
 defmodule EctoFoundationDB.MigrationsPJ do
   @moduledoc false
+  alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.Metadata
+  alias EctoFoundationDB.Layer.MetadataVersion
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Migration.Index
   alias EctoFoundationDB.Migration.SchemaMigration
   alias EctoFoundationDB.Options
   alias EctoFoundationDB.ProgressiveJob
   alias EctoFoundationDB.Schema
+  alias EctoFoundationDB.Tenant
 
   require Logger
 
@@ -25,11 +28,26 @@ defmodule EctoFoundationDB.MigrationsPJ do
     for source <- sources, do: claim_key(tenant, source)
   end
 
+  def tx_get_claim_status(tenant, tx, source, future) do
+    Future.set(
+      future,
+      tx,
+      :erlfdb.get(tx, claim_key(tenant, source)),
+      &decode_claim_status(&1, source)
+    )
+  end
+
+  def tx_add_claim_write_conflict(tenant, tx, source) do
+    :erlfdb.add_write_conflict_key(tx, claim_key(tenant, source))
+  end
+
   def claim_key(tenant, source),
     do: Pack.namespaced_pack(tenant, SchemaMigration.source(), "claim", ["#{source}"])
 
   def transactional(repo, tenant, migrator, limit, options) do
     active_versions = repo.all(SchemaMigration.versions(), prefix: tenant)
+
+    tenant = Tenant.set_metadata_cache(tenant, :disabled)
 
     ProgressiveJob.new(tenant, __MODULE__, %{
       active_versions: active_versions,
@@ -144,6 +162,10 @@ defmodule EctoFoundationDB.MigrationsPJ do
     %Index{schema: schema} = index
     {start_key, cursor_key, end_key} = cursor_key_tuple
 
+    # Each step in the job must update the global metadataVersion so that the
+    # Metadata module will always read the most up-to-date partial_idxs
+    MetadataVersion.tx_set_global(tx)
+
     case Indexer.create(tenant, tx, idx, schema, {cursor_key, end_key}, limit) do
       {^limit, {next_cursor_key, ^end_key}} ->
         {:more, {start_key, next_cursor_key, end_key}}
@@ -252,5 +274,36 @@ defmodule EctoFoundationDB.MigrationsPJ do
         "[EctoFoundationDB] #{tenant.id} (#{vsn}) #{idx[:source]} X #{inspect(idx[:id])}"
       )
     end
+  end
+
+  defp decode_claim_status(:not_found, _), do: {false, []}
+
+  defp decode_claim_status(claim, source) do
+    idx_being_created =
+      Pack.from_fdb_value(claim)
+      |> get_idx_being_created()
+
+    partial_idxs =
+      case idx_being_created do
+        nil ->
+          []
+
+        p_idx = {idx, _} ->
+          if idx[:source] == source do
+            [p_idx]
+          else
+            []
+          end
+      end
+
+    claim_active? = length(partial_idxs) > 0
+
+    partial_idxs =
+      Enum.filter(partial_idxs, fn {idx, _} ->
+        p_options = idx[:options]
+        Keyword.get(p_options, :concurrently, true)
+      end)
+
+    {claim_active?, partial_idxs}
   end
 end

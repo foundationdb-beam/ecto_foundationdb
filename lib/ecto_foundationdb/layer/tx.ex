@@ -41,6 +41,16 @@ defmodule EctoFoundationDB.Layer.Tx do
     end
   end
 
+  def repeated?(_tx) do
+    case :erlfdb.get_last_error() do
+      :undefined ->
+        false
+
+      _error ->
+        true
+    end
+  end
+
   def transactional_external(tenant, fun) do
     nil = Process.get(@tenant)
     nil = Process.get(@tx)

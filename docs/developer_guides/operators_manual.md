@@ -1,4 +1,4 @@
-# Guide | Operators Manual
+# Operator's Manual
 
 In order to maintain transactional guarantees as your application changes and
 grows, there is a burden on the database operator for some data manipulations.
@@ -28,7 +28,7 @@ are applicable to EctoFoundationDB, and it's worth a read.
 - [Removing a field](#removing-a-field)
 - [Renaming a field](#renaming-a-field)
 
-## Adding a field
+### Adding a field
 
 Adding a field is trivial. Simply modify your schema to include the new field.
 There is no `ALTER TABLE` DDL or equivalent. Any existing objects will
@@ -47,7 +47,7 @@ end
 
 ---
 
-## Removing a field
+### Removing a field
 
 If all you care about is not having the field show up in your structs, you may
 choose to simply remove it from your schema. The underlying data will remain
@@ -59,7 +59,7 @@ Safety can be assured if the application code is first updated to remove referen
 1. Deploy code change to remove references to the field.
 2. Execute `EctoFoundationDB.CLI.delete_field!/3` to remove the data.
 
-> #### Warning: database rewrite {: .warning}
+> #### Warning: data rewrite {: .warning}
 > Removing a field requires writing all keys that have that field in the
 > value.
 
@@ -95,8 +95,8 @@ Take a phased approach:
 5. In application code, remove old field from Ecto schemas, and drop any old index(es)
 6. Delete the old field (see below)
 
-> #### Warning: database rewrite {: .warning}
-> Renaming a field requires writing all keys in the database twice.
+> #### Warning: data rewrite {: .warning}
+> Renaming a field requires writing all related keys twice.
 
 **Backfill data from old field to new field**
 

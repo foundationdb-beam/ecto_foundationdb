@@ -1,33 +1,32 @@
 defmodule EctoFoundationDB.Layer.Metadata do
   @moduledoc false
-  alias EctoFoundationDB.Indexer.Default
-  alias EctoFoundationDB.Indexer.MaxValue
+  alias EctoFoundationDB.Future
+  alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.Metadata.Cache
+  alias EctoFoundationDB.Layer.MetadataVersion
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.Migration.SchemaMigration
   alias EctoFoundationDB.MigrationsPJ
   alias EctoFoundationDB.QueryPlan
 
-  # @todo: Ideally we change this, but it's a breaking change
   @metadata_source "indexes"
-  @max_version_name "version"
   @metadata_operation_failed {:erlfdb_error, 1020}
+
+  @app_metadata_version_idx [
+    id: "version",
+    type: :index,
+    indexer: Indexer.MDVAppVersion,
+    source: SchemaMigration.source(),
+    fields: [:version],
+    options: []
+  ]
 
   @builtin_metadata %{
     SchemaMigration.source() => %{
       partial_indexes: [],
       other: [],
-      indexes: [
-        [
-          id: @max_version_name,
-          type: :index,
-          indexer: MaxValue,
-          source: SchemaMigration.source(),
-          fields: [:version],
-          options: []
-        ]
-      ]
+      indexes: [@app_metadata_version_idx]
     }
   }
 
@@ -100,7 +99,7 @@ defmodule EctoFoundationDB.Layer.Metadata do
 
   defp get_indexer(options) do
     case Keyword.get(options, :indexer) do
-      nil -> Default
+      nil -> Indexer.Default
       module -> module
     end
   end
@@ -256,105 +255,120 @@ defmodule EctoFoundationDB.Layer.Metadata do
     cache? = :enabled == (tenant.options[:metadata_cache] || :enabled)
     cache = if cache?, do: cache, else: nil
 
+    future = Future.before_transactional()
+
     Tx.transactional(tenant, fn tx ->
-      tx_with_metadata_cache(tenant, tx, cache, source, fun)
+      transactional_(tenant, tx, cache, source, future, fun)
     end)
   end
 
-  def tx_with_metadata_cache(tenant, tx, cache, source, fun) do
-    now = System.monotonic_time(:millisecond)
-    cache_key = Cache.key(tenant, source)
+  def transactional_(tenant, tx, nil, source, future, fun) do
+    {_vsn, metadata, validator} = get_metadata(tenant, tx, source, nil, future)
 
+    apply_optimistically(tx, metadata, fun, validator, nil, nil)
+  end
+
+  def transactional_(tenant, tx, cache, source, future, fun) do
+    now = System.monotonic_time(:millisecond)
+
+    cache_key = Cache.key(tenant, source)
     cache_item = Cache.lookup(cache, cache_key)
 
-    {vsn, metadata, validator} = tx_metadata_get(tenant, tx, source, cache_item)
+    {mdv, metadata, validator} = get_metadata(tenant, tx, source, cache_item, future)
 
-    new_cache_item = Cache.CacheItem.new(cache_key, vsn, metadata, now)
+    Cache.update(cache, Cache.CacheItem.new(cache_key, mdv, metadata, now))
 
-    Cache.update(cache, cache_item, new_cache_item)
+    apply_optimistically(tx, metadata, fun, validator, cache, cache_key)
+  end
 
-    try do
-      fun.(tx, metadata)
-    after
-      unless validator.() do
-        :ets.delete(cache, cache_key)
-        :erlang.error(@metadata_operation_failed)
-      end
+  defp apply_optimistically(tx, metadata, fun, validator, cache, cache_key) do
+    fun.(tx, metadata)
+  after
+    unless validator.() do
+      if cache, do: :ets.delete(cache, cache_key)
+      :erlang.error(@metadata_operation_failed)
     end
   end
 
-  defp tx_metadata_get(tenant, tx, source, cache_item) do
+  defp get_metadata(tenant, tx, source, cache_item, future) do
+    valid = fn -> true end
+
     case Map.get(@builtin_metadata, source, nil) do
       nil ->
-        # Every transaction performs a 'get' on these two keys, which **does** have an impact
-        # on performance. The cost of the 'get' is worth it because
-        #
-        # 1. the max_version allows us to cache the metadata in ets so that we don't have to read
-        #    them as a blocking operation before doing actual index queries.
-        # 2. The claim key allows us to implement concurrently created indexes. With it,
-        #    we inspect the indexes that are partially created and use them accordingly.
-        #
-        # In both cases, we only wait for the result at the end of the rest of the transaction
-        # which gives FDB the opportunity to select the keys in the background while the user's
-        # more interesting work is being executed. If something is found to be violated at the end
-        # of the transaction, the entire transaction is retried.
-        max_version_future = MaxValue.get(tenant, tx, SchemaMigration.source(), @max_version_name)
-        claim_future = :erlfdb.get(tx, MigrationsPJ.claim_key(tenant, source))
+        global_only_mdv = MetadataVersion.tx_get_new(tx, future) |> Future.result()
 
-        case cache_item do
-          nil ->
-            tx_metadata_get_wait(tenant, tx, source, max_version_future, claim_future)
+        # We skip the global check if this is not our first time through the transaction.
+        # Otherwise, another tenant's index creation can cause us to retry more than is required.
+        if not Tx.repeated?(tx) and Cache.CacheItem.match_global?(cache_item, global_only_mdv) do
+          # Waiting on the global metadataVersion key is cheap (sent with every GRV). This buys
+          # us the privilege of having a trivial validator. If the global metadataVersion matches,
+          # the transaction will always succeed (wrt our Metadata checks)
+          mdv = Cache.CacheItem.get_metadata_version(cache_item)
+          metadata = Cache.CacheItem.get_metadata(cache_item)
+          {mdv, metadata, valid}
+        else
+          mdv_future =
+            MetadataVersion.tx_with_app(
+              global_only_mdv,
+              tenant,
+              tx,
+              @app_metadata_version_idx,
+              future
+            )
 
-          _ ->
-            tx_metadata_try_cache(cache_item, max_version_future, claim_future)
+          claim_future = MigrationsPJ.tx_get_claim_status(tenant, tx, source, future)
+          _get_metadata(tenant, tx, source, cache_item, mdv_future, claim_future, future)
         end
 
       metadata ->
-        {-1, struct(__MODULE__, metadata), fn -> true end}
+        {nil, struct(__MODULE__, metadata), valid}
     end
   end
 
-  defp tx_metadata_try_cache(cache_item, max_version_future, claim_future) do
-    cache_vsn = Cache.CacheItem.get_version(cache_item)
+  defp _get_metadata(tenant, tx, source, nil, mdv_future, claim_future, future) do
+    read_metadata(tenant, tx, source, future, mdv_future, claim_future)
+  end
+
+  defp _get_metadata(_tenant, _tx, _source, cache_item, mdv_future, claim_future, _future) do
+    get_metadata_from_cache(cache_item, mdv_future, claim_future)
+  end
+
+  defp get_metadata_from_cache(cache_item, mdv_future, claim_future) do
+    mdv = Cache.CacheItem.get_metadata_version(cache_item)
 
     vsn_validator = fn ->
-      [max_version, claim] =
-        [max_version_future, claim_future]
-        |> :erlfdb.wait_for_all()
+      [mdv2, claim_status] =
+        [mdv_future, claim_future]
+        |> Future.await_stream()
+        |> Enum.map(&Future.result/1)
 
-      MaxValue.decode(max_version) <= cache_vsn and
-        :not_found == claim
+      {claim_active?, _} = claim_status
+
+      Cache.CacheItem.match_local?(cache_item, mdv2) and not claim_active?
     end
 
-    {cache_vsn, Cache.CacheItem.get_metadata(cache_item), vsn_validator}
+    {mdv, Cache.CacheItem.get_metadata(cache_item), vsn_validator}
   end
 
-  defp tx_metadata_get_wait(tenant, tx, source, max_version_future, claim_future) do
-    {start_key, end_key} = metadata_range(tenant, source)
+  defp read_metadata(tenant, tx, source, future, mdv_future, claim_future) do
+    metadata_future = tx_get_metadata(tenant, tx, source, future)
 
-    metadata_future = :erlfdb.get_range(tx, start_key, end_key, wait: false)
+    [mdv, claim_status, metadata] =
+      [mdv_future, claim_future, metadata_future]
+      |> Future.await_stream()
+      |> Enum.map(&Future.result/1)
 
-    [max_version, claim, metadata] =
-      :erlfdb.wait_for_all_interleaving(tx, [max_version_future, claim_future, metadata_future])
-
-    metadata =
-      metadata
-      |> Enum.map(fn {_key, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
-      # high priority first
-      |> Enum.sort(&(Keyword.get(&1, :priority, 0) > Keyword.get(&2, :priority, 0)))
-      |> new()
-
-    case get_partial_idxs(claim, source) do
+    case claim_status do
       {claim_active?, []} ->
-        {MaxValue.decode(max_version), metadata, fn -> not claim_active? end}
+        {mdv, metadata, fn -> not claim_active? end}
 
       {_, partial_idxs} ->
         # Adding a write conflict here allows writes to commit at a lower latency
         # at the expense of migration taking longer, because we're not letting the
         # migration job starve us out
-        :erlfdb.add_write_conflict_key(tx, MigrationsPJ.claim_key(tenant, source))
+        MigrationsPJ.tx_add_claim_write_conflict(tenant, tx, source)
         metadata = %__MODULE__{partial_indexes: partial_idxs}
-        {MaxValue.decode(max_version), metadata, fn -> true end}
+        {mdv, metadata, fn -> true end}
     end
   end
 
@@ -362,34 +376,22 @@ defmodule EctoFoundationDB.Layer.Metadata do
     Pack.namespaced_range(tenant, source(), source, [])
   end
 
-  defp get_partial_idxs(:not_found, _), do: {false, []}
+  def tx_get_metadata(tenant, tx, source, future) do
+    {start_key, end_key} = metadata_range(tenant, source)
 
-  defp get_partial_idxs(claim, source) do
-    idx_being_created =
-      Pack.from_fdb_value(claim)
-      |> MigrationsPJ.get_idx_being_created()
+    Future.set(
+      future,
+      tx,
+      :erlfdb.get_range(tx, start_key, end_key, wait: false),
+      &decode_metadata/1
+    )
+  end
 
-    partial_idxs =
-      case idx_being_created do
-        nil ->
-          []
-
-        p_idx = {idx, _} ->
-          if idx[:source] == source do
-            [p_idx]
-          else
-            []
-          end
-      end
-
-    claim_active? = length(partial_idxs) > 0
-
-    partial_idxs =
-      Enum.filter(partial_idxs, fn {idx, _} ->
-        p_options = idx[:options]
-        Keyword.get(p_options, :concurrently, true)
-      end)
-
-    {claim_active?, partial_idxs}
+  defp decode_metadata(result) do
+    result
+    |> Enum.map(fn {_key, fdb_value} -> Pack.from_fdb_value(fdb_value) end)
+    # high priority first
+    |> Enum.sort(&(Keyword.get(&1, :priority, 0) > Keyword.get(&2, :priority, 0)))
+    |> new()
   end
 end

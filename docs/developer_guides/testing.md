@@ -1,4 +1,4 @@
-# Testing with EctoFoundationDB
+# Testing with ExUnit
 
 Setting up your app to use a FoundationDB Sandbox is very easy!
 
@@ -35,11 +35,11 @@ end
 ```
 
 Now, you can use your TenantCase to do any FDB operation in a test. Because
-we're using tenants with randomized names, you don't have to worry about key conflicts.
+we're using tenants with randomized names, you don't have to worry about key conflicts, so you can include the `async: true` option.
 
 ```elixir
 defmodule MyAppHelloFDBTest do
-  use MyApp.TenantCase
+  use MyApp.TenantCase, async: true
 
   alias Ecto.Adapters.FoundationDB
 

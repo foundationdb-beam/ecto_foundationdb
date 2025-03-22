@@ -5,11 +5,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
 
   def assign_ready(_module, repo, futures, ready_refs, options) when is_list(ready_refs) do
     Tx.transactional(options[:prefix], fn _tx ->
-      {assign_futures_rev, futures} =
-        Enum.reduce(ready_refs, {[], futures}, fn ready_ref, {acc, futures} ->
-          {assign_future, futures} = repo.async_assign_ready(futures, ready_ref, options)
-          {[assign_future | acc], futures}
-        end)
+      {assign_futures_rev, futures} = filter_ready(repo, futures, ready_refs, options)
 
       res = repo.await(Enum.reverse(assign_futures_rev))
 
@@ -20,6 +16,18 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
     end)
   end
 
+  defp filter_ready(repo, futures, ready_refs, options) do
+    Enum.reduce(ready_refs, {[], futures}, fn ready_ref, {acc, futures} ->
+      case async_assign_ready(__MODULE__, repo, futures, ready_ref, options) do
+        {nil, futures} ->
+          {acc, futures}
+
+        {assign_future, futures} ->
+          {[assign_future | acc], futures}
+      end
+    end)
+  end
+
   defp append_new_future(futures, nil), do: futures
   defp append_new_future(futures, future), do: [future | futures]
 
@@ -27,7 +35,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
       when is_reference(ready_ref) do
     case Future.find_ready(futures, ready_ref) do
       {nil, futures} ->
-        {[], futures}
+        {nil, futures}
 
       {future, futures} ->
         {schema, id, watch_options} = Future.result(future)

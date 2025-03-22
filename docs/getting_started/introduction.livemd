@@ -1,4 +1,4 @@
-# Livebook | Getting Started
+# Introduction
 
 ```elixir
 Mix.install([

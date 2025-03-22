@@ -12,9 +12,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAsync do
       nil ->
         raise "Pipelining failure"
 
-      future ->
-        schema = Future.schema(future)
-
+      {schema, future} ->
         Future.apply(future, fn {all_or_one, result} ->
           handle_all_or_one(repo, schema, all_or_one, result)
         end)

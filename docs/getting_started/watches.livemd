@@ -1,4 +1,4 @@
-# Livebook | Watches in LiveView
+# Watches in LiveView
 
 ```elixir
 Mix.install([
