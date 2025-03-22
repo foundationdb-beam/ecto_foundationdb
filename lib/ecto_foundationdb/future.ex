@@ -8,7 +8,7 @@ defmodule EctoFoundationDB.Future do
   internal use only.
   """
   alias EctoFoundationDB.Layer.Tx
-  defstruct [:ref, :schema, :tx, :erlfdb_future, :result, :handler, :must_wait?]
+  defstruct [:ref, :tx, :erlfdb_future, :result, :handler, :must_wait?]
 
   @token :__ectofdbfuture__
 
@@ -16,10 +16,9 @@ defmodule EctoFoundationDB.Future do
 
   # Before entering a transactional that uses this Future module, we must know whether or not
   # we are required to wait on the Future upon leaving the transactional (`must_wait?`).
-  def before_transactional(schema) do
+  def before_transactional() do
     %__MODULE__{
       ref: nil,
-      schema: schema,
       handler: &Function.identity/1,
       must_wait?: not Tx.in_tx?()
     }
@@ -41,18 +40,15 @@ defmodule EctoFoundationDB.Future do
     fut
   end
 
-  def schema(%__MODULE__{schema: schema}), do: schema
-
-  def new(schema) do
-    %__MODULE__{schema: schema, handler: &Function.identity/1, must_wait?: true}
+  def new() do
+    %__MODULE__{handler: &Function.identity/1, must_wait?: true}
   end
 
   def ref(%__MODULE__{ref: ref}), do: ref
 
-  def new_watch(schema, erlfdb_future, handler \\ &Function.identity/1) do
+  def new_watch(erlfdb_future, handler \\ &Function.identity/1) do
     # The future for a watch is fulfilled outside of a transaction, so there is no tx val
     %__MODULE__{
-      schema: schema,
       tx: :watch,
       ref: get_ref(erlfdb_future),
       erlfdb_future: erlfdb_future,
@@ -79,7 +75,19 @@ defmodule EctoFoundationDB.Future do
 
   def result(fut) do
     %__MODULE__{tx: tx, erlfdb_future: erlfdb_future, handler: handler} = fut
-    [res] = :erlfdb.wait_for_all_interleaving(tx, [erlfdb_future])
+
+    # Since we only have a single future, we can use :erlfdb.wait/1 as long as it's
+    # not a :fold_future. Doing so is good for bookkeeping (fdb_api_counting_test)
+    res =
+      case elem(erlfdb_future, 0) do
+        :fold_future ->
+          [res] = :erlfdb.wait_for_all_interleaving(tx, [erlfdb_future])
+          res
+
+        _ ->
+          :erlfdb.wait(erlfdb_future)
+      end
+
     handler.(res)
   end
 

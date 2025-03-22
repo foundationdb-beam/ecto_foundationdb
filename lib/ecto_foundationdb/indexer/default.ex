@@ -129,7 +129,16 @@ defmodule EctoFoundationDB.Indexer.Default do
         fdb_key
       end)
 
-    {length(keys), {List.last(keys), end_key}}
+    case keys do
+      [] ->
+        {0, {end_key, end_key}}
+
+      _ ->
+        last_key = List.last(keys)
+        next_key = :erlfdb_key.strinc(last_key)
+
+        {length(keys), {next_key, end_key}}
+    end
   end
 
   @impl true

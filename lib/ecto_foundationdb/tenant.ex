@@ -194,6 +194,11 @@ defmodule EctoFoundationDB.Tenant do
     |> tenant.backend.extend_tuple(tenant.meta)
   end
 
+  def set_metadata_cache(tenant, enabled_or_disabled)
+      when enabled_or_disabled in [:enabled, :disabled] do
+    Backend.set_option(tenant, :metadata_cache, enabled_or_disabled)
+  end
+
   defp handle_open(repo, tenant, options) do
     Migrator.up(repo, tenant, options)
   end

@@ -142,4 +142,9 @@ defmodule EctoFoundationDB.Tenant.Backend do
   defp get_module(options) do
     Options.get(options, :tenant_backend)
   end
+
+  def set_option(tenant, key, value) do
+    %Tenant{options: options} = tenant
+    %Tenant{tenant | options: Keyword.merge(options, [{key, value}])}
+  end
 end

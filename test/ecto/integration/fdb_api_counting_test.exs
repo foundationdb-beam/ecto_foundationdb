@@ -1,6 +1,9 @@
 defmodule Ecto.Integration.FdbApiCountingTest do
-  use Ecto.Integration.Case, async: true
+  # Cannot be async because the global metadataVersion key is not isolated in tenants. Other
+  # tests can interfere.
+  use Ecto.Integration.Case, async: false
 
+  alias EctoFoundationDB.Layer.MetadataVersion
   alias EctoFoundationDB.Tenant
 
   alias Ecto.Adapters.FoundationDB
@@ -74,22 +77,18 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
-             # get source claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
-
-             # there is no cache, so get metadata
+             # there is no cache, so get app version, source claim key, and indexes
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.MigrationsPJ, :get},
              {EctoFoundationDB.Layer.Metadata, :get_range},
-
-             # wait for max_version, claim_key, and metadata range
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all_interleaving},
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # check for existence of primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
-
-             # wait for existence check
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # primary write
@@ -100,7 +99,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
            ] == calls
   end
 
-  test "insert with metadata cache", context do
+  test "insert with global-validated metadata cache", context do
     tenant = context[:tenant]
 
     # Prime metadata cache
@@ -117,10 +116,50 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key. We have cached the metadata, so
-             # these waits are deferred optimistically.
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
+
+             # cache is a match, so there's no work here! :)
+
+             # check for existence of primary write
+             {EctoFoundationDB.Layer.Tx, :get_range},
+             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+
+             # primary write, index write
+             {EctoFoundationDB.Layer.TxInsert, :set},
+             {EctoFoundationDB.Indexer.Default, :set}
+           ] == calls
+  end
+
+  test "insert with local-validated metadata cache", context do
+    tenant = context[:tenant]
+
+    # Prime metadata cache
+    _alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+
+    # Update the global metadataVersion
+    FoundationDB.transactional(tenant, &MetadataVersion.tx_set_global/1)
+
+    {calls, _bob} =
+      with_erlfdb_calls(context.test, fn ->
+        {:ok, bob} =
+          %User{name: "Bob"}
+          |> FoundationDB.usetenant(tenant)
+          |> TestRepo.insert()
+
+        bob
+      end)
+
+    assert [
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
+
+             # global metadataVersion does not match, so we need to check
+             # local (app version) and claim key
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.MigrationsPJ, :get},
 
              # check for existence of primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -130,8 +169,8 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.TxInsert, :set},
              {EctoFoundationDB.Indexer.Default, :set},
 
-             # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+             # wait for app metadata version and claim_key
+             {EctoFoundationDB.Future, :wait_for_all_interleaving}
            ] == calls
   end
 
@@ -153,10 +192,9 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key. We have cached the metadata, so
-             # these waits are deferred optimistically.
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # check for existence of primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -164,10 +202,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
              # primary write, index write
              {EctoFoundationDB.Layer.TxInsert, :set},
-             {EctoFoundationDB.Indexer.Default, :set},
-
-             # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+             {EctoFoundationDB.Indexer.Default, :set}
            ] == calls
   end
 
@@ -181,16 +216,13 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # get and wait primary write key
              {EctoFoundationDB.Layer.Query, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
-
-             # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+             {EctoFoundationDB.Future, :wait_for_all_interleaving}
            ] = calls
   end
 
@@ -205,9 +237,9 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # get and wait for existing data from primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -218,10 +250,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
              # clear and set default index. :name has changed
              {EctoFoundationDB.Indexer.Default, :clear},
-             {EctoFoundationDB.Indexer.Default, :set},
-
-             # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+             {EctoFoundationDB.Indexer.Default, :set}
            ] == calls
   end
 
@@ -236,19 +265,16 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # get and wait for existing data from primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
              {EctoFoundationDB.Future, :wait_for_all_interleaving},
 
              # set data in primary write
-             {EctoFoundationDB.Layer.Tx, :set},
-
-             # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+             {EctoFoundationDB.Layer.Tx, :set}
            ] == calls
   end
 
@@ -262,9 +288,9 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # get_mapped_range for :name index. The call to :get_range shown here
              # is a tail call from get_mapped_range, so it's expected and harmless
@@ -272,10 +298,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.Query, :get_range},
 
              # wait for get_mapped_range result
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
-
-             # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+             {EctoFoundationDB.Future, :wait_for_all_interleaving}
            ] == calls
   end
 
@@ -297,28 +320,21 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # get_mapped_range for :name index
              {EctoFoundationDB.Layer.Query, :get_mapped_range},
              {EctoFoundationDB.Layer.Query, :get_range},
 
-             # wait for max_version and claim_key, @todo ideally this happens at the very end (#26)
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all},
-
-             # get max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # get global again (2nd async_get_by). Not strictly necessary, but there's no cost
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # get_mapped_range for :name index
              {EctoFoundationDB.Layer.Query, :get_mapped_range},
              {EctoFoundationDB.Layer.Query, :get_range},
-
-             # max_version and claim_key again. FDB implements a RWY-transaction, so
-             # this trivially reads from local memory
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all},
 
              # wait for results of both get_mapped_range calls
              {EctoFoundationDB.Future, :wait_for_all_interleaving}
@@ -335,9 +351,9 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # check for existence
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -347,10 +363,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.Tx, :clear},
 
              # clear :name index
-             {EctoFoundationDB.Indexer.Default, :clear},
-
-             # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+             {EctoFoundationDB.Indexer.Default, :clear}
            ] == calls
   end
 
@@ -371,11 +384,9 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version
-             {EctoFoundationDB.Layer.Metadata, :get},
-
-             # get source claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # check for existence of primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -391,10 +402,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.TxInsert, :set},
 
              # index write
-             {EctoFoundationDB.Indexer.Default, :set},
-
-             # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+             {EctoFoundationDB.Indexer.Default, :set}
            ] == calls
   end
 
@@ -412,9 +420,9 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # get and wait for existing data from primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -424,10 +432,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.Tx, :clear_range},
 
              # set data in primary write
-             {EctoFoundationDB.Layer.Tx, :set},
-
-             # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+             {EctoFoundationDB.Layer.Tx, :set}
            ] == calls
   end
 
@@ -445,9 +450,9 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # get and wait for existing data from primary write
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -458,10 +463,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
              # multikey writes
              {EctoFoundationDB.Layer.Tx, :set},
-             {EctoFoundationDB.Layer.Tx, :set},
-
-             # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+             {EctoFoundationDB.Layer.Tx, :set}
            ] == calls
   end
 
@@ -477,9 +479,9 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # get max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :get},
-             {EctoFoundationDB.Layer.Metadata, :get},
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, :get},
+             {EctoFoundationDB.Future, :wait},
 
              # check for existence
              {EctoFoundationDB.Layer.Tx, :get_range},
@@ -489,10 +491,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.Tx, :clear_range},
 
              # clear :name index
-             {EctoFoundationDB.Indexer.Default, :clear},
-
-             # wait for max_version and claim_key
-             {EctoFoundationDB.Layer.Metadata, :wait_for_all}
+             {EctoFoundationDB.Indexer.Default, :clear}
            ] == calls
   end
 end

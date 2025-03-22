@@ -34,7 +34,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       Enum.map(entries, fn data_object ->
         pk_field = Fields.get_pk_field!(schema)
         pk = data_object[pk_field]
-        future = Future.before_transactional(schema)
+        future = Future.before_transactional()
         {{pk_field, pk}, future, data_object}
       end)
 
@@ -84,7 +84,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
-    future = Future.before_transactional(schema)
+    future = Future.before_transactional()
 
     res =
       Metadata.transactional(tenant, adapter_meta, source, fn tx, metadata ->
@@ -122,7 +122,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
-    future = Future.before_transactional(schema)
+    future = Future.before_transactional()
 
     res =
       Metadata.transactional(tenant, adapter_meta, source, fn tx, metadata ->
@@ -160,7 +160,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     Metadata.transactional(tenant, adapter_meta, source, fn tx, _metadata ->
       future_ref = Tx.watch(tenant, tx, {schema, source, context}, {pk_field, pk}, options)
-      Future.new_watch(schema, future_ref, fn _ -> {schema, pk, options} end)
+      Future.new_watch(future_ref, fn _ -> {schema, pk, options} end)
     end)
   end
 

@@ -26,7 +26,7 @@ defmodule EctoFoundationDB.Layer.Query do
     # the result is not awaited upon until requested. But if we're creating a new
     # transaction, the wait happens before the transaction ends.
 
-    future = Future.before_transactional(plan.schema)
+    future = Future.before_transactional()
 
     {plan, future} =
       Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
@@ -135,7 +135,7 @@ defmodule EctoFoundationDB.Layer.Query do
     write_primary = Schema.get_option(plan.context, :write_primary)
 
     tx
-    |> tx_get_range(plan, Future.new(plan.schema), [])
+    |> tx_get_range(plan, Future.new(), [])
     |> Future.result()
     |> unpack_and_filter(plan)
     |> Stream.map(
@@ -156,7 +156,7 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp tx_delete_range(tx, plan, metadata) do
     tx
-    |> tx_get_range(plan, Future.new(plan.schema), [])
+    |> tx_get_range(plan, Future.new(), [])
     |> Future.result()
     |> unpack_and_filter(plan)
     |> Stream.map(&Tx.delete_data_object(plan.tenant, tx, plan.schema, &1, metadata))

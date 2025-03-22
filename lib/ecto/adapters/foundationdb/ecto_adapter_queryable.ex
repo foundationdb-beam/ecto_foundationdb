@@ -35,6 +35,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
           {:nocache,
            {:all,
             query = %Ecto.Query{
+              from: %Ecto.Query.FromExpr{source: {_source, schema}},
               select: %Ecto.Query.SelectExpr{
                 fields: select_fields
               }
@@ -60,7 +61,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
             |> select(Fields.parse_select_fields(select_fields), nil)
           end)
 
-        handle_returning(future, options)
+        handle_returning(schema, future, options)
     end
   end
 
@@ -168,10 +169,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     Query.all(tenant, adapter_meta, plan)
   end
 
-  defp handle_returning(future, options) do
+  defp handle_returning(schema, future, options) do
     case options[:returning] do
       {:future, all_or_one} ->
-        Process.put(Future.token(), Future.apply(future, fn res -> {all_or_one, res} end))
+        Process.put(
+          Future.token(),
+          {schema, Future.apply(future, fn res -> {all_or_one, res} end)}
+        )
+
         {0, []}
 
       _ ->

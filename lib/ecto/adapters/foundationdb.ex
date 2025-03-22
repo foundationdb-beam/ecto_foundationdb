@@ -257,8 +257,7 @@ defmodule Ecto.Adapters.FoundationDB do
   are executed. Your Indexer module does all the work necessary to maintain the index within the transaction
   that the data itself is being manipulated. Many different types of indexes are possible. You are in control!
 
-  For an example, please see the [MaxValue implementation](https://github.com/foundationdb-beam/ecto_foundationdb/blob/main/lib/ecto_foundationdb/indexer/max_value.ex)
-  which is used internally by EctoFoundationDB to keep track of the maximum value of a field in a Schema.
+  For an example, please see the [Default implementation](https://github.com/foundationdb-beam/ecto_foundationdb/blob/main/lib/ecto_foundationdb/indexer/default.ex).
 
   ## Transactions
 
