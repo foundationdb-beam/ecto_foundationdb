@@ -4,7 +4,7 @@ defmodule EctoFoundationdb.MixProject do
   def project do
     [
       app: :ecto_foundationdb,
-      version: "0.4.0",
+      version: "0.5.0",
       description: "FoundationDB adapter for Ecto",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
@@ -39,10 +39,16 @@ defmodule EctoFoundationdb.MixProject do
         ~r/^Elixir.Ecto.Adapters.FoundationDB|EctoFoundationDB(.CLI|.Database|.Exception.Unsupported|.Exception.IncorrectTenancy|.Future|.Index|.Indexer|.Layer|.Migrator|.Options|.QueryPlan|.Sandbox|.Tenant|.Tenant.DirectoryTenant|.Tenant.ManagedTenant)?$/,
       extras: [
         "CHANGELOG.md",
-        "TESTING.md",
-        "notebooks/guide.livemd",
-        "notebooks/watches.livemd",
-        "guides/OPERATORS.md"
+        "docs/getting_started/introduction.livemd",
+        "docs/getting_started/watches.livemd",
+        "docs/developer_guides/testing.md",
+        "docs/developer_guides/operators_manual.md",
+        "docs/design/metadata.md"
+      ],
+      groups_for_extras: [
+        "Getting Started": ~r/getting_started/,
+        "Developer Guides": ~r/developer_guides/,
+        Design: ~r/design/
       ],
       before_closing_head_tag: &docs_before_closing_head_tag/1,
       before_closing_body_tag: &docs_before_closing_body_tag/1
