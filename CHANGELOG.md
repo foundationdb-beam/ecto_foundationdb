@@ -1,6 +1,24 @@
-# Changelog for v0.x
+# Changelog
 
-## v0.4 (2024-01-16)
+## v0.5.0 (TBD)
+
+### Enhancements
+
+* Added ability to drop an index.
+* `EctoFoundationDB.CLI`: Functions for an operator to use to safely manage
+data migrations that cannot be done automatically.
+* Metadata cache is now shared across all open tenants of the same id on a
+given node.
+* Metadata cache now makes use of FoundationDB's `\xff/metadataVersion` key,
+which allows the client to cache metadata and maintain transactional isolation
+without having to wait on any keys.
+
+### New documentation
+
+* [Guide for Operators](operators_mamnual.html): Describes how to use the `EctoFoundationDB.CLI` functions to rename a field while guaraneeting that all
+concurrent queries in your distributed application are successful.
+
+## v0.4.0 (2024-01-16)
 
 ### Enhancements
 
@@ -24,7 +42,7 @@
 
 * Added `fdb_api_counting_text.exs` which tests and documents the `:erlfdb` operations that our Layer is expected to make.
 
-## v0.3 (2024-10-20)
+## v0.3.0 (2024-10-20)
 
 ### \*\* Major breaking changes \*\*
 
@@ -61,5 +79,29 @@ to discuss the upgrade path.
 
 ### New Documentation
 
-  * [TESTING.md](testing.html): Document to describe how to set up a Sandbox
+  * [testing.md](testing.html): Document to describe how to set up a Sandbox
   * [CHANGELOG.md](changelog.html): This file!
+
+## v0.1.2 (2024-08-31)
+
+### Bug fixes
+
+* Upgrade erlfdb
+
+## v0.1.1 (2024-08-25)
+
+### Enhancements
+
+* Upgrade to Ecto 3.12
+
+### New documentation
+
+* [Livebook | Getting Started](introduction.livemd): How to get started with EctoFoundationDB.
+
+## v0.1.0 (2024-04-07)
+
+### Features
+
+* Multitenancy
+* Basic CRUD operations
+* Indexes
