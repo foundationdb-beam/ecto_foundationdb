@@ -40,6 +40,8 @@ defmodule Ecto.Adapters.FoundationDB do
     use Ecto.Repo, otp_app: :my_app, adapter: Ecto.Adapters.FoundationDB
 
     use EctoFoundationDB.Migrator
+
+    @impl true
     def migrations(), do: []
   end
   ```
@@ -360,6 +362,8 @@ defmodule Ecto.Adapters.FoundationDB do
   ```elixir
   defmodule MyApp.IndexUserByDepartment do
     use EctoFoundationDB.Migration
+
+    @impl true
     def change() do
       [
         create index(User, [:department])
@@ -381,6 +385,8 @@ defmodule Ecto.Adapters.FoundationDB do
   ```elixir
   defmodule MyApp.ExampleMigration do
     use EctoFoundationDB.Migration
+
+    @impl true
     def change() do
       [
         create index(User, [:role]),

@@ -15,7 +15,7 @@ without having to wait on any keys.
 
 ### New documentation
 
-* [Guide for Operators](operators_mamnual.html): Describes how to use the `EctoFoundationDB.CLI` functions to rename a field while guaraneeting that all
+* [Guide for Operators](operators_manual.html): Describes how to use the `EctoFoundationDB.CLI` functions to rename a field while guaraneeting that all
 concurrent queries in your distributed application are successful.
 
 ## v0.4.0 (2024-01-16)

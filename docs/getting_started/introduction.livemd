@@ -26,6 +26,7 @@ defmodule MyApp.Repo do
 
   use EctoFoundationDB.Migrator
 
+  @impl true
   def migrations() do
     [
       # {0, IndexesMigration}
@@ -136,6 +137,7 @@ Welcome back! You've instructed the Repo to load a migration next time we open a
 defmodule IndexesMigration do
   use EctoFoundationDB.Migration
 
+  @impl true
   def change() do
     [
       create(index(TemperatureEvent, [:site])),

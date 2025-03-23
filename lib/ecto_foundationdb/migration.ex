@@ -17,24 +17,7 @@ defmodule EctoFoundationDB.Migration do
           | {:drop, Index.t(), drop_mode()}
           | {:drop_if_exists, Index.t(), drop_mode()}
 
-  @typedoc """
-  A struct that represents a table or index in a database schema.
-
-  These database objects can be modified through the use of a Data
-  Definition Language, hence the name DDL object.
-  """
-  @type ddl_object :: Index.t()
-
-  @doc """
-  Checks if the adapter supports ddl transaction.
-  """
-  @callback supports_ddl_transaction? :: boolean
-
-  @doc """
-  Executes migration commands.
-  """
-  @callback execute_ddl(adapter_meta, command, options :: Keyword.t()) ::
-              {:ok, [{Logger.level(), Logger.message(), Logger.metadata()}]}
+  @callback change() :: list(command())
 
   defmodule Index do
     @moduledoc """
@@ -77,6 +60,7 @@ defmodule EctoFoundationDB.Migration do
   defmacro __using__(_) do
     quote location: :keep do
       import EctoFoundationDB.Migration
+      @behaviour EctoFoundationDB.Migration
       @before_compile EctoFoundationDB.Migration
     end
   end
