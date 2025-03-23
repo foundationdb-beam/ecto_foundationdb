@@ -3,6 +3,7 @@ defmodule EctoFoundationDB.Integration.TestMigrator do
 
   use EctoFoundationDB.Migrator
 
+  @impl true
   def migrations() do
     [
       {0, EctoFoundationDB.Integration.Migration.UserIndex},

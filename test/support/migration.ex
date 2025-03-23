@@ -3,6 +3,7 @@ defmodule EctoFoundationDB.Integration.Migration.UserIndex do
   alias EctoFoundationDB.Schemas.User
   use EctoFoundationDB.Migration
 
+  @impl true
   def change() do
     [create(index(User, [:name]))]
   end
@@ -13,6 +14,7 @@ defmodule EctoFoundationDB.Integration.Migration.EventIndex do
   alias EctoFoundationDB.Schemas.Event
   use EctoFoundationDB.Migration
 
+  @impl true
   def change() do
     [
       create(index(Event, [:date, :user_id, :time], options: [mapped?: false]))

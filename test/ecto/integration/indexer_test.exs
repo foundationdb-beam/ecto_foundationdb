@@ -22,6 +22,7 @@ defmodule Ecto.Integration.IndexerTest do
 
     use EctoFoundationDB.Migrator
 
+    @impl true
     def migrations(), do: [{0, TestMigration}]
   end
 
@@ -30,6 +31,7 @@ defmodule Ecto.Integration.IndexerTest do
 
     use EctoFoundationDB.Migrator
 
+    @impl true
     def migrations(), do: [{0, TestMigration}, {1, TestDropMigration}]
   end
 
@@ -37,6 +39,7 @@ defmodule Ecto.Integration.IndexerTest do
     @moduledoc false
     use EctoFoundationDB.Migration
 
+    @impl true
     def change() do
       [create(index(User, [:name], options: [indexer: NameStartsWithJ]))]
     end
@@ -46,6 +49,7 @@ defmodule Ecto.Integration.IndexerTest do
     @moduledoc false
     use EctoFoundationDB.Migration
 
+    @impl true
     def change() do
       [drop(index(User, [:name], options: [indexer: NameStartsWithJ]))]
     end

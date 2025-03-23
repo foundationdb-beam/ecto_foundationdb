@@ -21,6 +21,7 @@ defmodule Repo do
 
   use EctoFoundationDB.Migrator
 
+  @impl true
   def migrations(), do: []
 end
 
