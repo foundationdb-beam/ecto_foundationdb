@@ -49,12 +49,12 @@ defmodule Ecto.Integration.LargeMigrationTest do
   defp seed_users(tenant) do
     insert_stream =
       get_stream(fn i ->
-        TestRepo.transaction(
+        TestRepo.transactional(
+          tenant,
           fn ->
             {_, users} = Enum.unzip(do_insert_chunk(tenant, "user-a", i, 0, false))
             users
-          end,
-          prefix: tenant
+          end
         )
       end)
 

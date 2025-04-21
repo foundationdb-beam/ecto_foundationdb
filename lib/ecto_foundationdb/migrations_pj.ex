@@ -167,6 +167,18 @@ defmodule EctoFoundationDB.MigrationsPJ do
     MetadataVersion.tx_set_global(tx)
 
     case Indexer.create(tenant, tx, idx, schema, {cursor_key, end_key}, limit) do
+      {_, {^cursor_key, ^end_key}} ->
+        raise """
+        Indexer did not make progress. Is the limit too small?
+
+        tenant: #{inspect(tenant)}
+        idx: #{inspect(idx)}
+        schema: #{inspect(schema)}
+        cursor_key: #{inspect(cursor_key, binaries: :as_strings)}
+        end_key: #{inspect(end_key, binaries: :as_strings)}
+        limit: #{inspect(limit)}
+        """
+
       {^limit, {next_cursor_key, ^end_key}} ->
         {:more, {start_key, next_cursor_key, end_key}}
 

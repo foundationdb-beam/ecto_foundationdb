@@ -46,10 +46,18 @@ defmodule EctoFoundationDB.Future do
 
   def ref(%__MODULE__{ref: ref}), do: ref
 
-  def new_watch(erlfdb_future, handler \\ &Function.identity/1) do
-    # The future for a watch is fulfilled outside of a transaction, so there is no tx val
+  @doc """
+  Creates a Future that will be resolved outside of the transaction in which it was created.
+
+  Used for:
+
+    - watch
+    - versionstamp
+  """
+  def new_deferred(erlfdb_future, handler \\ &Function.identity/1) do
+    # The future for a watch and versionstamp is fulfilled outside of a transaction, so there is no tx val
     %__MODULE__{
-      tx: :watch,
+      tx: :deferred,
       ref: get_ref(erlfdb_future),
       erlfdb_future: erlfdb_future,
       handler: handler,
@@ -63,11 +71,23 @@ defmodule EctoFoundationDB.Future do
     %__MODULE__{fut | ref: ref, tx: tx, erlfdb_future: erlfdb_future, handler: &f.(g.(&1))}
   end
 
+  def set_result(fut, result) do
+    %__MODULE__{handler: f} = fut
+
+    %__MODULE__{
+      fut
+      | tx: nil,
+        erlfdb_future: nil,
+        result: f.(result),
+        handler: &Function.identity/1
+    }
+  end
+
   def result(fut = %__MODULE__{erlfdb_future: nil, handler: f}) do
     f.(fut.result)
   end
 
-  def result(fut = %__MODULE__{tx: :watch}) do
+  def result(fut = %__MODULE__{tx: :deferred}) do
     %__MODULE__{erlfdb_future: erlfdb_future, handler: handler} = fut
     res = :erlfdb.wait(erlfdb_future)
     handler.(res)
@@ -99,6 +119,8 @@ defmodule EctoFoundationDB.Future do
 
   # Future: If there is a wrapping transaction with an `async_*` qualifier, the wait happens here
   def await_stream(futs) do
+    futs = Enum.to_list(futs)
+
     # important to maintain order of the input futures
     reffed_futures =
       for %__MODULE__{ref: ref, erlfdb_future: erlfdb_future} <- futs,

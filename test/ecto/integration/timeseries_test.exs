@@ -1,8 +1,6 @@
 defmodule Ecto.Integration.TimeSeriesTest do
   use Ecto.Integration.Case, async: true
 
-  alias Ecto.Adapters.FoundationDB
-
   alias EctoFoundationDB.Exception.Unsupported
 
   alias Ecto.Integration.TestRepo
@@ -25,15 +23,15 @@ defmodule Ecto.Integration.TimeSeriesTest do
               (e.time >= ^~T[00:00:00] and e.time <= ^~T[00:00:00])
         )
 
-      {:ok, _} =
-        %Event{date: ~D[2070-01-01], user_id: "bar", time: ~T[00:00:00.000000]}
-        |> FoundationDB.usetenant(tenant)
-        |> TestRepo.insert()
+      f =
+        TestRepo.transactional(tenant, fn ->
+          TestRepo.async_insert_all!(Event, [
+            %Event{date: ~D[2070-01-01], user_id: "bar", time: ~T[00:00:00.000000]},
+            %Event{date: ~D[2070-01-01], user_id: "foo", time: ~T[00:00:00.000000]}
+          ])
+        end)
 
-      {:ok, %Event{id: event_id}} =
-        %Event{date: ~D[2070-01-01], user_id: "foo", time: ~T[00:00:00.000000]}
-        |> FoundationDB.usetenant(tenant)
-        |> TestRepo.insert()
+      [_, %Event{id: event_id}] = TestRepo.await(f)
 
       assert_raise Unsupported, ~r/Default Index query mismatch/, fn ->
         TestRepo.all(query, prefix: tenant)
@@ -63,15 +61,15 @@ defmodule Ecto.Integration.TimeSeriesTest do
       tenant = context[:tenant]
 
       # Insert
-      {:ok, event = %Event{id: event_id}} =
-        %Event{date: ~D[2070-01-01], user_id: "foo", time: ~T[00:00:00.000000]}
-        |> FoundationDB.usetenant(tenant)
-        |> TestRepo.insert()
+      f =
+        TestRepo.transactional(tenant, fn ->
+          TestRepo.async_insert_all!(Event, [
+            %Event{date: ~D[2070-01-01], user_id: "foo", time: ~T[00:00:00.000000]},
+            %Event{date: ~D[2777-01-01], user_id: "foo", time: ~T[00:00:00.000000]}
+          ])
+        end)
 
-      {:ok, _} =
-        %Event{date: ~D[2777-01-01], user_id: "foo", time: ~T[00:00:00.000000]}
-        |> FoundationDB.usetenant(tenant)
-        |> TestRepo.insert()
+      [event = %Event{id: event_id}, _] = TestRepo.await(f)
 
       # Because write_primary: false
       nil = TestRepo.get(Event, event.id, prefix: tenant)

@@ -15,6 +15,10 @@ defmodule EctoFoundationDB.Options do
 
   @fdb_max_single_value_size_bytes 100_000
 
+  # :migration_step must be large enough to fit the largest multikey value. Otherwise, the ProgressiveJob
+  # cannot make progress. 1000 is safe with other defaults.
+  @migration_step 1000
+
   @type t() :: [option()]
 
   alias EctoFoundationDB.Exception.Unsupported
@@ -39,7 +43,7 @@ defmodule EctoFoundationDB.Options do
     do: Keyword.get(options, :migrator, nil)
 
   def get(options, :migration_step),
-    do: Keyword.get(options, :migration_step, 1000)
+    do: Keyword.get(options, :migration_step, @migration_step)
 
   def get(options, :metadata_cache),
     do: Keyword.get(options, :metadata_cache, :enabled)

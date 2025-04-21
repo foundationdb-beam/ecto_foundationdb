@@ -3,6 +3,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   @behaviour Ecto.Adapter.Schema
 
   alias EctoFoundationDB.Exception.IncorrectTenancy
+  alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Metadata
@@ -34,6 +35,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       Enum.map(entries, fn data_object ->
         pk_field = Fields.get_pk_field!(schema)
         pk = data_object[pk_field]
+
+        if is_nil(pk) do
+          raise Unsupported, """
+          FoundationDB Adapter does not support inserting records with nil primary keys.
+          """
+        end
+
         future = Future.before_transactional()
         {{pk_field, pk}, future, data_object}
       end)
@@ -160,7 +168,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     Metadata.transactional(tenant, adapter_meta, source, fn tx, _metadata ->
       future_ref = Tx.watch(tenant, tx, {schema, source, context}, {pk_field, pk}, options)
-      Future.new_watch(future_ref, fn _ -> {schema, pk, options} end)
+      Future.new_deferred(future_ref, fn _ -> {schema, pk, options} end)
     end)
   end
 

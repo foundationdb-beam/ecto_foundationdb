@@ -125,7 +125,7 @@ defmodule EctoIntegrationUpsertTest do
     )
   end
 
-  test "conflict_target: nil", context do
+  test "conflict_target: []", context do
     tenant = context[:tenant]
 
     user_a =
@@ -134,7 +134,17 @@ defmodule EctoIntegrationUpsertTest do
     # In using `conflict_target: []`, we pretend that the data doesn't exist. This speeds
     # up data loading but can result in inconsistent indexes if objects do exist in
     # the database that are being blindly overwritten. It should be used with extreme caution.
-    TestRepo.insert!(%User{id: user_a.id, name: "NotJohn"}, prefix: tenant, conflict_target: [])
+    #
+    # `TestRepo.insert!` can be used here but instead we use `TestRepo.async_insert_all!` so that we
+    # can exercise that path
+    f =
+      TestRepo.transactional(tenant, fn ->
+        TestRepo.async_insert_all!(User, [%User{id: user_a.id, name: "NotJohn"}],
+          conflict_target: []
+        )
+      end)
+
+    [_user_b] = TestRepo.await(f)
 
     user_b = TestRepo.get(User, user_a.id, prefix: tenant)
 

@@ -3,6 +3,8 @@ defmodule EctoFoundationDB.Schemas.Event do
 
   use Ecto.Schema
 
+  alias EctoFoundationDB.Versionstamp
+
   import Ecto.Changeset
 
   # Using write_primary: false means that the index will be the
@@ -10,7 +12,7 @@ defmodule EctoFoundationDB.Schemas.Event do
   # on only the primary key
   @schema_context write_primary: false
 
-  @primary_key {:id, :binary_id, autogenerate: true}
+  @primary_key {:id, Versionstamp, autogenerate: false}
 
   schema "events" do
     field(:date, :date)

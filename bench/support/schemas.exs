@@ -1,8 +1,8 @@
 defmodule Ecto.Bench.User do
   use Ecto.Schema
+  alias EctoFoundationDB.Versionstamp
 
-  @primary_key {:id, :binary_id, autogenerate: false}
-  @schema_context usetenant: true
+  @primary_key {:id, Versionstamp, autogenerate: false}
 
   schema "users" do
     field(:name, :string)
@@ -21,8 +21,7 @@ defmodule Ecto.Bench.User do
     :time_attr,
     :date_attr,
     :naive_datetime_attr,
-    :uuid,
-    :id
+    :uuid
   ]
 
   def changeset() do
@@ -34,15 +33,14 @@ defmodule Ecto.Bench.User do
   end
 
   def sample_data do
-    %{
+    %__MODULE__{
       name: "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
       email: "foobar@email.com",
       password: "mypass",
       time_attr: Time.utc_now() |> Time.truncate(:second),
       date_attr: Date.utc_today(),
       naive_datetime_attr: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second),
-      uuid: Ecto.UUID.generate(),
-      id: Ecto.UUID.generate()
+      uuid: Ecto.UUID.generate()
     }
   end
 end
@@ -50,8 +48,9 @@ end
 defmodule Ecto.Bench.Game do
   use Ecto.Schema
 
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @schema_context usetenant: true
+  alias EctoFoundationDB.Versionstamp
+
+  @primary_key {:id, Versionstamp, autogenerate: false}
 
   schema "games" do
     field(:name, :string)

@@ -3,8 +3,10 @@ defmodule EctoFoundationDB.Indexer.Default do
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.Pack
+  alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
+  alias EctoFoundationDB.Tenant
 
   @behaviour Indexer
 
@@ -158,10 +160,21 @@ defmodule EctoFoundationDB.Indexer.Default do
       tx
       |> :erlfdb.get_range(start_key, end_key, limit: limit, wait: true)
       |> Enum.map(fn {fdb_key, fdb_value} ->
-        {index_key, index_object} =
-          get_index_entry(tenant, idx, schema, {fdb_key, Pack.from_fdb_value(fdb_value)})
+        # @todo: this won't work for multikey objects, need to stream_decode.. but I'm not guaranteed to have
+        # the full set of keys.
+        kv_codec =
+          PrimaryKVCodec.new(fdb_key)
+          |> PrimaryKVCodec.with_unpacked_tuple(tenant)
 
-        :erlfdb.set(tx, index_key, index_object)
+        entry =
+          get_index_entry(
+            tenant,
+            idx,
+            schema,
+            {kv_codec, Pack.from_fdb_value(fdb_value)}
+          )
+
+        set_index_entry(tx, entry)
         fdb_key
       end)
 
@@ -179,14 +192,41 @@ defmodule EctoFoundationDB.Indexer.Default do
 
   @impl true
   def set(tenant, tx, idx, schema, kv) do
-    {index_key, index_object} = get_index_entry(tenant, idx, schema, kv)
-    :erlfdb.set(tx, index_key, index_object)
+    entry = get_index_entry(tenant, idx, schema, kv)
+    set_index_entry(tx, entry)
     :ok
+  end
+
+  # FDB API doesn't support setting the versionstamp on both the key and value in the
+  # same transaction. So, we must choose either the key or the value of the index entry.
+  # A natural choice is to use the value to have the versionstamp so that
+  # get_mapped_range works correctly. However, then we lose the ability to manage the index
+  # on updates and clears. Therefore, we must put the versionstamp in the index_key and
+  # which forces our mapper to inspect both the key and value to extract the pk.
+  #
+  # This means that the value portion of the index kv will always be written with an
+  # incomplete versionstamp. Maybe someday FDB will support setting both the key and
+  # value, and this can be cleaned up
+  defp set_index_entry(tx, {index_key, kv_codec = %PrimaryKVCodec{}, false, true}) do
+    :erlfdb.set(tx, index_key, kv_codec.packed)
+  end
+
+  defp set_index_entry(tx, {index_key, kv_codec = %PrimaryKVCodec{}, true, true}) do
+    :erlfdb.set_versionstamped_key(tx, index_key, kv_codec.packed)
+  end
+
+  defp set_index_entry(tx, {index_key, index_object, true, false}) when is_binary(index_object) do
+    :erlfdb.set_versionstamped_key(tx, index_key, index_object)
+  end
+
+  defp set_index_entry(tx, {index_key, index_object, false, false})
+       when is_binary(index_object) do
+    :erlfdb.set(tx, index_key, index_object)
   end
 
   @impl true
   def clear(tenant, tx, idx, schema, kv) do
-    {index_key, _index_object} = get_index_entry(tenant, idx, schema, kv)
+    {index_key, _index_object, _, _} = get_index_entry(tenant, idx, schema, kv)
 
     :erlfdb.clear(tx, index_key)
     :ok
@@ -239,14 +279,28 @@ defmodule EctoFoundationDB.Indexer.Default do
     start_key = options[:start_key] || start_key
 
     if Keyword.get(idx[:options], :mapped?, true) do
-      {start_key, end_key, Pack.primary_mapper(plan.tenant)}
+      {start_key, end_key, mapper(plan.tenant, length(fields))}
     else
       {start_key, end_key}
     end
   end
 
+  # Computes the key-value pair that defines the index indirection
+  #
+  # Key:
+  # { (tenant_prefix,) <<0xFE>>, source, "i", index_name, idx_len, index_values..., pk }
+  #
+  # Value:
+  #   mapped? == true:
+  #     primary_write_key =>
+  #        { (tenant_prefix,) <<0xFD>>, source, "d", pk }
+  #
+  #   mapped? == false:
+  #     data_object
+  #
+  #
   # Note: pk is always first. See insert and update paths
-  defp get_index_entry(tenant, idx, schema, {fdb_key, data_object = [{pk_field, pk_value} | _]}) do
+  defp get_index_entry(tenant, idx, schema, {kv_codec, data_object = [{pk_field, pk_value} | _]}) do
     index_name = idx[:id]
     index_fields = idx[:fields]
     index_options = idx[:options]
@@ -261,21 +315,35 @@ defmodule EctoFoundationDB.Indexer.Default do
         indexkey_encoder(Keyword.get(data_object, idx_field), types[idx_field])
       end
 
-    index_key =
-      Pack.default_index_pack(
-        tenant,
-        source,
-        index_name,
-        length(index_fields),
-        index_values,
-        pk_value
-      )
+    vs? = PrimaryKVCodec.vs?(kv_codec)
+    mapped? = Keyword.get(index_options, :mapped?, true)
 
-    if Keyword.get(index_options, :mapped?, true) do
-      {index_key, fdb_key}
+    index_key =
+      if vs? do
+        Pack.default_index_pack_vs(
+          tenant,
+          source,
+          index_name,
+          length(index_fields),
+          index_values,
+          pk_value
+        )
+      else
+        Pack.default_index_pack(
+          tenant,
+          source,
+          index_name,
+          length(index_fields),
+          index_values,
+          pk_value
+        )
+      end
+
+    if mapped? do
+      {index_key, kv_codec, vs?, mapped?}
     else
       # unmapped index values do not support key/value splitting
-      {index_key, Pack.to_fdb_value(data_object)}
+      {index_key, Pack.to_fdb_value(data_object), vs?, mapped?}
     end
   end
 
@@ -311,21 +379,27 @@ defmodule EctoFoundationDB.Indexer.Default do
     """
   end
 
-  # Future development notes:
-  # This is the beginning of supporting creation of indexes from other indexes
-  # (`write_primary: false` and `mapped?: false`). But the rest of the implementation
-  # is not straightforward.
-  #   1. For example when a `set/4` comes in, if the next index is mapped, then we
-  #      need to compute the key for the `:from` index, but we don't have the information
-  #      to do so.
-  #   2. During migrations, partial indexes are managed in the Indexer and they suffer the
-  #       same problem as above.
-  #
-  # case options[:from] do
-  #   nil ->
-  #     Pack.primary_range(tenant, source)
+  # See key-value design in get_index_entry
+  defp mapper(tenant, idx_len) do
+    offset_fun = fn offset ->
+      [
+        # prefix
+        "{V[#{offset}]}",
 
-  #   from ->
-  #     Pack.default_index_range(tenant, source, from)
-  # end
+        # source
+        "{V[#{offset + 1}]}",
+
+        # namespace
+        "{V[#{offset + 2}]}",
+
+        # pk: get it from the index_key because the versionstamp lives there, not in the value
+        "{K[#{offset + 5 + idx_len}]}",
+
+        # rest
+        "{...}"
+      ]
+    end
+
+    Tenant.extend_tuple(tenant, offset_fun)
+  end
 end
