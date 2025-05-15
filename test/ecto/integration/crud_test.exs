@@ -195,6 +195,33 @@ defmodule Ecto.Integration.CrudTest do
       assert user.name == "Jesse"
     end
 
+    test "query from source", context do
+      tenant = context[:tenant]
+
+      names = ~w/John James Jesse Sarah Bob Steve/
+
+      TestRepo.transaction(
+        fn ->
+          for n <- names do
+            TestRepo.insert(%User{name: n})
+          end
+        end,
+        prefix: tenant
+      )
+
+      assert [
+               ["Bob", _],
+               ["James", _],
+               ["Jesse", _],
+               ["John", _],
+               ["Sarah", _],
+               ["Steve", _]
+             ] =
+               from(u in "users", select: [u.name, u.id])
+               |> TestRepo.all(prefix: tenant)
+               |> Enum.sort()
+    end
+
     test "stream all", context do
       tenant = context[:tenant]
 
