@@ -6,6 +6,8 @@ defmodule EctoFoundationDB.Schema do
     context
   end
 
+  def get_context!(_source, _schema), do: []
+
   def get_source(schema) do
     schema.__schema__(:source)
   end

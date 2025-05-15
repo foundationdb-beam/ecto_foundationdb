@@ -166,6 +166,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     #   4. Post-get filtering (Remove :not_found, remove index conflicts, )
     #   5. Arrange fields based on the select input
     plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params)
+
     Query.all(tenant, adapter_meta, plan)
   end
 
@@ -277,16 +278,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   defp stream_all_after(_acc), do: :ok
 
-  defp select(objs, [], _callback) do
-    Enum.to_list(objs)
-  end
-
   defp select(objs, select_field_names, callback) do
     stream = if is_nil(callback), do: objs, else: callback.(objs)
 
     rows =
       stream
-      |> Stream.map(fn data_object -> Fields.arrange(data_object, select_field_names) end)
+      |> Stream.map(fn data_object ->
+        Fields.arrange(data_object, select_field_names)
+      end)
       |> Fields.strip_field_names_for_ecto()
       |> Enum.to_list()
 
