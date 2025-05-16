@@ -222,6 +222,18 @@ defmodule Ecto.Integration.CrudTest do
                |> Enum.sort()
     end
 
+    test "query between pks", context do
+      tenant = context[:tenant]
+
+      TestRepo.insert(%User{id: "0001", name: "Alice"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0002", name: "Bob"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0003", name: "Charlie"}, prefix: tenant)
+
+      assert [%User{id: "0001", name: "Alice"}, %User{id: "0002", name: "Bob"}] =
+               from(u in User, where: u.id >= ^"0001" and u.id <= ^"0002")
+               |> TestRepo.all(prefix: tenant)
+    end
+
     test "stream all", context do
       tenant = context[:tenant]
 

@@ -119,7 +119,7 @@ defmodule EctoFoundationDB.QueryPlan do
       ) do
     %Equal{
       field: where_field,
-      is_pk?: Fields.get_pk_field!(schema) == where_field,
+      is_pk?: pk?(schema, where_field),
       param: get_pinned_param(params, where_param)
     }
   end
@@ -145,7 +145,7 @@ defmodule EctoFoundationDB.QueryPlan do
              (op_right == :< or op_right == :<=) do
     %Between{
       field: where_field_gt,
-      is_pk?: Fields.get_pk_field!(schema) == where_field_gt,
+      is_pk?: pk?(schema, where_field_gt),
       param_left: get_pinned_param(params, where_param_left),
       param_right: get_pinned_param(params, where_param_right),
       inclusive_left?: op_left == :>=,
@@ -182,5 +182,11 @@ defmodule EctoFoundationDB.QueryPlan do
 
   defp resolve_updates([], _params) do
     []
+  end
+
+  defp pk?(nil, _param), do: nil
+
+  defp pk?(schema, param) do
+    Fields.get_pk_field!(schema) == param
   end
 end
