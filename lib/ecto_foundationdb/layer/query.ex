@@ -78,14 +78,14 @@ defmodule EctoFoundationDB.Layer.Query do
     end)
   end
 
-  defp make_range(
-         _metadata,
-         plan = %QueryPlan{constraints: [%{is_pk?: nil}]},
-         options
-       ) do
-    # @todo: we don't know what the primary key is. How can we query?
-    make_datakey_range(plan, options)
-  end
+  #  defp make_range(
+  #         _metadata,
+  #         plan = %QueryPlan{constraints: [%{is_pk?: nil}]},
+  #         options
+  #       ) do
+  #    # @todo: we don't know what the primary key is. How can we query?
+  #    make_datakey_range(plan, options)
+  #  end
 
   defp make_range(
          _metadata,
@@ -225,13 +225,13 @@ defmodule EctoFoundationDB.Layer.Query do
        when is_binary(param_left) and is_binary(param_right) do
     codec_left = Pack.primary_codec(tenant, plan.source, param_left)
     codec_right = Pack.primary_codec(tenant, plan.source, param_right)
-    {start_key, _} = PrimaryKVCodec.range(codec_left)
-    {_, end_key} = PrimaryKVCodec.range(codec_right)
+    {left_range_start, left_range_end} = PrimaryKVCodec.range(codec_left)
+    {right_range_start, right_range_end} = PrimaryKVCodec.range(codec_right)
 
-    start_key = if between.inclusive_left?, do: start_key, else: :erlfdb_key.strinc(start_key)
+    start_key = if between.inclusive_left?, do: left_range_start, else: left_range_end
 
     end_key =
-      if between.inclusive_right?, do: :erlfdb_key.strinc(end_key), else: end_key
+      if between.inclusive_right?, do: right_range_end, else: right_range_start
 
     start_key = options[:start_key] || start_key
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}

@@ -853,6 +853,32 @@ defmodule Ecto.Adapters.FoundationDB do
   @impl Ecto.Adapter
   defmacro __before_compile__(_env) do
     quote do
+      def async_all_range(queryable, id_s, id_e, opts \\ []) do
+        async_query(fn ->
+          repo = get_dynamic_repo()
+
+          EctoAdapterQueryable.execute_all_range(
+            __MODULE__,
+            repo,
+            queryable,
+            id_s,
+            id_e,
+            Ecto.Repo.Supervisor.tuplet(
+              repo,
+              Keyword.merge(
+                __MODULE__.default_options(:all),
+                opts
+              )
+            )
+          )
+        end)
+      end
+
+      def all_range(queryable, id_s, id_e, opts \\ []) do
+        future = async_all_range(queryable, id_s, id_e, opts)
+        await(future)
+      end
+
       def async_get(queryable, id, opts \\ []),
         do: async_query(fn -> get(queryable, id, opts ++ [returning: {:future, :one}]) end)
 

@@ -35,7 +35,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
           {:nocache,
            {:all,
             query = %Ecto.Query{
-              from: %Ecto.Query.FromExpr{source: {_source, schema}},
+              from: %Ecto.Query.FromExpr{source: {source, schema}},
               select: %Ecto.Query.SelectExpr{
                 fields: select_fields
               }
@@ -61,7 +61,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
             |> select(Fields.parse_select_fields(select_fields), nil)
           end)
 
-        handle_returning(schema, future, options)
+        handle_returning({source, schema}, future, options)
     end
   end
 
@@ -117,6 +117,37 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     |> stream_all(adapter_meta, context, query, params, options)
   end
 
+  def execute_all_range(_module, _repo, queryable, id_s, id_e, {adapter_meta, options}) do
+    %{opts: adapter_opts} = adapter_meta
+
+    {schema, source} = queryable_to_schema_source_tuplet(queryable)
+
+    {select_fields, return_handler} =
+      queryable_to_select_fields_return_handler_tuplet(queryable, schema)
+
+    tenant = queryable_to_tenant(queryable, options)
+
+    {context, tenant} = assert_tenancy!(tenant, source, schema, adapter_opts)
+    plan = QueryPlan.all_range(tenant, source, schema, context, id_s, id_e, options)
+    future = Query.all(tenant, adapter_meta, plan)
+
+    future =
+      Future.apply(future, fn {objs, _continuation} ->
+        case return_handler do
+          :all_from_source ->
+            select_fields = select_fields || get_field_names_union(objs)
+            {select_fields, select(objs, select_fields, nil)}
+
+          _ ->
+            select(objs, select_fields, nil)
+        end
+      end)
+
+    options = options ++ [returning: {:future, return_handler}]
+
+    handle_returning({source, schema}, future, options)
+  end
+
   # Extract limit from an `Ecto.Query`
   defp get_limit(nil), do: nil
   defp get_limit(%Ecto.Query.QueryExpr{expr: limit}), do: limit
@@ -126,8 +157,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
            prefix: tenant,
            from: %Ecto.Query.FromExpr{source: {source, schema}}
          },
-         _adapter_opts
+         adapter_opts
        ) do
+    {context, tenant} = assert_tenancy!(tenant, source, schema, adapter_opts)
+    {context, %Ecto.Query{query | prefix: tenant}}
+  end
+
+  defp assert_tenancy!(tenant, source, schema, _adapter_opts) do
     context = Schema.get_context!(source, schema)
 
     case Tx.safe?(tenant) do
@@ -141,7 +177,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         """
 
       {true, tenant = %Tenant{}} ->
-        {context, %Ecto.Query{query | prefix: tenant}}
+        {context, tenant}
     end
   end
 
@@ -170,12 +206,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     Query.all(tenant, adapter_meta, plan)
   end
 
-  defp handle_returning(schema, future, options) do
+  defp handle_returning({source, schema}, future, options) do
     case options[:returning] do
-      {:future, all_or_one} ->
+      {:future, return_handler} ->
         Process.put(
           Future.token(),
-          {schema, Future.apply(future, fn res -> {all_or_one, res} end)}
+          {{source, schema}, Future.apply(future, fn res -> {return_handler, res} end)}
         )
 
         {0, []}
@@ -278,6 +314,25 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   defp stream_all_after(_acc), do: :ok
 
+  defp get_field_names_union(objs) do
+    {all_fields, _} =
+      objs
+      |> Enum.reduce({[], MapSet.new()}, fn data_object, {list, set_a} ->
+        fields = Keyword.keys(data_object)
+        set_b = MapSet.new(fields)
+
+        if MapSet.size(set_a) == 0 do
+          {fields, set_b}
+        else
+          new_set = MapSet.union(set_a, set_b)
+          new_fields = MapSet.difference(set_a, set_b) |> MapSet.to_list()
+          {list ++ new_fields, new_set}
+        end
+      end)
+
+    all_fields
+  end
+
   defp select(objs, select_field_names, callback) do
     stream = if is_nil(callback), do: objs, else: callback.(objs)
 
@@ -290,5 +345,59 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       |> Enum.to_list()
 
     {length(rows), rows}
+  end
+
+  defp queryable_to_schema_source_tuplet(queryable) do
+    cond do
+      is_atom(queryable) ->
+        {queryable, Schema.get_source(queryable)}
+
+      is_binary(queryable) ->
+        {nil, queryable}
+
+      is_struct(queryable, Ecto.Query) ->
+        %Ecto.Query{from: %Ecto.Query.FromExpr{source: {source, schema}}} = queryable
+        {schema, source}
+    end
+  end
+
+  defp queryable_to_select_fields_return_handler_tuplet(queryable, schema) do
+    case queryable do
+      %Ecto.Query{
+        from: %Ecto.Query.FromExpr{source: {_source, schema}},
+        select: %Ecto.Query.SelectExpr{
+          fields: select_fields
+        }
+      }
+      when is_list(select_fields) and length(select_fields) > 0 ->
+        return_handler = if schema, do: :all, else: :all_from_source
+        {Fields.parse_select_fields(select_fields), return_handler}
+
+      %Ecto.Query{
+        from: %Ecto.Query.FromExpr{source: {_source, nil}},
+        select: %Ecto.Query.SelectExpr{
+          fields: nil,
+          expr: {:&, [], [0]},
+          take: %{0 => {:any, select_fields}}
+        }
+      }
+      when is_list(select_fields) ->
+        {select_fields, :all_from_source}
+
+      _ ->
+        if is_nil(schema) do
+          {nil, :all_from_source}
+        else
+          {schema.__schema__(:fields), :all}
+        end
+    end
+  end
+
+  defp queryable_to_tenant(%Ecto.Query{prefix: tenant}, options) do
+    options[:prefix] || tenant
+  end
+
+  defp queryable_to_tenant(_queryable, options) do
+    options[:prefix]
   end
 end
