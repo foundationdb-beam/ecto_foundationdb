@@ -113,10 +113,16 @@ defmodule EctoFoundationDB.Indexer.Default do
   def indexkey_encoder(x, :utc_datetime_usec),
     do: x |> DateTime.add(0, :microsecond) |> DateTime.to_iso8601(:basic)
 
+  def indexkey_encoder(x, nil) when is_binary(x), do: x
+  def indexkey_encoder(x, nil) when is_boolean(x), do: x
+  def indexkey_encoder(x, nil) when is_atom(x), do: "#{x}"
+  def indexkey_encoder(x, nil) when is_number(x), do: x
+
   def indexkey_encoder(x, _) do
     :erlang.term_to_binary(x)
   end
 
+  def allows_between?(nil), do: true
   def allows_between?(:id), do: true
   def allows_between?(:binary_id), do: true
   def allows_between?(:integer), do: true
@@ -196,7 +202,7 @@ defmodule EctoFoundationDB.Indexer.Default do
   def range(idx, plan = %QueryPlan{constraints: constraints}, options) do
     :ok = assert_constraints(idx[:fields], constraints)
     fields = idx[:fields]
-    types = Schema.field_types(plan.schema, fields)
+    types = if is_nil(plan.schema), do: nil, else: Schema.field_types(plan.schema, fields)
 
     left_values = indexkey_encoder(:left, types, constraints, [])
     right_values = indexkey_encoder(:right, types, constraints, [])
