@@ -20,7 +20,7 @@ defmodule EctoFoundationDB.Layer.Query do
   @doc """
   Executes a query for retrieving data.
   """
-  def all(tenant, adapter_meta, plan, options \\ []) do
+  def all(tenant, adapter_meta, plan, options) do
     # All data retrieval comes through here. We use the Future module to
     # ensure that if the whole thing is executed inside a wrapping transaction,
     # the result is not awaited upon until requested. But if we're creating a new

@@ -51,7 +51,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       _ ->
         {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
 
-        future = execute_all(tenant, adapter_meta, context, query, params)
+        future = execute_all(tenant, adapter_meta, context, query, params, options)
 
         future =
           Future.apply(future, fn {objs, _continuation} ->
@@ -129,7 +129,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
     {context, tenant} = assert_tenancy!(tenant, source, schema, adapter_opts)
     plan = QueryPlan.all_range(tenant, source, schema, context, id_s, id_e, options)
-    future = Query.all(tenant, adapter_meta, plan)
+    future = Query.all(tenant, adapter_meta, plan, options)
 
     future =
       Future.apply(future, fn {objs, _continuation} ->
@@ -189,7 +189,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
            from: %Ecto.Query.FromExpr{source: {source, schema}},
            wheres: wheres
          },
-         params
+         params,
+         options
        ) do
     # Steps:
     #   0. Validate wheres for supported query types
@@ -203,7 +204,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     #   5. Arrange fields based on the select input
     plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params)
 
-    Query.all(tenant, adapter_meta, plan)
+    Query.all(tenant, adapter_meta, plan, options)
   end
 
   defp handle_returning({source, schema}, future, options) do

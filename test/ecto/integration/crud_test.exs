@@ -222,6 +222,11 @@ defmodule Ecto.Integration.CrudTest do
                from(u in "users", select: [u.name, u.id])
                |> TestRepo.all(prefix: tenant)
                |> Enum.sort()
+
+      assert [_, _] =
+               from(u in "users", select: [u.name, u.id])
+               |> TestRepo.all(prefix: tenant, limit: 2)
+               |> Enum.sort()
     end
 
     test "between pks with Ecto.Query", context do
@@ -253,6 +258,14 @@ defmodule Ecto.Integration.CrudTest do
                TestRepo.all_range(from("users", select: [:id, :name]), "0001", "0002",
                  inclusive_right?: true,
                  prefix: tenant
+               )
+               |> Enum.map(&Map.to_list/1)
+
+      assert [[id: "0001", name: "Alice"]] =
+               TestRepo.all_range(from("users", select: [:id, :name]), "0001", "0002",
+                 inclusive_right?: true,
+                 prefix: tenant,
+                 limit: 1
                )
                |> Enum.map(&Map.to_list/1)
     end
