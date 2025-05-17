@@ -44,8 +44,8 @@ defmodule EctoFoundationDB.QueryPlan do
           is_pk?: true,
           param_left: id_s,
           param_right: id_e,
-          inclusive_left?: Keyword.get(options, :inclusive_left?, true),
-          inclusive_right?: Keyword.get(options, :inclusive_right?, false)
+          inclusive_left?: is_nil(id_s) || Keyword.get(options, :inclusive_left?, true),
+          inclusive_right?: is_nil(id_e) || Keyword.get(options, :inclusive_right?, false)
         }
       ],
       updates: [],
