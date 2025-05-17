@@ -135,6 +135,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       Future.apply(future, fn {objs, _continuation} ->
         case return_handler do
           :all_from_source ->
+            objs = Enum.to_list(objs)
             select_fields = select_fields || get_field_names_union(objs)
             {select_fields, select(objs, select_fields, nil)}
 

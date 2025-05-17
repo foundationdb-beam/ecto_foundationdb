@@ -61,7 +61,7 @@ defmodule EctoFoundationDB.Layer.Pack do
     iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
     iex> kv_codec = EctoFoundationDB.Layer.Pack.primary_codec(tenant, "my-source", "my-id")
     iex> EctoFoundationDB.Tenant.unpack(tenant, EctoFoundationDB.Layer.PrimaryKVCodec.pack_key(kv_codec, nil))
-    {"\\xFD", "my-source", "d", <<131, 109, 0, 0, 0, 5, 109, 121, 45, 105, 100>>}
+    {"\\xFD", "my-source", "d", "my-id"}
   """
   def primary_codec(tenant, source, id) do
     namespaced_tuple(source, @data_namespace, [encode_pk_for_key(id)])
@@ -101,7 +101,7 @@ defmodule EctoFoundationDB.Layer.Pack do
     iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
     iex> EctoFoundationDB.Layer.Pack.default_index_pack(tenant, "my-source", "my-index", 1, ["my-val"], "my-id")
     iex> |> then(&EctoFoundationDB.Tenant.unpack(tenant, &1))
-    {"\\xFD", "my-source", "i", "my-index", 1, "my-val", <<131, 109, 0, 0, 0, 5, 109, 121, 45, 105, 100>>}
+    {"\\xFD", "my-source", "i", "my-index", 1, "my-val", "my-id"}
   """
   def default_index_pack(tenant, source, index_name, idx_len, index_values, id) do
     vals =
@@ -162,5 +162,8 @@ defmodule EctoFoundationDB.Layer.Pack do
 
   def from_fdb_value(bin), do: :erlang.binary_to_term(bin)
 
+  def encode_pk_for_key(id) when is_binary(id), do: id
+  def encode_pk_for_key(id) when is_atom(id), do: {:utf8, "#{id}"}
+  def encode_pk_for_key(id) when is_number(id), do: id
   def encode_pk_for_key(id), do: :erlang.term_to_binary(id)
 end

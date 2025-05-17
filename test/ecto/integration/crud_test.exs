@@ -239,6 +239,10 @@ defmodule Ecto.Integration.CrudTest do
       assert [%User{id: "0001", name: "Alice"}, %User{id: "0002", name: "Bob"}] =
                from(u in User, where: u.id >= ^"0001" and u.id <= ^"0002")
                |> TestRepo.all(prefix: tenant)
+
+      assert [%User{id: "0001"}, %User{id: "0002"}, %User{id: "0003"}] =
+               from(u in User, where: u.id >= ^"00" and u.id < ^"1")
+               |> TestRepo.all(prefix: tenant)
     end
 
     test "between pks with all_range", context do
