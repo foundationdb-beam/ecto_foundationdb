@@ -170,7 +170,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ```
 
   In fact, the index value can be any Elixir term. All types support Equal queries (of the form `x.field == "value"`).
-  However, certain Ecto Schema types support Between queries (of the form `x.field >= 10 and x.field < 20`).
+  Certain Ecto Schema types support Between queries (of the form `x.field >= 10 and x.field < 20`).
   See the [Data Types](#module-data-types) section for the list.
 
   See the [Migrations](#module-migrations) section for further details about managing indexes in your application.
@@ -787,12 +787,8 @@ defmodule Ecto.Adapters.FoundationDB do
   ### Other Ecto features
 
   As you test the boundaries of EctoFoundationDB, you'll find that many other Ecto features just plain
-  don't work with this adapter. Ecto has a lot of features, and this adapter is in the early stage.
-  For any given unsupported feature, the underlying reason will be one of the following.
-
-  1. It makes sense for EctoFoundationDB, but it just hasn't been implemented yet.
-  2. The fundamental differences between FDB and SQL backends mean that there is
-     no practical reason to implement it in EctoFoundationDB.
+  don't work with this adapter. Ecto has a lot of features, and this adapter is in active development.
+  Please let us know what you find!
   """
 
   @behaviour Ecto.Adapter
