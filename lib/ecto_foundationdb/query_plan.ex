@@ -174,6 +174,38 @@ defmodule EctoFoundationDB.QueryPlan do
     }
   end
 
+  def get_op(
+        {op, [], [{{:., [], [{:&, [], [0]}, where_field]}, [], []}, where_param]},
+        schema,
+        params
+      )
+      when op in ~w[> >=]a do
+    %Between{
+      field: where_field,
+      is_pk?: pk?(schema, where_field),
+      param_left: get_pinned_param(params, where_param),
+      param_right: nil,
+      inclusive_left?: op == :>=,
+      inclusive_right?: true
+    }
+  end
+
+  def get_op(
+        {op, [], [{{:., [], [{:&, [], [0]}, where_field]}, [], []}, where_param]},
+        schema,
+        params
+      )
+      when op in ~w[< <=]a do
+    %Between{
+      field: where_field,
+      is_pk?: pk?(schema, where_field),
+      param_left: nil,
+      param_right: get_pinned_param(params, where_param),
+      inclusive_left?: true,
+      inclusive_right?: op == :<=
+    }
+  end
+
   def get_op(_, _schema, _params) do
     nil
   end

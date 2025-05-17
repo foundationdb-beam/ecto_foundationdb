@@ -274,6 +274,22 @@ defmodule Ecto.Integration.CrudTest do
                |> Enum.map(&Map.to_list/1)
     end
 
+    test "single inequality pks with Ecto.Query", context do
+      tenant = context[:tenant]
+
+      TestRepo.insert(%User{id: "0001", name: "Alice"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0002", name: "Bob"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0003", name: "Charlie"}, prefix: tenant)
+
+      assert [%User{id: "0002", name: "Bob"}, %User{id: "0003", name: "Charlie"}] =
+               from(u in User, where: u.id > ^"0001")
+               |> TestRepo.all(prefix: tenant)
+
+      assert [%User{id: "0001", name: "Alice"}, %User{id: "0002", name: "Bob"}] =
+               from(u in User, where: u.id <= ^"0002")
+               |> TestRepo.all(prefix: tenant)
+    end
+
     test "stream all", context do
       tenant = context[:tenant]
 

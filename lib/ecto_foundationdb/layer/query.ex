@@ -186,6 +186,7 @@ defmodule EctoFoundationDB.Layer.Query do
     PrimaryKVCodec.stream_decode(kvs, plan.tenant)
   end
 
+  # Selects all data from source
   defp make_datakey_range(
          plan = %QueryPlan{constraints: [%QueryPlan.None{}], layer_data: layer_data},
          options
@@ -195,6 +196,7 @@ defmodule EctoFoundationDB.Layer.Query do
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
+  # Selects data from source where primary key matches exactly
   defp make_datakey_range(
          plan = %QueryPlan{
            tenant: tenant,
@@ -208,6 +210,61 @@ defmodule EctoFoundationDB.Layer.Query do
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, PrimaryKVCodec.range(kv_codec))}
   end
 
+  # Selects data from source where primary key is > / >= given param
+  defp make_datakey_range(
+         plan = %QueryPlan{
+           tenant: tenant,
+           constraints: [
+             between =
+               %QueryPlan.Between{
+                 param_left: param_left,
+                 param_right: nil
+               }
+           ],
+           layer_data: layer_data
+         },
+         options
+       ) do
+    codec_left = Pack.primary_codec(tenant, plan.source, param_left)
+    {left_range_start, left_range_end} = PrimaryKVCodec.range(codec_left)
+    {_right_range_start, right_range_end} = Pack.primary_range(tenant, plan.source)
+
+    start_key = if between.inclusive_left?, do: left_range_start, else: left_range_end
+    end_key = right_range_end
+
+    start_key = options[:start_key] || start_key
+    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
+  end
+
+  # Selects data from source where primary key is < / <= given param
+  defp make_datakey_range(
+         plan = %QueryPlan{
+           tenant: tenant,
+           constraints: [
+             between =
+               %QueryPlan.Between{
+                 param_left: nil,
+                 param_right: param_right
+               }
+           ],
+           layer_data: layer_data
+         },
+         options
+       ) do
+    codec_right = Pack.primary_codec(tenant, plan.source, param_right)
+    {left_range_start, _left_range_end} = Pack.primary_range(tenant, plan.source)
+    {right_range_start, right_range_end} = PrimaryKVCodec.range(codec_right)
+
+    start_key = left_range_start
+
+    end_key =
+      if between.inclusive_right?, do: right_range_end, else: right_range_start
+
+    start_key = options[:start_key] || start_key
+    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
+  end
+
+  # Selects data from source where primary key is between given params
   defp make_datakey_range(
          plan = %QueryPlan{
            tenant: tenant,
@@ -221,8 +278,7 @@ defmodule EctoFoundationDB.Layer.Query do
            layer_data: layer_data
          },
          options
-       )
-       when is_binary(param_left) and is_binary(param_right) do
+       ) do
     codec_left = Pack.primary_codec(tenant, plan.source, param_left)
     codec_right = Pack.primary_codec(tenant, plan.source, param_right)
     {left_range_start, left_range_end} = PrimaryKVCodec.range(codec_left)
