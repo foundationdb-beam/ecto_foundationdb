@@ -86,7 +86,7 @@ defmodule Ecto.Integration.IndexTest do
       assert nil == TestRepo.get(User, user.id, prefix: tenant)
     end
 
-    test "between query fails on value index", context do
+    test "between query on string param", context do
       tenant = context[:tenant]
 
       {:ok, _user1} =
@@ -99,11 +99,37 @@ defmodule Ecto.Integration.IndexTest do
         |> FoundationDB.usetenant(tenant)
         |> TestRepo.insert()
 
-      assert [] ==
+      assert [%User{name: "James"}] =
                from(u in User,
                  where:
                    u.name > "Ja" and
                      u.name < "Jo"
+               )
+               |> TestRepo.all(prefix: tenant)
+    end
+
+    test "greater/lesser query on string param", context do
+      tenant = context[:tenant]
+
+      {:ok, _user1} =
+        %User{name: "John"}
+        |> FoundationDB.usetenant(tenant)
+        |> TestRepo.insert()
+
+      {:ok, _user2} =
+        %User{name: "James"}
+        |> FoundationDB.usetenant(tenant)
+        |> TestRepo.insert()
+
+      assert [%User{name: "James"}, %User{name: "John"}] =
+               from(u in User,
+                 where: u.name > "Ja"
+               )
+               |> TestRepo.all(prefix: tenant)
+
+      assert [%User{name: "James"}] =
+               from(u in User,
+                 where: u.name < "Jo"
                )
                |> TestRepo.all(prefix: tenant)
     end

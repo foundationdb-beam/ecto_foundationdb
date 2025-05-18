@@ -1,6 +1,7 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterAsync do
   @moduledoc false
   alias EctoFoundationDB.Future
+  import Ecto.Query
 
   def async_query(_module, repo, fun) do
     # Executes the repo function (e.g. get, get_by, all, etc). Caller must ensure
@@ -12,27 +13,34 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAsync do
       nil ->
         raise "Pipelining failure"
 
-      {schema, future} ->
-        Future.apply(future, fn {all_or_one, result} ->
-          handle_all_or_one(repo, schema, all_or_one, result)
+      {{source, schema}, future} ->
+        Future.apply(future, fn {return_handler, result} ->
+          invoke_return_handler(repo, source, schema, return_handler, result)
         end)
     end
   after
     Process.delete(Future.token())
   end
 
-  defp handle_all_or_one(repo, schema, all_or_one, result) do
+  defp invoke_return_handler(repo, source, schema, return_handler, result) do
     if is_nil(result), do: raise("Pipelining failure")
+
+    queryable = if is_nil(schema), do: source, else: schema
 
     # Abuse a :noop option here to signal to the backend that we don't
     # actually want to run a query. Instead, we just want the result to
     # be transformed by Ecto's internal logic.
-    case all_or_one do
+    case return_handler do
       :all ->
-        repo.all(schema, noop: result)
+        repo.all(queryable, noop: result)
 
       :one ->
-        repo.one(schema, noop: result)
+        repo.one(queryable, noop: result)
+
+      :all_from_source ->
+        {select_fields, data_result} = result
+        query = from(_ in source, select: ^select_fields)
+        repo.all(query, noop: data_result)
     end
   end
 end

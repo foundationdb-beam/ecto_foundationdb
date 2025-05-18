@@ -13,6 +13,12 @@ given node.
 which allows the client to cache metadata and maintain transactional isolation
 without having to wait on any keys.
 
+### Breaking changes
+
+* Key construction has changed, making databases created on <= 0.4.x incompatible with >=0.5. Specifically, a binary, atom, or
+  number primary key is now encoded in the FDB key with the Tuple layer. All other types remain encoded with term_to_binary.
+  If you need help upgrading your database, please put in a GitHub Issue.
+
 ### New documentation
 
 * [Guide for Operators](operators_manual.html): Describes how to use the `EctoFoundationDB.CLI` functions to rename a field while guaraneeting that all

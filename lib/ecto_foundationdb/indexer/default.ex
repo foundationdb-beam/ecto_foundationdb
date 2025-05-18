@@ -8,15 +8,34 @@ defmodule EctoFoundationDB.Indexer.Default do
 
   @behaviour Indexer
 
-  def indexkey_encoder(_left_or_right, types, %QueryPlan.Equal{param: param, field: field}) do
-    indexkey_encoder(param, types[field])
+  def indexkey_encoder(_left_or_right, _types, [], acc), do: Enum.reverse(acc)
+
+  def indexkey_encoder(
+        left_or_right,
+        types,
+        [%QueryPlan.Equal{param: param, field: field} | rest],
+        acc
+      ) do
+    val = indexkey_encoder(param, types[field])
+    indexkey_encoder(left_or_right, types, rest, [val | acc])
   end
 
-  def indexkey_encoder(:left, types, %QueryPlan.Between{
-        param_left: param,
-        field: field,
-        inclusive_left?: inclusive_left?
-      }) do
+  def indexkey_encoder(:left, types, [%QueryPlan.Between{param_left: nil} | rest], acc) do
+    indexkey_encoder(:left, types, rest, acc)
+  end
+
+  def indexkey_encoder(
+        :left,
+        types,
+        [
+          %QueryPlan.Between{
+            param_left: param,
+            field: field
+          }
+          | rest
+        ],
+        acc
+      ) do
     type = types[field]
 
     if not allows_between?(type) do
@@ -26,14 +45,25 @@ defmodule EctoFoundationDB.Indexer.Default do
     end
 
     val = indexkey_encoder(param, type)
-    if inclusive_left?, do: val, else: :erlfdb_key.strinc(val)
+    indexkey_encoder(:left, types, rest, [val | acc])
   end
 
-  def indexkey_encoder(:right, types, %QueryPlan.Between{
-        param_right: param,
-        field: field,
-        inclusive_right?: inclusive_right?
-      }) do
+  def indexkey_encoder(:right, types, [%QueryPlan.Between{param_right: nil} | rest], acc) do
+    indexkey_encoder(:right, types, rest, acc)
+  end
+
+  def indexkey_encoder(
+        :right,
+        types,
+        [
+          %QueryPlan.Between{
+            param_right: param,
+            field: field
+          }
+          | rest
+        ],
+        acc
+      ) do
     type = types[field]
 
     if not allows_between?(type) do
@@ -43,7 +73,7 @@ defmodule EctoFoundationDB.Indexer.Default do
     end
 
     val = indexkey_encoder(param, type)
-    if inclusive_right?, do: :erlfdb_key.strinc(val), else: val
+    indexkey_encoder(:right, types, rest, [val | acc])
   end
 
   @doc """
@@ -83,10 +113,16 @@ defmodule EctoFoundationDB.Indexer.Default do
   def indexkey_encoder(x, :utc_datetime_usec),
     do: x |> DateTime.add(0, :microsecond) |> DateTime.to_iso8601(:basic)
 
+  def indexkey_encoder(x, nil) when is_binary(x), do: x
+  def indexkey_encoder(x, nil) when is_boolean(x), do: x
+  def indexkey_encoder(x, nil) when is_atom(x), do: "#{x}"
+  def indexkey_encoder(x, nil) when is_number(x), do: x
+
   def indexkey_encoder(x, _) do
     :erlang.term_to_binary(x)
   end
 
+  def allows_between?(nil), do: true
   def allows_between?(:id), do: true
   def allows_between?(:binary_id), do: true
   def allows_between?(:integer), do: true
@@ -166,38 +202,38 @@ defmodule EctoFoundationDB.Indexer.Default do
   def range(idx, plan = %QueryPlan{constraints: constraints}, options) do
     :ok = assert_constraints(idx[:fields], constraints)
     fields = idx[:fields]
-    types = Schema.field_types(plan.schema, fields)
+    types = if is_nil(plan.schema), do: nil, else: Schema.field_types(plan.schema, fields)
 
-    left_values = for op <- constraints, do: indexkey_encoder(:left, types, op)
-    right_values = for op <- constraints, do: indexkey_encoder(:right, types, op)
+    left_values = indexkey_encoder(:left, types, constraints, [])
+    right_values = indexkey_encoder(:right, types, constraints, [])
 
-    start_key =
-      Pack.default_index_pack(
+    {left_range_start, left_range_end} =
+      Pack.default_index_range(
         plan.tenant,
         plan.source,
         idx[:id],
         length(fields),
-        left_values,
-        nil
+        left_values
       )
 
-    end_key =
-      Pack.default_index_pack(
+    {right_range_start, right_range_end} =
+      Pack.default_index_range(
         plan.tenant,
         plan.source,
         idx[:id],
         length(fields),
-        right_values,
-        nil
+        right_values
       )
 
-    end_key =
+    {start_key, end_key} =
       case List.last(constraints) do
         %QueryPlan.Equal{} ->
-          :erlfdb_key.strinc(end_key)
+          {left_range_start, right_range_end}
 
-        _ ->
-          end_key
+        between = %QueryPlan.Between{} ->
+          sk = if between.inclusive_left?, do: left_range_start, else: left_range_end
+          ek = if between.inclusive_right?, do: right_range_end, else: right_range_start
+          {sk, ek}
       end
 
     start_key = options[:start_key] || start_key

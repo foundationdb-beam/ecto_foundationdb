@@ -32,6 +32,27 @@ defmodule EctoFoundationDB.QueryPlan do
     ]
   end
 
+  def all_range(tenant, source, schema, context, id_s, id_e, options) do
+    %__MODULE__{
+      tenant: tenant,
+      source: source,
+      schema: schema,
+      context: context,
+      constraints: [
+        %Between{
+          field: :_,
+          is_pk?: true,
+          param_left: id_s,
+          param_right: id_e,
+          inclusive_left?: is_nil(id_s) || Keyword.get(options, :inclusive_left?, true),
+          inclusive_right?: is_nil(id_e) || Keyword.get(options, :inclusive_right?, false)
+        }
+      ],
+      updates: [],
+      layer_data: %{}
+    }
+  end
+
   def get(tenant, source, schema, context, wheres, updates, params) do
     if is_nil(tenant), do: raise("asda")
 
@@ -150,6 +171,38 @@ defmodule EctoFoundationDB.QueryPlan do
       param_right: get_pinned_param(params, where_param_right),
       inclusive_left?: op_left == :>=,
       inclusive_right?: op_right == :<=
+    }
+  end
+
+  def get_op(
+        {op, [], [{{:., [], [{:&, [], [0]}, where_field]}, [], []}, where_param]},
+        schema,
+        params
+      )
+      when op in ~w[> >=]a do
+    %Between{
+      field: where_field,
+      is_pk?: pk?(schema, where_field),
+      param_left: get_pinned_param(params, where_param),
+      param_right: nil,
+      inclusive_left?: op == :>=,
+      inclusive_right?: true
+    }
+  end
+
+  def get_op(
+        {op, [], [{{:., [], [{:&, [], [0]}, where_field]}, [], []}, where_param]},
+        schema,
+        params
+      )
+      when op in ~w[< <=]a do
+    %Between{
+      field: where_field,
+      is_pk?: pk?(schema, where_field),
+      param_left: nil,
+      param_right: get_pinned_param(params, where_param),
+      inclusive_left?: true,
+      inclusive_right?: op == :<=
     }
   end
 

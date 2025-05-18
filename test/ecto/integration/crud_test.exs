@@ -194,8 +194,10 @@ defmodule Ecto.Integration.CrudTest do
 
       assert user.name == "Jesse"
     end
+  end
 
-    test "query from source", context do
+  describe "query" do
+    test "from source", context do
       tenant = context[:tenant]
 
       names = ~w/John James Jesse Sarah Bob Steve/
@@ -220,9 +222,14 @@ defmodule Ecto.Integration.CrudTest do
                from(u in "users", select: [u.name, u.id])
                |> TestRepo.all(prefix: tenant)
                |> Enum.sort()
+
+      assert [_, _] =
+               from(u in "users", select: [u.name, u.id])
+               |> TestRepo.all(prefix: tenant, limit: 2)
+               |> Enum.sort()
     end
 
-    test "query between pks", context do
+    test "between pks with Ecto.Query", context do
       tenant = context[:tenant]
 
       TestRepo.insert(%User{id: "0001", name: "Alice"}, prefix: tenant)
@@ -231,6 +238,55 @@ defmodule Ecto.Integration.CrudTest do
 
       assert [%User{id: "0001", name: "Alice"}, %User{id: "0002", name: "Bob"}] =
                from(u in User, where: u.id >= ^"0001" and u.id <= ^"0002")
+               |> TestRepo.all(prefix: tenant)
+
+      assert [%User{id: "0001"}, %User{id: "0002"}, %User{id: "0003"}] =
+               from(u in User, where: u.id >= ^"00" and u.id < ^"1")
+               |> TestRepo.all(prefix: tenant)
+    end
+
+    test "between pks with all_range", context do
+      tenant = context[:tenant]
+
+      TestRepo.insert(%User{id: "0001", name: "Alice"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0002", name: "Bob"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0003", name: "Charlie"}, prefix: tenant)
+
+      assert [%User{id: "0001", name: "Alice"}, %User{id: "0002", name: "Bob"}] =
+               TestRepo.all_range(User, "0001", "0003", prefix: tenant)
+
+      assert [%{id: "0002", name: "Bob"}] =
+               TestRepo.all_range("users", "0001", "0003", inclusive_left?: false, prefix: tenant)
+
+      assert [[id: "0001", name: "Alice"], [id: "0002", name: "Bob"]] =
+               TestRepo.all_range(from("users", select: [:id, :name]), "0001", "0002",
+                 inclusive_right?: true,
+                 prefix: tenant
+               )
+               |> Enum.map(&Map.to_list/1)
+
+      assert [[id: "0001", name: "Alice"]] =
+               TestRepo.all_range(from("users", select: [:id, :name]), "0001", "0002",
+                 inclusive_right?: true,
+                 prefix: tenant,
+                 limit: 1
+               )
+               |> Enum.map(&Map.to_list/1)
+    end
+
+    test "single inequality pks with Ecto.Query", context do
+      tenant = context[:tenant]
+
+      TestRepo.insert(%User{id: "0001", name: "Alice"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0002", name: "Bob"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0003", name: "Charlie"}, prefix: tenant)
+
+      assert [%User{id: "0002", name: "Bob"}, %User{id: "0003", name: "Charlie"}] =
+               from(u in User, where: u.id > ^"0001")
+               |> TestRepo.all(prefix: tenant)
+
+      assert [%User{id: "0001", name: "Alice"}, %User{id: "0002", name: "Bob"}] =
+               from(u in User, where: u.id <= ^"0002")
                |> TestRepo.all(prefix: tenant)
     end
 

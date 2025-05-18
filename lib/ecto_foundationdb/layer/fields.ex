@@ -12,7 +12,13 @@ defmodule EctoFoundationDB.Layer.Fields do
   """
   def parse_select_fields(select_fields) do
     select_fields
-    |> Enum.map(fn {{:., _, [{:&, [], [0]}, field]}, [], []} -> field end)
+    |> Enum.map(fn
+      {{:., _, [{:&, [], [0]}, field]}, [], []} ->
+        field
+
+      atom when is_atom(atom) ->
+        atom
+    end)
   end
 
   @doc """

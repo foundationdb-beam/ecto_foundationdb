@@ -20,7 +20,7 @@ defmodule EctoFoundationDB.Layer.Query do
   @doc """
   Executes a query for retrieving data.
   """
-  def all(tenant, adapter_meta, plan, options \\ []) do
+  def all(tenant, adapter_meta, plan, options) do
     # All data retrieval comes through here. We use the Future module to
     # ensure that if the whole thing is executed inside a wrapping transaction,
     # the result is not awaited upon until requested. But if we're creating a new
@@ -76,15 +76,6 @@ defmodule EctoFoundationDB.Layer.Query do
       plan = make_range(metadata, plan, [])
       tx_delete_range(tx, plan, metadata)
     end)
-  end
-
-  defp make_range(
-         _metadata,
-         plan = %QueryPlan{constraints: [%{is_pk?: nil}]},
-         options
-       ) do
-    # @todo: we don't know what the primary key is. How can we query?
-    make_datakey_range(plan, options)
   end
 
   defp make_range(
@@ -186,6 +177,7 @@ defmodule EctoFoundationDB.Layer.Query do
     PrimaryKVCodec.stream_decode(kvs, plan.tenant)
   end
 
+  # Selects all data from source
   defp make_datakey_range(
          plan = %QueryPlan{constraints: [%QueryPlan.None{}], layer_data: layer_data},
          options
@@ -209,29 +201,36 @@ defmodule EctoFoundationDB.Layer.Query do
   end
 
   defp make_datakey_range(
-         plan = %QueryPlan{
-           tenant: tenant,
-           constraints: [
-             between =
-               %QueryPlan.Between{
-                 param_left: param_left,
-                 param_right: param_right
-               }
-           ],
-           layer_data: layer_data
-         },
+         plan = %QueryPlan{constraints: [between = %QueryPlan.Between{}]},
          options
-       )
-       when is_binary(param_left) and is_binary(param_right) do
-    codec_left = Pack.primary_codec(tenant, plan.source, param_left)
-    codec_right = Pack.primary_codec(tenant, plan.source, param_right)
-    {start_key, _} = PrimaryKVCodec.range(codec_left)
-    {_, end_key} = PrimaryKVCodec.range(codec_right)
+       ) do
+    %QueryPlan{tenant: tenant, layer_data: layer_data} = plan
 
-    start_key = if between.inclusive_left?, do: start_key, else: :erlfdb_key.strinc(start_key)
+    %QueryPlan.Between{
+      param_left: param_left,
+      inclusive_left?: inclusive_left?,
+      param_right: param_right,
+      inclusive_right?: inclusive_right?
+    } = between
 
-    end_key =
-      if between.inclusive_right?, do: :erlfdb_key.strinc(end_key), else: end_key
+    {left_range_start, left_range_end} =
+      if is_nil(param_left) do
+        Pack.primary_range(tenant, plan.source)
+      else
+        codec_left = Pack.primary_codec(tenant, plan.source, param_left)
+        PrimaryKVCodec.range(codec_left)
+      end
+
+    {right_range_start, right_range_end} =
+      if is_nil(param_right) do
+        Pack.primary_range(tenant, plan.source)
+      else
+        codec_right = Pack.primary_codec(tenant, plan.source, param_right)
+        PrimaryKVCodec.range(codec_right)
+      end
+
+    start_key = if inclusive_left?, do: left_range_start, else: left_range_end
+    end_key = if inclusive_right?, do: right_range_end, else: right_range_start
 
     start_key = options[:start_key] || start_key
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
