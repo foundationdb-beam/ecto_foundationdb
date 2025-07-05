@@ -11,7 +11,9 @@ defmodule EctoFoundationDB.Layer.Pack do
   # Schema migrations are stored as primary writes and default indexes with
   #     {@migration_prefix, source, ...}
 
+  alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Tenant
+  alias EctoFoundationDB.Versionstamp
 
   @adapter_prefix <<0xFD>>
   @migration_prefix <<0xFE>>
@@ -58,14 +60,15 @@ defmodule EctoFoundationDB.Layer.Pack do
 
   ## Examples
 
+    iex> alias EctoFoundationDB.Layer.PrimaryKVCodec
     iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
-    iex> kv_codec = EctoFoundationDB.Layer.Pack.primary_codec(tenant, "my-source", "my-id")
-    iex> EctoFoundationDB.Tenant.unpack(tenant, EctoFoundationDB.Layer.PrimaryKVCodec.pack_key(kv_codec, nil))
+    iex> %{packed: packed} = EctoFoundationDB.Layer.Pack.primary_codec(tenant, "my-source", "my-id") |> PrimaryKVCodec.with_packed_key()
+    iex> EctoFoundationDB.Tenant.unpack(tenant, packed)
     {"\\xFD", "my-source", "d", "my-id"}
   """
   def primary_codec(tenant, source, id) do
     namespaced_tuple(source, @data_namespace, [encode_pk_for_key(id)])
-    |> then(&Tenant.primary_codec(tenant, &1))
+    |> then(&Tenant.primary_codec(tenant, &1, Versionstamp.incomplete?(id)))
   end
 
   def primary_write_key_to_codec(tenant, key) when is_binary(key) do
@@ -75,7 +78,21 @@ defmodule EctoFoundationDB.Layer.Pack do
   end
 
   def primary_write_key_to_codec(tenant, tuple) do
-    Tenant.primary_codec(tenant, tuple)
+    Tenant.primary_codec(tenant, tuple, false)
+  end
+
+  def get_vs_from_key_tuple(key_tuple) do
+    case Kernel.elem(key_tuple, tuple_size(key_tuple) - 1) do
+      vs = {:versionstamp, _, _, _} ->
+        vs
+
+      _ ->
+        raise Unsupported, """
+        Versionstamp must be the last element of the key tuple. Instead we found
+
+        #{inspect(key_tuple)}
+        """
+    end
   end
 
   @doc """
@@ -89,10 +106,6 @@ defmodule EctoFoundationDB.Layer.Pack do
     namespaced_range(tenant, source, @data_namespace, [])
   end
 
-  def primary_mapper(tenant) do
-    Tenant.primary_mapper(tenant)
-  end
-
   @doc """
   We assume index_values are already encoded as binaries
 
@@ -104,11 +117,18 @@ defmodule EctoFoundationDB.Layer.Pack do
     {"\\xFD", "my-source", "i", "my-index", 1, "my-val", "my-id"}
   """
   def default_index_pack(tenant, source, index_name, idx_len, index_values, id) do
-    vals =
-      ["#{index_name}", idx_len] ++
-        index_values ++ if(is_nil(id), do: [], else: [encode_pk_for_key(id)])
-
+    vals = default_index_pack_vals(index_name, idx_len, index_values, id)
     namespaced_pack(tenant, source, @index_namespace, vals)
+  end
+
+  def default_index_pack_vs(tenant, source, index_name, idx_len, index_values, id) do
+    vals = default_index_pack_vals(index_name, idx_len, index_values, id)
+    namespaced_pack_vs(tenant, source, @index_namespace, vals)
+  end
+
+  defp default_index_pack_vals(index_name, idx_len, index_values, id) do
+    ["#{index_name}", idx_len] ++
+      index_values ++ if(is_nil(id), do: [], else: [encode_pk_for_key(id)])
   end
 
   def default_index_range(tenant, source, index_name) do
@@ -133,6 +153,11 @@ defmodule EctoFoundationDB.Layer.Pack do
   def namespaced_pack(tenant, source, namespace, vals) do
     namespaced_tuple(source, namespace, vals)
     |> then(&Tenant.pack(tenant, &1))
+  end
+
+  def namespaced_pack_vs(tenant, source, namespace, vals) do
+    namespaced_tuple(source, namespace, vals)
+    |> then(&Tenant.pack_vs(tenant, &1))
   end
 
   defp namespaced_tuple(source, namespace, vals) when is_list(vals) do
@@ -162,6 +187,7 @@ defmodule EctoFoundationDB.Layer.Pack do
 
   def from_fdb_value(bin), do: :erlang.binary_to_term(bin)
 
+  def encode_pk_for_key(id = {:versionstamp, _, _, _}), do: id
   def encode_pk_for_key(id) when is_binary(id), do: id
   def encode_pk_for_key(id) when is_atom(id), do: {:utf8, "#{id}"}
   def encode_pk_for_key(id) when is_number(id), do: id

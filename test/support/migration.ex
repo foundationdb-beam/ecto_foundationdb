@@ -21,3 +21,16 @@ defmodule EctoFoundationDB.Integration.Migration.EventIndex do
     ]
   end
 end
+
+defmodule EctoFoundationDB.Integration.Migration.QueueItemIndex do
+  @moduledoc false
+  alias EctoFoundationDB.Schemas.QueueItem
+  use EctoFoundationDB.Migration
+
+  @impl true
+  def change() do
+    [
+      create(index(QueueItem, [:author]))
+    ]
+  end
+end

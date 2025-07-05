@@ -6,9 +6,7 @@ defmodule EctoFoundationDB.Indexer do
   A faulty implementation may lead to data loss or corruption.
   """
   alias EctoFoundationDB.Index
-  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Metadata
-  alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Tenant
@@ -48,25 +46,25 @@ defmodule EctoFoundationDB.Indexer do
   def create(tenant, tx, idx, schema, range, limit),
     do: idx[:indexer].create(tenant, tx, idx, schema, range, limit)
 
-  def set(tenant, tx, metadata, schema, kv = {k, _}) do
+  def set(tenant, tx, metadata, schema, kv = {kv_codec, _}) do
     %Metadata{indexes: idxs, partial_indexes: partial_idxs} = metadata
-    idxs = idxs ++ filter_partials(partial_idxs, k, [])
+    idxs = idxs ++ filter_partials(partial_idxs, kv_codec.packed, [])
 
     for idx <- idxs,
         do: idx[:indexer].set(tenant, tx, idx, schema, kv)
   end
 
-  def clear(tenant, tx, metadata, schema, kv = {k, _}) do
+  def clear(tenant, tx, metadata, schema, kv = {kv_codec, _}) do
     %Metadata{indexes: idxs, partial_indexes: partial_idxs} = metadata
-    idxs = idxs ++ filter_partials(partial_idxs, k, [])
+    idxs = idxs ++ filter_partials(partial_idxs, kv_codec.packed, [])
 
     for idx <- idxs,
         do: idx[:indexer].clear(tenant, tx, idx, schema, kv)
   end
 
-  def update(tenant, tx, metadata, schema, kv = {k, _}, updates) do
+  def update(tenant, tx, metadata, schema, kv = {kv_codec, _}, updates) do
     %Metadata{indexes: idxs, partial_indexes: partial_idxs} = metadata
-    idxs = idxs ++ filter_partials(partial_idxs, k, [])
+    idxs = idxs ++ filter_partials(partial_idxs, kv_codec.packed, [])
 
     for idx <- idxs do
       apply(
@@ -85,11 +83,14 @@ defmodule EctoFoundationDB.Indexer do
     do: apply(idx[:indexer], :unpack, [idx, plan, fdb_kv], &_unpack/3)
 
   ## Default behavior for standard key-value response
-  defp _unpack(_idx, plan, {fdb_key, fdb_value}),
-    do: %DecodedKV{
-      codec: Pack.primary_write_key_to_codec(plan.tenant, fdb_key),
-      data_object: Pack.from_fdb_value(fdb_value)
-    }
+  defp _unpack(_idx, plan, {fdb_key, fdb_value}) do
+    [kv] =
+      [{fdb_key, fdb_value}]
+      |> PrimaryKVCodec.stream_decode(plan.tenant)
+      |> Enum.to_list()
+
+    kv
+  end
 
   # Default behavior for get_mapped_range response
   defp _unpack(_idx, _plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, []}),
@@ -126,11 +127,11 @@ defmodule EctoFoundationDB.Indexer do
     end
   end
 
-  defp __update(tenant, tx, idx, schema, kv = {k, v}, updates) do
+  defp __update(tenant, tx, idx, schema, kv = {kv_codec, v}, updates) do
     idx[:indexer].clear(tenant, tx, idx, schema, kv)
 
     kv =
-      {k,
+      {kv_codec,
        v
        |> Keyword.merge(updates[:set] || [])
        |> Keyword.drop(updates[:clear] || [])}

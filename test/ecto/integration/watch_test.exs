@@ -14,13 +14,13 @@ defmodule EctoIntegrationWatchTest do
     # Our process has created a watch and will receive a message when the struct
     # changes.
     {assigns, futures} =
-      TestRepo.transaction(
+      TestRepo.transactional(
+        tenant,
         fn ->
           alice = TestRepo.insert!(%User{name: "Alice"})
           future = TestRepo.watch(alice, label: :mykey)
           {%{assigns | mykey: alice}, [future]}
-        end,
-        prefix: tenant
+        end
       )
 
     assert %User{name: "Alice"} = assigns.mykey
@@ -28,13 +28,13 @@ defmodule EctoIntegrationWatchTest do
     # This transaction emulates some other change to the DB that is independent of
     # our process. For simplicity, we're using the same tenant ref, but that isn't required.
     {:ok, _alicia} =
-      TestRepo.transaction(
+      TestRepo.transactional(
+        tenant,
         fn ->
           TestRepo.get_by!(User, name: "Alice")
           |> User.changeset(%{name: "Alicia"})
           |> TestRepo.update()
-        end,
-        prefix: tenant
+        end
       )
 
     # Here we emulate our process's event loop (e.g. handle_info). When we receive a {ref, :ready}

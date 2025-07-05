@@ -196,7 +196,6 @@ defmodule EctoFoundationDB.Layer.Query do
          _options
        ) do
     kv_codec = Pack.primary_codec(tenant, plan.source, param)
-
     %QueryPlan{plan | layer_data: Map.put(layer_data, :range, PrimaryKVCodec.range(kv_codec))}
   end
 

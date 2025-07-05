@@ -22,6 +22,7 @@ defmodule EctoFoundationDB.Layer.Tx do
   end
 
   def in_tx?(), do: not is_nil(Process.get(@tx))
+  def get(), do: Process.get(@tx)
 
   def safe?(nil) do
     case in_tenant_tx?() do
@@ -120,61 +121,20 @@ defmodule EctoFoundationDB.Layer.Tx do
   def insert_all(tenant, tx, {schema, source, context}, entries, metadata, options) do
     write_primary = Schema.get_option(context, :write_primary)
 
-    tx_insert = TxInsert.new(tenant, schema, metadata, write_primary, options)
+    tx_insert = TxInsert.new(tenant, schema, source, metadata, write_primary, options)
 
-    case options[:conflict_target] do
-      [] ->
-        # We pretend that the data doesn't exist. This speeds up data loading
-        # but can result in inconsistent indexes if objects do exist in
-        # the database that are being blindly overwritten.
+    assert_conflict_target!(options)
 
-        Enum.each(entries, fn {{pk_field, pk}, _future, data_object} ->
-          kv_codec = Pack.primary_codec(tenant, source, pk)
-          data_object = Fields.to_front(data_object, pk_field)
-          kv = %DecodedKV{codec: kv_codec, data_object: data_object}
-          TxInsert.do_set(tx_insert, tx, kv, nil)
-        end)
+    read_before_write = options[:conflict_target] !== []
 
-        length(entries)
-
-      nil ->
-        entries
-        |> Enum.map(fn {{pk_field, pk}, future, data_object} ->
-          data_object = Fields.to_front(data_object, pk_field)
-
-          kv_codec = Pack.primary_codec(tenant, source, pk)
-
-          kv_codec
-          |> then(&async_get(tenant, tx, &1, future))
-          |> Future.apply(
-            &TxInsert.do_set(
-              tx_insert,
-              tx,
-              %DecodedKV{codec: kv_codec, data_object: data_object},
-              &1
-            )
-          )
-        end)
-        |> Future.await_stream()
-        |> Stream.map(&Future.result/1)
-        |> Enum.reduce(0, fn
-          nil, sum -> sum
-          :ok, sum -> sum + 1
-        end)
-
-      unsupported_conflict_target ->
-        raise Unsupported, """
-        The :conflict_target option provided is not supported by the FoundationDB Adapter.
-
-        You provided #{inspect(unsupported_conflict_target)}.
-
-        Instead, we suggest you do not use this option at all.
-
-        FoundationDB Adapter does support `conflict_target: []`, but this using this option
-        can result in inconsistent indexes, and it is only recommended if you know ahead of
-        time that your data does not already exist in the database.
-        """
-    end
+    entries
+    |> Stream.map(&TxInsert.insert_one(tx_insert, tx, &1, read_before_write))
+    |> Future.await_stream()
+    |> Stream.map(&Future.result/1)
+    |> Enum.reduce(0, fn
+      nil, sum -> sum
+      :ok, sum -> sum + 1
+    end)
   end
 
   def update_pks(
@@ -254,7 +214,9 @@ defmodule EctoFoundationDB.Layer.Tx do
       :erlfdb.clear_range(tx, fdb_key, clear_end)
     end
 
-    Indexer.update(tenant, tx, metadata, schema, {fdb_key, orig_data_object}, updates)
+    kv_codec = PrimaryKVCodec.with_packed_key(kv_codec)
+
+    Indexer.update(tenant, tx, metadata, schema, {kv_codec, orig_data_object}, updates)
   end
 
   def delete_pks(tenant, tx, {schema, source, _context}, pk_futures, metadata) do
@@ -298,15 +260,16 @@ defmodule EctoFoundationDB.Layer.Tx do
       ) do
     %DecodedKV{codec: kv_codec, data_object: v} = decoded_kv
 
-    {start_key, end_key} = PrimaryKVCodec.range(kv_codec)
+    kv_codec = %{packed: key} = PrimaryKVCodec.with_packed_key(kv_codec)
 
     if decoded_kv.multikey? do
+      {start_key, end_key} = PrimaryKVCodec.range(kv_codec)
       :erlfdb.clear_range(tx, start_key, end_key)
     else
-      :erlfdb.clear(tx, start_key)
+      :erlfdb.clear(tx, key)
     end
 
-    Indexer.clear(tenant, tx, metadata, schema, {start_key, v})
+    Indexer.clear(tenant, tx, metadata, schema, {kv_codec, v})
   end
 
   def clear_all(tenant, tx, %{opts: _adapter_opts}, source) do
@@ -324,8 +287,9 @@ defmodule EctoFoundationDB.Layer.Tx do
       raise Unsupported, "Watches on schemas with `write_primary: false` are not supported."
     end
 
-    kv_codec = Pack.primary_codec(tenant, source, pk)
-    key = PrimaryKVCodec.pack_key(kv_codec, nil)
+    %{packed: key} =
+      Pack.primary_codec(tenant, source, pk)
+      |> PrimaryKVCodec.with_packed_key()
 
     fut = :erlfdb.watch(tx, key)
     fut
@@ -349,7 +313,7 @@ defmodule EctoFoundationDB.Layer.Tx do
           data_object: Pack.from_fdb_value(v)
         }
 
-      kvs ->
+      kvs when is_list(kvs) ->
         [kv] =
           kvs
           |> PrimaryKVCodec.stream_decode(tenant)
@@ -359,5 +323,28 @@ defmodule EctoFoundationDB.Layer.Tx do
     end
 
     Future.set(future, tx, future_ref, f)
+  end
+
+  defp assert_conflict_target!(options) do
+    case options[:conflict_target] do
+      [] ->
+        :ok
+
+      nil ->
+        :ok
+
+      unsupported_conflict_target ->
+        raise Unsupported, """
+        The :conflict_target option provided is not supported by the FoundationDB Adapter.
+
+        You provided #{inspect(unsupported_conflict_target)}.
+
+        Instead, we suggest you do not use this option at all.
+
+        FoundationDB Adapter does support `conflict_target: []`, but this using this option
+        can result in inconsistent indexes, and it is only recommended if you know ahead of
+        time that your data does not already exist in the database.
+        """
+    end
   end
 end

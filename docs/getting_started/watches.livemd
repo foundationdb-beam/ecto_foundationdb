@@ -46,13 +46,13 @@ defmodule Quote do
   end
 
   def like!(tenant, id) do
-      Repo.transaction(fn ->
+      Repo.transactional(tenant, fn ->
         quote = Repo.get!(Quote, id)
 
         quote
         |> changeset(%{likes: quote.likes+1})
         |> Repo.update!()
-      end, prefix: tenant)
+      end)
   end
 end
 
@@ -107,13 +107,12 @@ defmodule DemoLive do
   end
 
   defp assign_watch!(socket, schema, label, id) do
-    {struct, futures} = Repo.transaction(
+    {struct, futures} = Repo.transactional(socket.assigns.tenant,
       fn ->
         struct = Repo.get!(schema, id)
         future = Repo.watch(struct, label: label)
         {struct, [future]}
-      end,
-      prefix: socket.assigns.tenant)
+      end)
 
     socket
     |> assign(label, struct)
@@ -194,7 +193,7 @@ defmodule ChangeFavoriteQuote do
   @id "my-favorite-quote"
 
   def to(tenant, author, content) do
-    Repo.transaction(fn ->
+    Repo.transactional(tenant, fn ->
       Repo.get(Quote, @id)
       |> Quote.changeset(%{
         author: author,
@@ -203,7 +202,7 @@ defmodule ChangeFavoriteQuote do
         likes: 0
       })
       |> Repo.update()
-      end, prefix: tenant)
+      end)
   end
 end
 ```

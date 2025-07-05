@@ -13,19 +13,20 @@ defmodule EctoIntegrationPipelineTest do
     template = %{name: "", inserted_at: ts, updated_at: ts}
 
     {2, nil} =
-      TestRepo.transaction(
+      TestRepo.transactional(
+        tenant,
         fn ->
           users = [%{template | name: "John"}, %{template | name: "James"}]
           TestRepo.insert_all(User, users)
-        end,
-        prefix: tenant
+        end
       )
 
     john = TestRepo.get_by!(User, [name: "John"], prefix: tenant)
     james = TestRepo.get_by!(User, [name: "James"], prefix: tenant)
 
     [john, james] =
-      TestRepo.transaction(
+      TestRepo.transactional(
+        tenant,
         fn ->
           futures =
             [f1, f2] = [
@@ -39,15 +40,15 @@ defmodule EctoIntegrationPipelineTest do
           assert nil == f2.result
 
           TestRepo.await(futures)
-        end,
-        prefix: tenant
+        end
       )
 
     assert john.name == "John"
     assert james.name == "James"
 
     [john, james] =
-      TestRepo.transaction(
+      TestRepo.transactional(
+        tenant,
         fn ->
           futures =
             [f1, f2] = [
@@ -61,15 +62,15 @@ defmodule EctoIntegrationPipelineTest do
           assert nil == f2.result
 
           TestRepo.await(futures)
-        end,
-        prefix: tenant
+        end
       )
 
     assert john.name == "John"
     assert james.name == "James"
 
     [all_john, all_james] =
-      TestRepo.transaction(
+      TestRepo.transactional(
+        tenant,
         fn ->
           futures =
             [f1, f2] = [
@@ -83,15 +84,15 @@ defmodule EctoIntegrationPipelineTest do
           assert nil == f2.result
 
           TestRepo.await(futures)
-        end,
-        prefix: tenant
+        end
       )
 
     assert hd(all_john).name == "John"
     assert hd(all_james).name == "James"
 
     [john, james] =
-      TestRepo.transaction(
+      TestRepo.transactional(
+        tenant,
         fn ->
           futures =
             [f1, f2] = [
@@ -105,8 +106,7 @@ defmodule EctoIntegrationPipelineTest do
           assert nil == f2.result
 
           TestRepo.await(futures)
-        end,
-        prefix: tenant
+        end
       )
 
     assert john.name == "John"
@@ -135,7 +135,8 @@ defmodule EctoIntegrationPipelineTest do
 
     # Here is the nontrival transaction that we are testing
     load_fn = fn ->
-      TestRepo.transaction(
+      TestRepo.transactional(
+        tenant,
         fn ->
           nils =
             for(u <- users, do: TestRepo.async_get(User, u.id))
@@ -146,8 +147,7 @@ defmodule EctoIntegrationPipelineTest do
           else
             raise "Conflict"
           end
-        end,
-        prefix: tenant
+        end
       )
     end
 

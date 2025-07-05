@@ -27,8 +27,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterTransaction do
   def transaction(_adapter_meta, options, function) when is_function(function, 1) do
     tenant = assert_tenancy!(options)
 
-    FoundationDB.transactional(tenant, fn repo ->
-      function.(repo)
+    FoundationDB.transactional(tenant, fn tx ->
+      function.(tx)
     end)
   catch
     {:__ectofdbtxrollback__, value} -> {:error, value}

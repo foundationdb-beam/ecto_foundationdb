@@ -164,13 +164,24 @@ defmodule EctoFoundationDB.Tenant do
   keyspace.
   """
   def pack(tenant, tuple) when is_tuple(tuple) do
-    tuple = tenant.backend.extend_tuple(tuple, tenant.meta)
+    tuple = extend_tuple(tenant, tuple)
     :erlfdb_tuple.pack(tuple)
   end
 
-  def primary_codec(tenant, tuple) when is_tuple(tuple) do
-    tuple = tenant.backend.extend_tuple(tuple, tenant.meta)
-    PrimaryKVCodec.new(tuple)
+  @doc """
+  Packs an Elixir tuple having an incomplete versionstamp into an FDB-encoded Tuple.
+
+  Caller should proceed to use `:erlfdb.set_versionstamped_key` or `:erlfdb.set_versionstamped_value`
+  as needed.
+  """
+  def pack_vs(tenant, tuple) when is_tuple(tuple) do
+    tuple = extend_tuple(tenant, tuple)
+    :erlfdb_tuple.pack_vs(tuple)
+  end
+
+  def primary_codec(tenant, tuple, vs \\ false) when is_tuple(tuple) do
+    tuple = extend_tuple(tenant, tuple)
+    PrimaryKVCodec.new(tuple, vs)
   end
 
   def unpack(tenant, tuple) do
@@ -180,18 +191,12 @@ defmodule EctoFoundationDB.Tenant do
   end
 
   def range(tenant, tuple) when is_tuple(tuple) do
-    tuple
-    |> tenant.backend.extend_tuple(tenant.meta)
+    extend_tuple(tenant, tuple)
     |> :erlfdb_tuple.range()
   end
 
-  def primary_mapper(tenant) do
-    # mapper indexes are offset by the number of elements added by `extend_tuple`
-    fn offset ->
-      # tuple elements: (head,) prefix, source, namespace, id, get_range
-      for(i <- offset..(offset + 3), do: "{V[#{i}]}") ++ ["{...}"]
-    end
-    |> tenant.backend.extend_tuple(tenant.meta)
+  def extend_tuple(tenant, tuple_or_fun) do
+    tenant.backend.extend_tuple(tuple_or_fun, tenant.meta)
   end
 
   def set_metadata_cache(tenant, enabled_or_disabled)

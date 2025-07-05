@@ -70,12 +70,10 @@ defmodule Sensor do
   alias Ecto.Adapters.FoundationDB
 
   def record(n, tenant) do
-    MyApp.Repo.transaction(
+    MyApp.Repo.transactional(tenant,
       fn ->
         for _ <- 1..n, do: record(nil)
-      end,
-      prefix: tenant
-    )
+      end)
   end
 
   def record(tenant) do

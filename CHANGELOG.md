@@ -12,12 +12,19 @@ given node.
 * Metadata cache now makes use of FoundationDB's `\xff/metadataVersion` key,
 which allows the client to cache metadata and maintain transactional isolation
 without having to wait on any keys.
+* Added support for versionstamping with `EctoFoundationDB.Versionstamp`.
 
 ### Breaking changes
 
 * Key construction has changed, making databases created on <= 0.4.x incompatible with >=0.5. Specifically, a binary, atom, or
   number primary key is now encoded in the FDB key with the Tuple layer. All other types remain encoded with term_to_binary.
   If you need help upgrading your database, please put in a GitHub Issue.
+
+### Deprecations
+
+* Ecto has deprecated `Repo.transaction` in favor of `Repo.transact`. Since this decision doesn't align with FoundationDB's view of
+transactions, we have chosen to deprecate `Repo.transaction` in favor of `Repo.transactional`. This terminology better aligns with
+`:erlfdb` and provides a distinction from RDBMS transactions, and allows us to avoid future deprecations.
 
 ### New documentation
 

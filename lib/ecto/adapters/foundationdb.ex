@@ -133,14 +133,14 @@ defmodule Ecto.Adapters.FoundationDB do
   do not include the `:prefix` option. See [Transactions](#module-transactions) for more information.
 
   ```elixir
-  MyApp.Repo.transaction(fn ->
+  MyApp.Repo.transactional(tenant, fn ->
     alice = MyApp.Repo.get!(User, alice.id)
     if alice.balance > 0 do
       MyApp.Repo.update(User.changeset(alice, %{balance: alice.balance - 1}))
     else
       raise "Overdraft"
     end
-  end, prefix: tenant)
+  end)
   ```
 
   ## Indexes and queries
@@ -264,20 +264,20 @@ defmodule Ecto.Adapters.FoundationDB do
   ## Transactions
 
   All work involving FDB happens in a transaction, including each Repo function call (e.g. `Repo.get/1`). EctoFoundationDB also
-  exposes the `Repo.transaction/2` function, allowing you to group operations together with transactional isolation ([ACID](https://en.wikipedia.org/wiki/ACID)
+  exposes the `Repo.transactional/2` function, allowing you to group operations together with transactional isolation ([ACID](https://en.wikipedia.org/wiki/ACID)
   and [globally serializable](https://en.wikipedia.org/wiki/Global_serializability))
 
   ```elixir
-  MyApp.Repo.transaction(fn ->
+  MyApp.Repo.transactional(tenant, fn ->
       # Ecto work
-    end, prefix: tenant)
+    end)
   ```
 
   Please read the [FoundationDB Developer Guide on transactions](https://apple.github.io/foundationdb/developer-guide.html#transaction-basics)
   for more information about how to develop with transactions.
 
   It's important to remember that even though the database gives ACID guarantees about the
-  keys updated in a transaction, the Elixir function passed into `Repo.transaction/2`
+  keys updated in a transaction, the Elixir function passed into `Repo.transactional/2`
   may be executed more than once when any conflicts
   are encountered. For this reason, your function must not have any side effects other than
   the database operations. For example, do not publish any messages to other processes
@@ -285,19 +285,19 @@ defmodule Ecto.Adapters.FoundationDB do
 
   ```elixir
   # Do not do this!
-  MyApp.Repo.transaction(fn ->
+  MyApp.Repo.transactional(tenant, fn ->
     MyApp.Repo.insert(%User{name: "Alice"})
     ...
     Phoenix.PubSub.broadcast("my_topic", "new_user") # Not safe! :(
-  end, prefix: tenant)
+  end)
   ```
 
   ```elixir
   # Instead, do this:
-  MyApp.Repo.transaction(fn ->
+  MyApp.Repo.transactional(tenant, fn ->
     MyApp.Repo.insert(%User{name: "Alice"})
     ...
-  end, prefix: tenant)
+  end)
   Phoenix.PubSub.broadcast("my_topic", "new_user") # Safe :)
   ```
 
@@ -445,6 +445,56 @@ defmodule Ecto.Adapters.FoundationDB do
 
   See [Indexes and Queries](#module-indexes-and-queries) for more information.
 
+  ### Versionstamps (autoincrement)
+
+  FoundationDB provides a mechanism for generating an automatically increasing integer id, called a versionstamp.
+  Versionstamps are guaranteed to be unique and increasing along with the total order of the serializable transactions.
+  They are not guaranteed to increment by exactly one.
+
+  To use Versionstamps, your Schema must have a primary key field of type `Versionstamp`, with `autogenerate: false`.
+
+  ```elixir
+  @primary_key {:id, EctoFoundationDB.Versionstamp, autogenerate: false}
+  ```
+
+  The easiest way to insert such records is by using `Repo.async_insert_all/3`. This function follows a different
+  approach than the other `Repo.async_*` functions: the future must be awaited *outside* of the transaction.
+
+  ```elixir
+  alias MyApp.{Repo, Event}
+  future = Repo.transactional(tenant, fn ->
+    Repo.async_insert_all(Event, [%Event{data: "event_a"}, %Event{data: "event_b"}])
+  end)
+  [event_a, event_b] = Repo.await(future)
+  ```
+
+  The purpose of the async/await pattern here is for the FDB client to discover the committed versionstamp, and to apply
+  it to the inserted structs after the transaction is committed. Since the computation of the versionstamp is a
+  commit-time decision by the FoundationDB Server, the final value is unknowable by the client until after the transaction
+  is committed.
+
+  Inspecting the contents of the `:id` field will reveal the structure of the versionstamp:
+
+  ```elixir
+  event_a.id
+  # => {:versionstamp, 1111, 2222, 0}
+  ```
+
+  The Versionstamp can be converted to an integer using the `EctoFoundationDB.Versionstamp.to_integer/1` function.
+
+  ```elixir
+  alias EctoFoundationDB.Versionstamp
+  Versionstamp.to_integer(event_a.id)
+  # => 4771854286848
+  ```
+
+  Note:
+
+   - The approach to inserting above is guaranteed to have zero conflicts with other keys in the database.
+   - A group of records inserted in a single transaction **will** have versionatmps that are guaranteed to increment by 1.
+   - Records inserted in different transactions **will not** have a predictable versionstamp distance from each other. That distance
+     is very unlikely to ever be 1.
+
   ## Watches
 
   [FoundationDB Watches](https://apple.github.io/foundationdb/developer-guide.html#watches) are
@@ -504,11 +554,11 @@ defmodule Ecto.Adapters.FoundationDB do
     # ...
 
     def init(tenant) do
-      {alice, future} = MyRepo.transaction(
+      {alice, future} = MyRepo.transactional(tenant,
                           fn ->
                             alice = MyRepo.get_by(User, name: "Alice")
                             {alice, MyRepo.watch(alice, label: :alice)}
-                          end, prefix: tenant)
+                          end)
       assigns = [alice: alice]
       {:ok, %{assigns: assigns, futures: [future]}}
     end
@@ -591,12 +641,12 @@ defmodule Ecto.Adapters.FoundationDB do
   list is constructed and the transaction ends.
 
   ```elixir
-  result = MyApp.Repo.transaction(fn ->
+  result = MyApp.Repo.transactional(tenant, fn ->
     [
       MyApp.Repo.get_by(User, name: "Alice"),
       MyApp.Repo.get_by(User, name: "Bob")
     ]
-  end, prefix: tenant)
+  end)
 
   [alice, bob] = result
   ```
@@ -606,14 +656,14 @@ defmodule Ecto.Adapters.FoundationDB do
   is constructed, and then we `await` on them.
 
   ```elixir
-  result = MyApp.Repo.transaction(fn ->
+  result = MyApp.Repo.transactional(tenant, fn ->
     futures = [
       MyApp.Repo.async_get_by(User, name: "Alice"),
       MyApp.Repo.async_get_by(User, name: "Bob")
     ]
 
     MyApp.Repo.await(futures)
-  end, prefix: tenant)
+  end)
 
   [alice, bob] = result
   ```
@@ -631,14 +681,14 @@ defmodule Ecto.Adapters.FoundationDB do
   Consider this example, where we're retrieving all Users and all Posts in the same transaction.
 
   ```elixir
-  MyApp.Repo.transaction(fn ->
+  MyApp.Repo.transactional(tenant, fn ->
     futures = [
       MyApp.Repo.async_all(User),
       MyApp.Repo.async_all(Post)
     ]
 
     MyApp.Repo.await(futures)
-  end, prefix: tenant)
+  end)
   ```
 
   Each query individually executed would be multiple round-trips to the database as pages of results are retrieved.
@@ -849,6 +899,13 @@ defmodule Ecto.Adapters.FoundationDB do
   @impl Ecto.Adapter
   defmacro __before_compile__(_env) do
     quote do
+      def transactional(tenant, fun), do: Ecto.Adapters.FoundationDB.transactional(tenant, fun)
+
+      def async_insert_all!(schema, list, opts \\ []) do
+        repo = get_dynamic_repo()
+        EctoAdapterAsync.async_insert_all!(__MODULE__, repo, schema, list, opts)
+      end
+
       def async_all_range(queryable, id_s, id_e, opts \\ []) do
         async_query(fn ->
           repo = get_dynamic_repo()
