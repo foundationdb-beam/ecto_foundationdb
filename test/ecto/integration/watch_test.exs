@@ -2,6 +2,7 @@ defmodule EctoIntegrationWatchTest do
   use Ecto.Integration.Case, async: true
 
   alias Ecto.Integration.TestRepo
+  alias EctoFoundationDB.Future
   alias EctoFoundationDB.Schemas.User
 
   test "watch", context do
@@ -37,16 +38,20 @@ defmodule EctoIntegrationWatchTest do
         end
       )
 
+    [watch_future] = futures
+    watch_ref = Future.ref(watch_future)
+
     # Here we emulate our process's event loop (e.g. handle_info). When we receive a {ref, :ready}
     # message, we use TestRepo to retrieve the result according to the previously specified :label.
     # The returned map is merged into our assigns. We also create another watch so that the event loop
     # could continue in the same manner. Instead of looping, we end our test.
     {assigns, futures} =
       receive do
-        {ref, :ready} when is_reference(ref) ->
+        {^watch_ref, :ready} when is_reference(watch_ref) ->
           {ready_assigns, futures} =
-            TestRepo.assign_ready(futures, [ref], watch?: true, prefix: tenant)
+            TestRepo.assign_ready(futures, [watch_ref], watch?: true, prefix: tenant)
 
+          assert [_] = ready_assigns
           assert is_list(ready_assigns)
 
           {Map.merge(assigns, Enum.into(ready_assigns, %{})), futures}
@@ -55,7 +60,9 @@ defmodule EctoIntegrationWatchTest do
           raise "Future result not received within 100 msec"
       end
 
-    assert %User{name: "Alicia"} = assigns.mykey
     assert [_] = futures
+    refute watch_future == hd(futures)
+
+    assert %User{name: "Alicia"} = assigns.mykey
   end
 end
