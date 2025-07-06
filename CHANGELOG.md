@@ -2,6 +2,10 @@
 
 ## v0.5.0 (TBD)
 
+### Bug fixes
+
+* Fixed a bug where index creation was failing for multikey objects
+
 ### Enhancements
 
 * Added ability to drop an index.

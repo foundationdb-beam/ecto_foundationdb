@@ -9,6 +9,7 @@ defmodule Ecto.Integration.MigrationsTest do
 
   alias EctoFoundationDB.CLI
   alias EctoFoundationDB.Exception.Unsupported
+  alias EctoFoundationDB.Test.Util
 
   import Ecto.Query
 
@@ -17,7 +18,7 @@ defmodule Ecto.Integration.MigrationsTest do
       tenant = context[:tenant]
 
       {:ok, _user1} =
-        %User{name: "John"}
+        %User{name: "John", notes: Util.get_random_bytes(100_000)}
         |> FoundationDB.usetenant(tenant)
         |> TestRepo.insert()
 

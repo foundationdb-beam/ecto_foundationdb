@@ -2,6 +2,7 @@ defmodule EctoFoundationDB.Indexer.Default do
   @moduledoc false
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
+  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.QueryPlan
@@ -159,21 +160,10 @@ defmodule EctoFoundationDB.Indexer.Default do
     keys =
       tx
       |> :erlfdb.get_range(start_key, end_key, limit: limit, wait: true)
-      |> Enum.map(fn {fdb_key, fdb_value} ->
-        # @todo: this won't work for multikey objects, need to stream_decode.. but I'm not guaranteed to have
-        # the full set of keys.
-        kv_codec =
-          PrimaryKVCodec.new(fdb_key)
-          |> PrimaryKVCodec.with_unpacked_tuple(tenant)
-
-        entry =
-          get_index_entry(
-            tenant,
-            idx,
-            schema,
-            {kv_codec, Pack.from_fdb_value(fdb_value)}
-          )
-
+      |> PrimaryKVCodec.stream_decode(tenant, emit_db_key?: true)
+      |> Enum.map(fn {fdb_key, decoded_kv} ->
+        %DecodedKV{codec: kv_codec, data_object: data_object} = decoded_kv
+        entry = get_index_entry(tenant, idx, schema, {kv_codec, data_object})
         set_index_entry(tx, entry)
         fdb_key
       end)

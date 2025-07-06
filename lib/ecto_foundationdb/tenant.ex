@@ -181,7 +181,9 @@ defmodule EctoFoundationDB.Tenant do
 
   def primary_codec(tenant, tuple, vs \\ false) when is_tuple(tuple) do
     tuple = extend_tuple(tenant, tuple)
+
     PrimaryKVCodec.new(tuple, vs)
+    |> PrimaryKVCodec.with_packed_key()
   end
 
   def unpack(tenant, tuple) do
