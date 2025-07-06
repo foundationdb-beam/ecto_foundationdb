@@ -1,5 +1,5 @@
 defmodule Ecto.Integration.LargeMigrationTest do
-  use Ecto.Integration.MigrationsCase, async: false
+  use Ecto.Integration.MigrationsCase, async: true
 
   alias Ecto.Integration.TestRepo
 

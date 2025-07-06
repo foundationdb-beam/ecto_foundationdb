@@ -1,5 +1,5 @@
 defmodule Ecto.Integration.MigrationsTest do
-  use Ecto.Integration.MigrationsCase, async: false
+  use Ecto.Integration.MigrationsCase, async: true
 
   alias Ecto.Integration.TestRepo
 
@@ -40,7 +40,7 @@ defmodule Ecto.Integration.MigrationsTest do
       assert_raise(Unsupported, ~r/FoundationDB Adapter supports either/, query_fun)
 
       # Ecto.Integration.MigrationsCase skips the migrations on purpose, so now we'll apply them manually.
-      :ok = CLI.migrate!(TestRepo, log: false)
+      :ok = CLI.migrate!(TestRepo, log: false, prefix: [tenant.id])
 
       assert [%User{name: "John"}, %User{name: "John"}] = query_fun.()
     end
