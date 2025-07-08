@@ -26,7 +26,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ```elixir
   defp deps do
     [
-      {:ecto_foundationdb, "~> 0.4"}
+      {:ecto_foundationdb, "~> 0.5"}
     ]
   end
   ```
@@ -447,7 +447,7 @@ defmodule Ecto.Adapters.FoundationDB do
 
   ### Versionstamps (autoincrement)
 
-  FoundationDB provides a mechanism for generating an automatically increasing integer id, called a versionstamp.
+  FoundationDB provides a mechanism for generating an automatically increasing integer id, called a [versionstamp](https://apple.github.io/foundationdb/data-modeling.html#versionstamps).
   Versionstamps are guaranteed to be unique and increasing along with the total order of the serializable transactions.
   They are not guaranteed to increment by exactly one.
 
@@ -582,6 +582,54 @@ defmodule Ecto.Adapters.FoundationDB do
 
   And `Repo.assign_ready/3` provides a conventional way to retrieve the result and register a new watch
   in one go, so that updates to Alice are not missed.
+
+  For more on watches, see
+
+  * [Sync Engine Part I - Single Object](watches.html)
+  * [Schema Metadata](#module-schema-metadata)
+
+  ## Schema Metadata
+
+  In addition to [Default Indexes](#module-indexes-and-queries), EctoFDB provides another built-in Indexer called `EctoFoundationDB.Indexer.SchemaMetadata`.
+
+  This is an optional Indexer that will keep track of various actions for a Schema:
+
+  - `inserts`: Incremented for each insert or upsert
+  - `deletes`: Incremented for each delete
+  - `collection`: Incremented for each insert, update, or delete
+  - `updates`: Incremented for each update (via `Repo.update/*`)
+  - `changes`: Incremented for each insert, upsert, delete, or update
+
+  These keys are useful for creating watches that will notify your application of those actions. For example, if you create a watch on the `inserts` key,
+  your application will be notified when a new record is inserted, and you can react however you like.
+
+  The counters are scoped to a particular tenant. If you desire a different scoping for the watches, then we recommend you split your tenant.
+
+  To create this Indexer, you use [Migrations](#module-migrations):
+
+  ```elixir
+  defmodule MyApp.UserSchemaMetadata do
+    @moduledoc false
+    use EctoFoundationDB.Migration
+
+    @impl true
+    def change() do
+      [create metadata(User)]
+    end
+  end
+  ```
+
+  ```elixir
+    def migrations() do
+      [
+        # ...
+        {2, MyApp.UserSchemaMetadata},
+        # ...
+      ]
+    end
+  ```
+
+  For more on these watches, see [Sync Engine Part II - Collections](collection_syncing.html)
 
   ## Upserts
 

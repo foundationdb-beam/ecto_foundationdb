@@ -1,0 +1,257 @@
+# Sync Engine Part II - Collections
+
+```elixir
+Mix.install([
+  {:phoenix_playground, "~> 0.1.0"},
+  {:ecto_foundationdb, github: "foundationdb-beam/ecto_foundationdb"}
+])
+```
+
+## Intro
+
+Using [FoundationDB Watches](https://hexdocs.pm/ecto_foundationdb/Ecto.Adapters.FoundationDB.html#module-watches), we can set up a mini read-path Sync Engine. It will automatically propagate new data to all mounted LiveViews with push-messaging delivered from the database directly to the LiveView process.
+
+This is Part II, where we explore syncing a collection of objects to the LiveView page. See [Part I](docs/getting_started/watches.livemd) for syncing a single object.
+
+## Setup Ecto
+
+First, we set up Ecto, defining a Quote schema, and starting the Repo.
+
+This is similar to Part I, but there's a key difference: we create a `SchemaMetadata` index on `Quote`. This metadata is required to drive watches on the collection of quotes.
+
+```elixir
+defmodule Quote do
+  use Ecto.Schema
+
+  alias Ecto.Changeset
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+
+  schema "quotes" do
+    field(:author, :string)
+    field(:content, :string)
+    field(:likes, :integer, default: 0)
+    field(:as_of, :naive_datetime)
+    timestamps()
+  end
+
+  def changeset(quote, params \\ %{}) do
+    quote
+    |> Changeset.cast(params, [:author, :content, :likes, :as_of])
+  end
+
+  def like!(tenant, id) do
+      Repo.transactional(tenant, fn ->
+        quote = Repo.get!(Quote, id)
+
+        quote
+        |> changeset(%{likes: quote.likes+1})
+        |> Repo.update!()
+      end)
+  end
+end
+
+defmodule QuoteMetadata do
+  use EctoFoundationDB.Migration
+
+  @impl true
+  def change() do
+    [create(metadata(Quote))]
+  end
+end
+
+defmodule Repo do
+  use Ecto.Repo, otp_app: :my_app, adapter: Ecto.Adapters.FoundationDB
+
+  use EctoFoundationDB.Migrator
+
+  @impl true
+  def migrations(), do: [
+    {1, QuoteMetadata}
+  ]
+end
+
+# ------------------------------------------------------------------
+# This section contains some set-up within Livebook that's typically
+# handled instead in your application startup and config.
+Application.put_env(:my_app, Repo,
+  open_db: &EctoFoundationDB.Sandbox.open_db/1,
+  storage_id: EctoFoundationDB.Sandbox
+)
+
+{:ok, _} = Ecto.Adapters.FoundationDB.ensure_all_started(Repo.config(), :temporary)
+Repo.start_link(log: false)
+# ------------------------------------------------------------------
+
+alias EctoFoundationDB.Tenant
+
+tenant = Tenant.open!(Repo, "experiment-with-watches-in-liveview-ii")
+
+```
+
+Next, we create two `Quote`s in the DB. Our LiveView page will render the full list.
+
+```elixir
+quotes = [
+  {"René Descartes", "Cogito, ergo sum."},
+  {"Heraclitus", "One cannot step twice in the same river."}
+]
+
+for {author, content} <- quotes, do:
+  Repo.insert!(%Quote{author: author, content: content}, prefix: tenant)
+```
+
+## Setup LiveView
+
+Just like in Part I, we're using Phoenix Playground to create a sample LiveView. Here are the key takeways:
+
+1. In `sync_all!/4`, we're initializing our mini sync engine. Notice that we use `Repo.all` and `SchemaMetadata.watch_changes`.
+
+2. `handle_ready/2` is the same LiveView hook as Part I.
+
+3. `sync_all!/4` and `handle_ready/2` both contain nothing specific to the Quote schema. This is a general purpose approach that can be re-used for any other schema types.
+
+```elixir
+defmodule DemoLive do
+  use Phoenix.LiveView
+
+  alias EctoFoundationDB.Indexer.SchemaMetadata
+
+  def mount(_params, _session, socket) do
+
+    tenant = Tenant.open!(Repo, "experiment-with-watches-in-liveview-ii")
+
+    {:ok, socket
+      |> assign(tenant: tenant)
+      |> sync_all!(Quote, :quotes)
+    }
+  end
+
+  # 1. Initialize our mini Sync Engine. Similar to Part I, except this time we
+  #    use Repo.all and SchemaMetadata.watch_changes
+  defp sync_all!(socket, schema, label) do
+    {list, futures} = Repo.transactional(socket.assigns.tenant,
+      fn ->
+        list = Repo.all(schema)
+        future = SchemaMetadata.watch_changes(schema, label: label)
+        {list, [future]}
+      end)
+
+    socket
+    |> assign(label, list)
+    |> assign(futures: futures)
+    |> attach_hook({:assign_ready, schema, label}, :handle_info, &handle_ready/2)
+  end
+
+  # 2. LiveView server hook that receives a message from the database layer
+  #    and updates the assigns (same as Part I)
+  defp handle_ready({ref, :ready}, socket) do
+
+    %{assigns: assigns} = socket
+
+    {new_assigns, futures} = Repo.assign_ready(
+        assigns.futures,
+        [ref],
+        watch?: true,
+        prefix: assigns.tenant
+      )
+    {:halt, socket
+            |> assign(new_assigns)
+            |> assign(futures: futures)}
+  end
+
+  def render(assigns) do
+    ~H"""
+    <div class="content">
+      <h1>A list of Quotes</h1>
+      <ul>
+        <li :for={quote <- @quotes}>
+          <figure>
+            <blockquote><%= quote.content %></blockquote>
+            <h3><figcaption>- <%= quote.author %></figcaption></h3>
+
+            <p>
+              <label>Likes: </label>
+              <span><%= quote.likes %></span>
+              <button phx-click="like" phx-value-id={quote.id}>👍</button>
+            </p>
+          </figure>
+        </li>
+      </ul>
+    </div>
+
+    <style type="text/css">
+      h1 { text-align: center; }
+      h3 { text-align: right; }
+      h6 { text-align: right; }
+      p { text-align: center; }
+      ul li { list-style-type: none; }
+
+      .content {
+        max-width: 500px;
+        margin: auto;
+      }
+    </style>
+    """
+  end
+
+  # 3. Receive the "like" event and update the DB
+  def handle_event("like", params, socket) do
+
+    Quote.like!(socket.assigns.tenant, params["id"])
+
+    {:noreply, socket}
+  end
+
+end
+
+PhoenixPlayground.start(live: DemoLive)
+```
+
+Open a web browser to http://localhost:4000 side-by-side with this Livebook, so that you can watch the updates in real-time.
+
+You can click the Like button and observe that the value changes. Notice that we are not pushing this value to the assigns explicitly. It's being handled automatically in our mini sync engine in `handle_info`. This is all wired together because of our use of `watch_changes` on the `Quote` schema. There are various functions that notify your app in different circumstances:
+
+* `watch_inserts`: Notifies when an insert or upsert happens
+* `watch_deletes`: Notifies when a delete happens
+* `watch_collection`: Notifies when either an insert or a delete happens
+* `watch_updates`: Notifies when an update (`Repo.update`) happens
+* `watch_changes`: Notifies when an insert, delete, or update happens
+
+All of these notifications are scoped to the tenant.
+
+## Inserting and deleting some Quotes
+
+To demonstrate that the page will update as expected, we can insert and delete some Quote objects while we have the page open.
+
+```elixir
+tenant = Tenant.open!(Repo, "experiment-with-watches-in-liveview-ii")
+
+defmodule CollectQuotes do
+  def insert(tenant, author, content) do
+    Repo.insert!(%Quote{author: author, content: content}, prefix: tenant)
+  end
+
+  def delete_random(tenant) do
+    Repo.transactional(tenant, fn ->
+      Repo.all(Quote)
+      |> Enum.random()
+      |> Repo.delete!()
+    end)
+  end
+end
+```
+
+```elixir
+CollectQuotes.insert(tenant, "Elixir", "Hello World")
+```
+
+```elixir
+CollectQuotes.delete_random(tenant)
+```
+
+## Takeaways
+
+In Part I, we showed how EctoFDB can implement a mini Sync Engine for the read-path of a single object in the database. In Part II, we upgraded it to a collection of objects on the tenant.
+
+These two approaches can be combined easily - the LiveView hook we defined works for both types at the same time. The only difference is how you initialize on mount.

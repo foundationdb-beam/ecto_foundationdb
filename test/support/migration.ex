@@ -1,11 +1,23 @@
 defmodule EctoFoundationDB.Integration.Migration.UserIndex do
   @moduledoc false
   alias EctoFoundationDB.Schemas.User
+  alias EctoFoundationDB.Schemas.User2
   use EctoFoundationDB.Migration
 
   @impl true
   def change() do
-    [create(index(User, [:name]))]
+    [create(index(User, [:name])), create(index(User2, [:name]))]
+  end
+end
+
+defmodule EctoFoundationDB.Integration.Migration.UserSchemaMetadata do
+  @moduledoc false
+  alias EctoFoundationDB.Schemas.User
+  use EctoFoundationDB.Migration
+
+  @impl true
+  def change() do
+    [create(metadata(User))]
   end
 end
 

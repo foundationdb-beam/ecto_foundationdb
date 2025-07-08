@@ -99,7 +99,7 @@ defmodule EctoFoundationDBProgressiveJobTest do
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Tenant
 
-  use Ecto.Integration.MigrationsCase
+  use Ecto.Integration.MigrationsCase, async: true
 
   @n_seed 1000
 

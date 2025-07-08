@@ -1,4 +1,4 @@
-# A Sync Engine in LiveView with FoundationDB Watches
+# Sync Engine Part I - Single Object
 
 ```elixir
 Mix.install([
@@ -140,7 +140,7 @@ defmodule DemoLive do
   # 2. LiveView server hook that receives a message from the database layer
   #    and updates the assigns
   defp handle_ready({ref, :ready}, socket) do
-    
+
     %{assigns: assigns} = socket
 
     {new_assigns, futures} = Repo.assign_ready(

@@ -33,7 +33,7 @@ defmodule EctoFoundationDB.CLI do
     options = Keyword.merge(repo.config(), options)
     db = FoundationDB.db(repo)
 
-    ids = Tenant.Backend.list(db, options)
+    ids = options[:tenant_ids] || Tenant.Backend.list(db, options)
 
     fun = fn id ->
       tenant = Tenant.open(repo, id, options)
@@ -83,6 +83,16 @@ defmodule EctoFoundationDB.CLI do
         # However, we allow for both.
         _ = Tenant.open(repo, id, options)
         :ok
+
+      tenant_ids when is_list(tenant_ids) ->
+        up_fun = fn _tenant -> :ok end
+
+        run_concurrently_for_all_tenants!(
+          repo,
+          up_fun,
+          Keyword.put(options, :tenant_ids, tenant_ids)
+        )
+        |> Stream.run()
 
       tenant ->
         _ = Tenant.open(repo, tenant.id, options)

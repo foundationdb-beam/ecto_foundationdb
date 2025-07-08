@@ -7,10 +7,10 @@ defmodule Ecto.Integration.ManagedTenantCase do
   setup do
     {:ok, _} = TestManagedTenantRepo.start_link()
 
-    context = TenantsForCase.setup(TestManagedTenantRepo, log: false)
+    context = TenantForCase.setup(TestManagedTenantRepo, log: false)
 
     on_exit(fn ->
-      TenantsForCase.exit(TestManagedTenantRepo, context[:tenant_id], context[:other_tenant_id])
+      TenantForCase.exit(TestManagedTenantRepo, context[:tenant_id])
     end)
 
     {:ok, context}
@@ -18,7 +18,7 @@ defmodule Ecto.Integration.ManagedTenantCase do
 end
 
 defmodule Ecto.Integration.ManagedTenantTest do
-  use Ecto.Integration.ManagedTenantCase, async: false
+  use Ecto.Integration.ManagedTenantCase, async: true
 
   alias Ecto.Adapters.FoundationDB
   alias Ecto.Integration.TestManagedTenantRepo

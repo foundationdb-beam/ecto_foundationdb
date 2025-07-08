@@ -137,10 +137,10 @@ defmodule Ecto.Integration.CliTest do
     # -------------------------------------------------------
     app_release(0)
 
-    context = TenantsForCase.setup(CliTest.Repo, log: false)
+    context = TenantForCase.setup(CliTest.Repo, log: false)
 
     on_exit(fn ->
-      TenantsForCase.exit(CliTest.Repo, context[:tenant_id], context[:other_tenant_id])
+      TenantForCase.exit(CliTest.Repo, context[:tenant_id])
     end)
 
     context

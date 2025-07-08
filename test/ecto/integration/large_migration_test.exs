@@ -1,12 +1,12 @@
 defmodule Ecto.Integration.LargeMigrationTest do
-  use Ecto.Integration.MigrationsCase, async: false
+  use Ecto.Integration.MigrationsCase, async: true
 
   alias Ecto.Integration.TestRepo
 
   alias EctoFoundationDB.Tenant
 
   alias EctoFoundationDB.Integration.TestMigrator
-  alias EctoFoundationDB.Schemas.User
+  alias EctoFoundationDB.Schemas.User2
 
   import Ecto.Query
 
@@ -21,7 +21,7 @@ defmodule Ecto.Integration.LargeMigrationTest do
     j = j |> Integer.to_string() |> String.pad_leading(4, "0")
 
     {:ok, _user1} =
-      TestRepo.insert(%User{id: "id-#{j}-#{i}-#{tag}", name: "name-#{j}-#{i}-#{tag}"},
+      TestRepo.insert(%User2{id: "id-#{j}-#{i}-#{tag}", name: "name-#{j}-#{i}-#{tag}"},
         prefix: tenant
       )
   end
@@ -114,12 +114,12 @@ defmodule Ecto.Integration.LargeMigrationTest do
 
     assert((@num_chunks + 1) * @chunk_size == length(all_users))
 
-    assert(length(all_users) == length(TestRepo.all(User, prefix: tenant)))
+    assert(length(all_users) == length(TestRepo.all(User2, prefix: tenant)))
 
     assert(
       length(all_users) ==
         length(
-          TestRepo.all(from(u in User, where: u.name > ^"\x00" and u.name < ^"\xF0"),
+          TestRepo.all(from(u in User2, where: u.name > ^"\x00" and u.name < ^"\xF0"),
             prefix: tenant
           )
         )

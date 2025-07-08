@@ -11,6 +11,7 @@ defmodule Ecto.Integration.CrudTest do
 
   alias EctoFoundationDB.Exception.IncorrectTenancy
   alias EctoFoundationDB.Exception.Unsupported
+  alias EctoFoundationDB.Sandbox
 
   import Ecto.Query
 
@@ -59,7 +60,10 @@ defmodule Ecto.Integration.CrudTest do
 
     test "insert fail, cross tenancy transaction", context do
       tenant = context[:tenant]
-      other_tenant = context[:other_tenant]
+
+      other_tenant_id = Ecto.UUID.autogenerate()
+      other_tenant = Sandbox.checkout(TestRepo, other_tenant_id, log: false)
+
       {:ok, user} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
 
       # Crossing a struct into another tenant is allowed when using Repo functions.
@@ -93,6 +97,8 @@ defmodule Ecto.Integration.CrudTest do
                    :ok
                  end
                )
+
+      Sandbox.checkin(TestRepo, other_tenant_id)
     end
 
     test "handles nulls when querying correctly", context do

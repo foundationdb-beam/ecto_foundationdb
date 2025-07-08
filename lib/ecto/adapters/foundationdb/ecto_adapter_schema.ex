@@ -152,7 +152,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     end
   end
 
-  def watch(_module, _repo, struct, {adapter_meta, options}) do
+  def watch(_module, _repo, nil, {_adapter_meta, _options}) do
+    nil
+  end
+
+  def watch(module, repo, struct, {adapter_meta, options}) do
     # This is not an Ecto callback, so we have to construct our own schema_meta
     schema_meta = %{
       schema: struct.__struct__,
@@ -166,9 +170,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     pk_field = Fields.get_pk_field!(schema)
     pk = Map.get(struct, pk_field)
 
-    Metadata.transactional(tenant, adapter_meta, source, fn tx, _metadata ->
+    Tx.transactional(tenant, fn tx ->
       future_ref = Tx.watch(tenant, tx, {schema, source, context}, {pk_field, pk}, options)
-      Future.new_deferred(future_ref, fn _ -> {schema, pk, options} end)
+
+      # See EctoAdapterAssigns for the other half of this implementation.
+      Future.new_deferred(future_ref, fn _ ->
+        {schema, {:pk, pk}, options,
+         &watch(module, repo, &1, {adapter_meta, Keyword.merge(options, &2)})}
+      end)
     end)
   end
 
