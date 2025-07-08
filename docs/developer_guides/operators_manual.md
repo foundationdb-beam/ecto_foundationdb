@@ -16,8 +16,8 @@ It's written assuming a SQL database like Postgres, but many of the concepts
 are applicable to EctoFoundationDB, and it's worth a read.
 
 > #### Safe Index Migrations {: .note}
-> Index migrations are handled on-line by your application code. This guide will
-> include phrases like "drop an index" without further instructions. Please
+> Adding and dropping indexes is done completely on-line without risk of data consistency problems.
+> The remainder of this document discusses other data operations. Please
 > refer to the documentation on
 > [Migrations](Ecto.Adapters.FoundationDB.html#module-migrations)
 > for more info on index migrations.
@@ -84,7 +84,7 @@ iex> EctoFoundationDB.CLI.delete_field!(MyApp.Repo, MyApp.Post, :no_longer_neede
 
 ---
 
-## Renaming a field
+### Renaming a field
 
 Take a phased approach:
 

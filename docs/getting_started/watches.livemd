@@ -1,4 +1,4 @@
-# Using FDB Watch to drive a LiveView Sync Engine - Part I - Single object
+# Sync Engine Part I - Single Object
 
 ```elixir
 Mix.install([

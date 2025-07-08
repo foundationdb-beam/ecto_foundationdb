@@ -72,7 +72,7 @@ doing so, we limit the impact of another tenant's migration.
 #### Schema Migration Version Key
 
 This is a key that is managed by EctoFDB itself, and does not have special
-treatment by FDB. It alaways contains an integer value representing the largest
+treatment by FDB. It always contains an integer value representing the largest
 version number for complete migrations that are specified in your
 `EctoFoundationDB.Migrator`.
 
@@ -87,4 +87,4 @@ then the cache is invalidated and the transaction is retried.
 
 This key is used for tracking metadata that is currently undergoing a
 migration. It's managed in the same way as the schema migration version key.
-It's content includes a cursor that defines the progress of the migration.
+Its content includes a cursor that defines the progress of the migration.

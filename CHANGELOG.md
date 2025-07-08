@@ -1,29 +1,28 @@
 # Changelog
 
-## v0.5.0 (TBD)
-
-### Bug fixes
-
-* Fixed a bug where index creation was failing for multikey objects
-* (#57) Fixed a bug where index management was failing while a new index was being created
+## v0.5.0 (2025-07-08)
 
 ### Enhancements
 
-* Added ability to drop an index.
-* `EctoFoundationDB.CLI`: Functions for an operator to use to safely manage
+* `EctoFoundationDB.CLI` [[doc](operators_manual.md)]: Functions for an operator to use to safely manage
 data migrations that cannot be done automatically.
-* Metadata cache is now shared across all open tenants of the same id on a
-given node.
-* Metadata cache now makes use of FoundationDB's `\xff/metadataVersion` key,
+* Index Metadata [[doc](metadata.html)] now makes use of FoundationDB's `\xff/metadataVersion` key,
 which allows the client to cache metadata and maintain transactional isolation
-without having to wait on any keys.
-* Added support for versionstamping with `EctoFoundationDB.Versionstamp`.
+without having to wait on any keys. Also, the cache is shared across all open tenants of the same id on a given node.
+* `EctoFoundationDB.Versionstamp` [[doc](Ecto.Adapters.FoundationDB.html#module-versionstamps-autoincrement)]: Added the ability to insert objects with a monotonically increasing integer id, via FoundationDB's versionstamp.
+* `SchemaMetadata` [[doc](Ecto.Adapters.FoundationDB.html#module-schema-metadata)]: This is a new built-in Indexer that allows your app to watch and sync collection of objects in a tenant.
+* Added ability to drop an index.
 
 ### Breaking changes
 
 * Key construction has changed, making databases created on <= 0.4.x incompatible with >=0.5. Specifically, a binary, atom, or
   number primary key is now encoded in the FDB key with the Tuple layer. All other types remain encoded with term_to_binary.
-  If you need help upgrading your database, please put in a GitHub Issue.
+  If you need help upgrading your database, please put in a GitHub Issue. We strive for a stable v1.0.
+
+### Bug fixes
+
+* Fixed a bug where index creation was failing for multikey objects
+* (#57) Fixed a bug where index management was failing while a new index was being created
 
 ### Deprecations
 
@@ -35,8 +34,11 @@ transactions, we have chosen to deprecate `Repo.transaction` in favor of `Repo.t
 
 * [Guide for Operators](operators_manual.html): Describes how to use the `EctoFoundationDB.CLI` functions to rename a field while guaraneeting that all
 concurrent queries in your distributed application are successful.
+* [Metadata Design](metadata.html): Describes how index metadata is managed and cached in EctoFDB.
+* [Sync Engine Part I - Single Object](watches.livemd): Revamped Livebook that demonstrates how to create a Sync Engine for a single object (for syncing reads)
+* [Sync Engine Part II - Collections](collection_syncing.livemd): New Livebook that demonstrates a Sync Engine for a collection of objects in a tenant (still for reads)
 
-## v0.4.0 (2024-01-16)
+## v0.4.0 (2025-01-16)
 
 ### Enhancements
 

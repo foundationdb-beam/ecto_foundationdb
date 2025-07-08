@@ -1,4 +1,4 @@
-# Using FDB Watch to drive a LiveView Sync Engine - Part II - Collections
+# Sync Engine Part II - Collections
 
 ```elixir
 Mix.install([
@@ -15,7 +15,7 @@ This is Part II, where we explore syncing a collection of objects to the LiveVie
 
 ## Setup Ecto
 
-First, we set up Ecto, defining a Quote schema, and starting the Repo. For this to work, you must have `foundationdb-server` installed. Refer to the [EctoFoundationDB documentation](https://hexdocs.pm/ecto_foundationdb/Ecto.Adapters.FoundationDB.html#module-installation) for installation help.
+First, we set up Ecto, defining a Quote schema, and starting the Repo.
 
 This is similar to Part I, but there's a key difference: we create a `SchemaMetadata` index on `Quote`. This metadata is required to drive watches on the collection of quotes.
 
@@ -93,8 +93,8 @@ Next, we create two `Quote`s in the DB. Our LiveView page will render the full l
 
 ```elixir
 quotes = [
-  {"foo", "bar"},
-  {"baz", "buzz"}
+  {"René Descartes", "Cogito, ergo sum."},
+  {"Heraclitus", "One cannot step twice in the same river."}
 ]
 
 for {author, content} <- quotes, do:
