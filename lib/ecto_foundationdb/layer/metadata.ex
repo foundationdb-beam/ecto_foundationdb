@@ -42,7 +42,7 @@ defmodule EctoFoundationDB.Layer.Metadata do
 
   defp new(struct, []) do
     %__MODULE__{indexes: indexes, other: other} = struct
-    %__MODULE__{struct | indexes: Enum.reverse(indexes), other: Enum.reverse(other)}
+    %{struct | indexes: Enum.reverse(indexes), other: Enum.reverse(other)}
   end
 
   defp new(struct, [meta | metadata_kwl]) do
@@ -51,10 +51,10 @@ defmodule EctoFoundationDB.Layer.Metadata do
     # Default type is index for historical reasons
     case meta[:type] || :index do
       :index ->
-        new(%__MODULE__{struct | indexes: [meta | indexes]}, metadata_kwl)
+        new(%{struct | indexes: [meta | indexes]}, metadata_kwl)
 
       _ ->
-        new(%__MODULE__{struct | other: [meta | other]}, metadata_kwl)
+        new(%{struct | other: [meta | other]}, metadata_kwl)
     end
   end
 
@@ -367,7 +367,7 @@ defmodule EctoFoundationDB.Layer.Metadata do
         # at the expense of migration taking longer, because we're not letting the
         # migration job starve us out
         MigrationsPJ.tx_add_claim_write_conflict(tenant, tx, source)
-        metadata = %__MODULE__{metadata | partial_indexes: partial_idxs}
+        metadata = %{metadata | partial_indexes: partial_idxs}
         {mdv, metadata, fn -> true end}
     end
   end

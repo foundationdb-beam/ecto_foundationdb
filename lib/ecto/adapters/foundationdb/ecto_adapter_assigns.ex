@@ -1,6 +1,7 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
   @moduledoc false
   alias EctoFoundationDB.Future
+  alias EctoFoundationDB.Indexer.SchemaMetadata
   alias EctoFoundationDB.Layer.Tx
 
   def assign_ready(_module, repo, futures, ready_refs, options) when is_list(ready_refs) do
@@ -38,24 +39,38 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
         {nil, futures}
 
       {future, futures} ->
-        {schema, id, watch_options} = Future.result(future)
+        {schema, query, watch_options, new_watch_fn} = Future.result(future)
 
         if not Keyword.has_key?(watch_options, :label) do
-          raise "To use Repo.assign_ready/3, you must have previously called Repo.watch(struct, label: mykey)."
+          raise """
+          To use Repo.assign_ready/3, you must have previously created a watch with a label
+
+          Examples:
+
+              Repo.watch(struct, label: :mykey)
+              SchemaMetadata.watch_collection(MySchema, label: :mykey)
+          """
         end
 
-        async_get(repo, futures, schema, id, watch_options, options)
+        case query do
+          {:pk, pk} ->
+            async_get(repo, futures, schema, pk, watch_options, options, new_watch_fn)
+
+          {SchemaMetadata, name}
+          when name in [:inserts, :deletes, :collection, :updates, :changes] ->
+            async_all(repo, futures, schema, watch_options, options, new_watch_fn)
+        end
     end
   end
 
-  defp async_get(repo, futures, schema, id, watch_options, options) do
+  defp async_get(repo, futures, schema, id, watch_options, options, new_watch_fn) do
     label = watch_options[:label]
 
     Tx.transactional(options[:prefix], fn _tx ->
       assign_future =
         repo.async_get(schema, id, options)
         |> Future.apply(fn struct_or_nil ->
-          new_future = maybe_new_watch(repo, struct_or_nil, watch_options, options)
+          new_future = maybe_new_watch(struct_or_nil, watch_options, options, new_watch_fn)
 
           {[{label, struct_or_nil}], new_future}
         end)
@@ -64,9 +79,25 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
     end)
   end
 
-  defp maybe_new_watch(repo, struct_or_nil, watch_options, options) do
-    if not is_nil(struct_or_nil) and Keyword.get(options, :watch?, false) do
-      repo.watch(struct_or_nil, Keyword.merge(options, watch_options))
+  defp async_all(repo, futures, schema, watch_options, options, new_watch_fn) do
+    label = watch_options[:label]
+
+    Tx.transactional(options[:prefix], fn _tx ->
+      assign_future =
+        repo.async_all(schema, options)
+        |> Future.apply(fn result ->
+          new_future = maybe_new_watch(result, watch_options, options, new_watch_fn)
+
+          {[{label, result}], new_future}
+        end)
+
+      {assign_future, futures}
+    end)
+  end
+
+  defp maybe_new_watch(result, watch_options, options, new_watch_fn) do
+    if Keyword.get(options, :watch?, false) do
+      new_watch_fn.(result, watch_options)
     else
       nil
     end

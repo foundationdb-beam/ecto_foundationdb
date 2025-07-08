@@ -19,6 +19,7 @@ defmodule EctoFoundationDB.Layer.Pack do
   @migration_prefix <<0xFE>>
   @data_namespace "d"
   @index_namespace "i"
+  @metadata_namespace "m"
 
   @doc """
   ## Examples
@@ -148,6 +149,10 @@ defmodule EctoFoundationDB.Layer.Pack do
   def default_index_range(tenant, source, index_name, idx_len, index_values) do
     vals = ["#{index_name}", idx_len] ++ index_values
     namespaced_range(tenant, source, @index_namespace, vals)
+  end
+
+  def schema_metadata_pack(tenant, source, field_name) do
+    namespaced_pack(tenant, source, @metadata_namespace, ["#{field_name}"])
   end
 
   def namespaced_pack(tenant, source, namespace, vals) do

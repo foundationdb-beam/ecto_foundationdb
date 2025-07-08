@@ -1,6 +1,7 @@
 defmodule EctoFoundationDB.Migration do
   @moduledoc false
 
+  alias EctoFoundationDB.Indexer.SchemaMetadata
   alias EctoFoundationDB.Migration.Index
   alias EctoFoundationDB.Schema
 
@@ -94,10 +95,27 @@ defmodule EctoFoundationDB.Migration do
     %{index | name: index.name || default_index_name(index)}
   end
 
+  def metadata(schema, include \\ nil, opts \\ []) do
+    options = opts[:options] || []
+    options = Keyword.put(options, :indexer, SchemaMetadata)
+    opts = Keyword.put(opts, :options, options)
+    validate_index_opts!(opts)
+    index = struct(%Index{schema: schema, columns: get_metadata_include(include)}, opts)
+    %{index | name: index.name || default_metadata_name(%{index | columns: []})}
+  end
+
   defp validate_index_opts!(opts), do: Keyword.validate!(opts, [:options])
 
   defp default_index_name(index) do
-    [Schema.get_source(index.schema), index.columns, "index"]
+    default_name_(index, "index")
+  end
+
+  defp default_metadata_name(index) do
+    default_name_(index, "metadata")
+  end
+
+  defp default_name_(index, label) do
+    [Schema.get_source(index.schema), index.columns, label]
     |> List.flatten()
     |> Stream.map(&to_string(&1))
     |> Stream.map(&String.replace(&1, ~r"[^\w_]", "_"))
@@ -106,4 +124,9 @@ defmodule EctoFoundationDB.Migration do
     |> Enum.join("_")
     |> String.to_atom()
   end
+
+  # The include param is always explicitly defined in the DB so that new entries to
+  # SchemaMetadata can be added without affecting existing indexes.
+  defp get_metadata_include(nil), do: SchemaMetadata.field_names()
+  defp get_metadata_include(include) when is_list(include), do: include
 end
