@@ -367,7 +367,7 @@ defmodule EctoFoundationDB.Layer.Metadata do
         # at the expense of migration taking longer, because we're not letting the
         # migration job starve us out
         MigrationsPJ.tx_add_claim_write_conflict(tenant, tx, source)
-        metadata = %__MODULE__{partial_indexes: partial_idxs}
+        metadata = %__MODULE__{metadata | partial_indexes: partial_idxs}
         {mdv, metadata, fn -> true end}
     end
   end

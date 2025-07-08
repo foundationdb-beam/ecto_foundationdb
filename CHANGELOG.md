@@ -5,6 +5,7 @@
 ### Bug fixes
 
 * Fixed a bug where index creation was failing for multikey objects
+* (#57) Fixed a bug where index management was failing while a new index was being created
 
 ### Enhancements
 
