@@ -4,6 +4,7 @@ defmodule EctoIntegrationWatchTest do
   alias Ecto.Integration.TestRepo
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Schemas.User
+  alias EctoFoundationDB.Tenant
 
   test "watch", context do
     tenant = context[:tenant]
@@ -64,5 +65,6 @@ defmodule EctoIntegrationWatchTest do
     refute watch_future == hd(futures)
 
     assert %User{name: "Alicia"} = assigns.mykey
+    assert %Tenant{} = assigns.mykey.__meta__.prefix
   end
 end

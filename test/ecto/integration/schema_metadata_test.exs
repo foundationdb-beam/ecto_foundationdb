@@ -5,6 +5,7 @@ defmodule EctoFoundationDBSchemaMetadataTest do
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer.SchemaMetadata
   alias EctoFoundationDB.Schemas.User
+  alias EctoFoundationDB.Tenant
 
   defp idcuc(tenant, schema) do
     TestRepo.transactional(tenant, fn ->
@@ -79,6 +80,7 @@ defmodule EctoFoundationDBSchemaMetadataTest do
     watch_ref = Future.ref(watch_future)
 
     assert %{users: [user = %{name: "Alice"}]} = assigns
+    assert %Tenant{} = hd(assigns.users).__meta__.prefix
 
     # delete and receive the new collection
     TestRepo.delete!(user, prefix: tenant)

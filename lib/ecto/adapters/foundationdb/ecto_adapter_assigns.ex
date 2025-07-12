@@ -4,6 +4,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
   alias EctoFoundationDB.Indexer.SchemaMetadata
   alias EctoFoundationDB.Layer.Tx
 
+  alias Ecto.Adapters.FoundationDB
+
   def assign_ready(_module, repo, futures, ready_refs, options) when is_list(ready_refs) do
     Tx.transactional(options[:prefix], fn _tx ->
       {assign_futures_rev, futures} = filter_ready(repo, futures, ready_refs, options)
@@ -66,10 +68,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
   defp async_get(repo, futures, schema, id, watch_options, options, new_watch_fn) do
     label = watch_options[:label]
 
+    tenant = options[:prefix]
+
     Tx.transactional(options[:prefix], fn _tx ->
       assign_future =
         repo.async_get(schema, id, options)
         |> Future.apply(fn struct_or_nil ->
+          struct_or_nil = usetenant(struct_or_nil, tenant)
           new_future = maybe_new_watch(struct_or_nil, watch_options, options, new_watch_fn)
 
           {[{label, struct_or_nil}], new_future}
@@ -82,10 +87,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
   defp async_all(repo, futures, schema, watch_options, options, new_watch_fn) do
     label = watch_options[:label]
 
-    Tx.transactional(options[:prefix], fn _tx ->
+    tenant = options[:prefix]
+
+    Tx.transactional(tenant, fn _tx ->
       assign_future =
         repo.async_all(schema, options)
         |> Future.apply(fn result ->
+          result = usetenant(result, tenant)
           new_future = maybe_new_watch(result, watch_options, options, new_watch_fn)
 
           {[{label, result}], new_future}
@@ -94,6 +102,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
       {assign_future, futures}
     end)
   end
+
+  defp usetenant(nil, _tenant), do: nil
+  defp usetenant(list, tenant) when is_list(list), do: Enum.map(list, &usetenant(&1, tenant))
+  defp usetenant(struct, tenant), do: FoundationDB.usetenant(struct, tenant)
 
   defp maybe_new_watch(result, watch_options, options, new_watch_fn) do
     if Keyword.get(options, :watch?, false) do
