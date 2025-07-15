@@ -29,6 +29,7 @@ defmodule EctoFoundationDB.Integration.Migration.EventIndex do
   @impl true
   def change() do
     [
+      create(metadata(Event)),
       create(index(Event, [:date, :user_id, :time], options: [mapped?: false]))
     ]
   end

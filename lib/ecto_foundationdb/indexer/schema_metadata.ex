@@ -4,7 +4,7 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
 
   - `inserts`: Incremented for each insert or upsert
   - `deletes`: Incremented for each delete
-  - `collection`: Incremented for each insert, update, or delete
+  - `collection`: Incremented for each insert, upsert, or delete
   - `updates`: Incremented for each update (via `Repo.update/*`)
   - `changes`: Incremented for each insert, upsert, delete, or update
 
@@ -49,29 +49,69 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
   def changes(schema, opts), do: sync_get(schema, :changes, opts)
 
   @doc """
-  Create a watch on the `inserts` key.
+  Equivalent to `watch(schema, :inserts, opts)`
   """
   def watch_inserts(schema, opts \\ []), do: watch(schema, :inserts, opts)
 
   @doc """
-  Create a watch on the `deletes` key.
+  Equivalent to `watch(schema, :deletes, opts)`
   """
   def watch_deletes(schema, opts \\ []), do: watch(schema, :deletes, opts)
 
   @doc """
-  Create a watch on the `collection` key.
+  Equivalent to `watch(schema, :collection, opts)`
   """
   def watch_collection(schema, opts \\ []), do: watch(schema, :collection, opts)
 
   @doc """
-  Create a watch on the `updates` key.
+  Equivalent to `watch(schema, :updates, opts)`
   """
   def watch_updates(schema, opts \\ []), do: watch(schema, :updates, opts)
 
   @doc """
-  Create a watch on the `changes` key.
+  Equivalent to `watch(schema, :changes, opts)`
   """
   def watch_changes(schema, opts \\ []), do: watch(schema, :changes, opts)
+
+  @doc """
+  Creates a watch on the provided SchemaMetadata named key.
+
+  ## Arguments
+
+  - `schema`: The schema to watch
+  - `name`: The name of the watch
+  - `opts`: The options for the watch
+
+  ### Name
+
+  - `:inserts`: Signals for each insert or upsert
+  - `:deletes`: Signals for each delete
+  - `:collection`: Signals for each insert, upsert, or delete
+  - `:updates`: Signals for each update (via `Repo.update/*`)
+  - `:changes`: Signals for each insert, upsert, delete, or update
+
+  ### Options
+
+  - `:label`: An optional atom label that if provided, will be used by subsequent calls
+    to `Repo.assign_ready/3` to store the data into the assigns map. There is no default
+    behavior. If a label is not provided, `assign_ready` will fail.
+  - `:query`: An optional `Ecto.Query` that if provided, will be used by subsequent calls
+    to `Repo.assign_ready/3` to query the database for data to be stored in the assigns map.
+    By default, `Repo.all(schema)` is used.
+  """
+  def watch(schema, name, opts) do
+    {tenant, tx} = assert_tenant_tx!()
+    source = Schema.get_source(schema)
+    future_ref = :erlfdb.watch(tx, key(tenant, source, name))
+
+    Future.new_deferred(
+      future_ref,
+      fn _ ->
+        {schema, {__MODULE__, name}, opts,
+         fn _, new_opts -> watch(schema, name, Keyword.merge(opts, new_opts)) end}
+      end
+    )
+  end
 
   @doc """
   Asynchronously get the `inserts` key.
@@ -110,20 +150,6 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
     {tenant, tx} = assert_tenant_tx!()
     future_ref = :erlfdb.get(tx, key(tenant, source, name))
     Future.set(future, tx, future_ref, &decode_counter/1)
-  end
-
-  defp watch(schema, name, opts) do
-    {tenant, tx} = assert_tenant_tx!()
-    source = Schema.get_source(schema)
-    future_ref = :erlfdb.watch(tx, key(tenant, source, name))
-
-    Future.new_deferred(
-      future_ref,
-      fn _ ->
-        {schema, {__MODULE__, name}, opts,
-         fn _, new_opts -> watch(schema, name, Keyword.merge(opts, new_opts)) end}
-      end
-    )
   end
 
   # This defines the full set of possible values for the `include` param
