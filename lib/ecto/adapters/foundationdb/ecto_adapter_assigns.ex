@@ -41,7 +41,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
         {nil, futures}
 
       {future, futures} ->
-        {schema, query, watch_options, new_watch_fn} = Future.result(future)
+        {schema, kind, watch_options, new_watch_fn} = Future.result(future)
 
         if not Keyword.has_key?(watch_options, :label) do
           raise """
@@ -54,7 +54,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
           """
         end
 
-        case query do
+        case kind do
           {:pk, pk} ->
             async_get(repo, futures, schema, pk, watch_options, options, new_watch_fn)
 
@@ -86,12 +86,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
 
   defp async_all(repo, futures, schema, watch_options, options, new_watch_fn) do
     label = watch_options[:label]
-
+    query = watch_options[:query] || schema
     tenant = options[:prefix]
 
     Tx.transactional(tenant, fn _tx ->
       assign_future =
-        repo.async_all(schema, options)
+        repo.async_all(query, options)
         |> Future.apply(fn result ->
           result = usetenant(result, tenant)
           new_future = maybe_new_watch(result, watch_options, options, new_watch_fn)

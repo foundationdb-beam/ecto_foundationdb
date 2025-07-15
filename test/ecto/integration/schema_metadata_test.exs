@@ -4,6 +4,7 @@ defmodule EctoFoundationDBSchemaMetadataTest do
   alias Ecto.Integration.TestRepo
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer.SchemaMetadata
+  alias EctoFoundationDB.Schemas.Event
   alias EctoFoundationDB.Schemas.User
   alias EctoFoundationDB.Tenant
 
@@ -91,6 +92,52 @@ defmodule EctoFoundationDBSchemaMetadataTest do
     assert [_] = futures
 
     assert %{users: []} = assigns
+  end
+
+  test "labeled query watch", context do
+    tenant = context[:tenant]
+
+    import Ecto.Query
+
+    query = from(e in Event, where: e.date >= ^~D[2025-07-15])
+
+    insert_event = fn date ->
+      f =
+        TestRepo.transactional(tenant, fn ->
+          TestRepo.async_insert_all!(Event, [
+            %Event{date: date, user_id: "foo", time: ~T[00:00:00.000000]}
+          ])
+        end)
+
+      [_] = TestRepo.await(f)
+    end
+
+    insert_event.(~D[2025-07-14])
+
+    # init
+    {events, futures} =
+      TestRepo.transactional(tenant, fn ->
+        events = TestRepo.all(query)
+        future = SchemaMetadata.watch_collection(Event, label: :events, query: query)
+        {events, [future]}
+      end)
+
+    assigns = %{events: events}
+
+    assert [] = events
+
+    [watch_future] = futures
+    watch_ref = Future.ref(watch_future)
+
+    # insert and receive the new collection
+    insert_event.(~D[2025-07-16])
+
+    {assigns, futures} =
+      receive_ready(assigns, futures, [watch_ref], prefix: tenant, watch?: false)
+
+    assert [] = futures
+
+    assert %{events: [%{user_id: "foo"}]} = assigns
   end
 
   defp receive_ready(assigns, futures, [watch_ref], opts) do
