@@ -113,16 +113,52 @@ defmodule EctoFoundationDB.Layer.Query do
     end
   end
 
-  defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key}}}, future, options) do
-    get_options = Keyword.take(options, [:limit]) |> Keyword.put(:wait, false)
+  defp tx_get_range(
+         tx,
+         plan = %QueryPlan{layer_data: %{range: {start_key, end_key}}},
+         future,
+         options
+       ) do
+    backward? = backward?(plan, options)
+
+    get_options =
+      Keyword.take(options, [:limit])
+      |> Keyword.put(:wait, false)
+      |> Keyword.put(:reverse, backward?)
+
     future_ref = :erlfdb.get_range(tx, start_key, end_key, get_options)
-    Future.set(future, tx, future_ref)
+
+    Future.set(future, tx, future_ref, fn result ->
+      if backward? do
+        Enum.reverse(result)
+      else
+        result
+      end
+    end)
   end
 
-  defp tx_get_range(tx, %{layer_data: %{range: {start_key, end_key, mapper}}}, future, options) do
-    get_options = Keyword.take(options, [:limit]) |> Keyword.put(:wait, false)
+  defp tx_get_range(
+         tx,
+         plan = %QueryPlan{layer_data: %{range: {start_key, end_key, mapper}}},
+         future,
+         options
+       ) do
+    backward? = backward?(plan, options)
+
+    get_options =
+      Keyword.take(options, [:limit])
+      |> Keyword.put(:wait, false)
+      |> Keyword.put(:reverse, backward?)
+
     future_ref = :erlfdb.get_mapped_range(tx, start_key, end_key, mapper, get_options)
-    Future.set(future, tx, future_ref)
+
+    Future.set(future, tx, future_ref, fn result ->
+      if backward? do
+        Enum.reverse(result)
+      else
+        result
+      end
+    end)
   end
 
   defp tx_update_range(
@@ -253,4 +289,52 @@ defmodule EctoFoundationDB.Layer.Query do
         end
     end
   end
+
+  # Backward scan doesn't come for free since we need to manage the key ordering,
+  # so only do it if there's a limit set.
+  defp backward?(plan = %{layer_data: %{idx: idx}}, options) do
+    case options[:limit] do
+      int when is_integer(int) ->
+        %{ordering: ordering} = plan
+        idx_fields = idx[:fields]
+        idx_backward?(idx_fields, ordering)
+
+      _ ->
+        false
+    end
+  end
+
+  defp backward?(plan, options) do
+    case {plan.schema, plan.ordering, options[:limit]} do
+      {nil, [], int} when is_integer(int) ->
+        false
+
+      {nil, [_ | _], int} when is_integer(int) ->
+        raise Unsupported, """
+        Cannot apply limit on query ordering when schema is unknown
+        """
+
+      {schema, ordering, int} when is_integer(int) ->
+        pk_field = Fields.get_pk_field!(schema)
+        idx_backward?([pk_field], ordering)
+
+      _ ->
+        false
+    end
+  end
+
+  defp idx_backward?([field | _], [{:desc, field}]), do: true
+
+  defp idx_backward?([field | fields], [{:asc, field} | ordering]),
+    do: idx_backward?(fields, ordering)
+
+  defp idx_backward?([_field | fields], ordering), do: idx_backward?(fields, ordering)
+
+  defp idx_backward?(_, [{_, _field} | _]) do
+    raise(Unsupported, """
+    When querying with a limit, the ordering must correspond to the primary key or an indexed field.
+    """)
+  end
+
+  defp idx_backward?(_, _), do: false
 end

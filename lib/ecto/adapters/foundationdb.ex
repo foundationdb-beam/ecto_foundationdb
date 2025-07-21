@@ -253,6 +253,76 @@ defmodule Ecto.Adapters.FoundationDB do
   We encourage you to test execution times of your expected workload before deciding to create an index.
   Remember: since your data is already partitioned into tenants, you're effectively getting 1 index for free.
 
+  ### Query behavior
+
+  In the implementation of Layer queries, we choose to provide the following guarantee to the developer:
+
+  > A query is valid only if it can be achieved with a single Get or a single GetRange.
+
+  This ensures that your application's queries will always be efficient. It allows you to construct your own
+  complex query orchestration, but only when you need it.
+
+  For example, a query with an `or` condition is not possible in EctoFDB, because to satisfy the `or`, we
+  would need to issue 2 GetRange operations for a single query.
+
+  ```elixir
+  from(c in City, where: c.country == "Sweden", or_where: c.country == "Brazil")
+  |> Repo.all(prefix: tenant)
+  # =x Error
+  ```
+
+  Instead, we want the database to do both GetRange at the same time with `async_all`.
+
+  ```elixir
+  Repo.transactional(tenant, fn ->
+    [
+      Repo.async_all(from(c in City, where: c.country == "Sweden")),
+      Repo.async_all(from(c in City, where: c.country == "Brazil")),
+    ]
+    |> Repo.await()
+    |> List.flatten()
+  end)
+  ```
+
+  The trade-off that we choose to accept is that the expressiveness of the queries we support is limited
+  compared to SQL databases. But you can develop with confidence that your queries will always be
+  efficient.
+
+  #### Using `order_by` and `limit` in the same query
+
+  EctoFDB will always attempt to return query result that has the ordering applied first and then the limit. If it's
+  unable to do so, then an exception is raised. Remember: a key design decision of our Layer is that a query is valid
+  only if it can be achieved with a single Get or GetRange.
+
+  `order_by` and `limit` will work as expected as long as one of the following conditions is true:
+
+  1. An index is not being queried AND the `order_by` is defined on the primary key field.
+  2. The fields of the selected index match with the fields in the `order_by` clause.
+
+  Examples:
+
+  ```elixir
+  opts = [prefix: tenant, limit: 10]
+
+  # order_by primary key field
+  Repo.all(
+    from(c in City, order_by: c.id),
+    opts
+  )
+
+  # where+order_by indexed field (`[:country]` is an index)
+  Repo.all(
+    from(c in City, where: c.country == "Sweden", order_by: [asc: c.country]),
+    opts
+  )
+
+  # where+order_by index subset (`[:continent, :incorporated_date]` is an index)
+  Repo.all(
+    from(c in City, where: c.country == "Europe", order_by: [asc: c.country, desc: c.incorporated_date]),
+    opts
+  )
+  ```
+
   ### Custom indexes
 
   As data is inserted, updated, deleted, and queried, the Indexer callbacks (via behaviour `EctoFoundationDB.Indexer`)

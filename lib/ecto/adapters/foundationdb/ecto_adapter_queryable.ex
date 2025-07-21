@@ -4,6 +4,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   alias Ecto.Adapters.FoundationDB
   alias EctoFoundationDB.Exception.IncorrectTenancy
+  alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Ordering
@@ -14,17 +15,17 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   alias EctoFoundationDB.Tenant
 
   @impl Ecto.Adapter.Queryable
-  def prepare(
-        operation,
-        query = %Ecto.Query{
-          order_bys: order_bys,
-          limit: limit
-        }
-      ) do
-    ordering_fn = Ordering.get_ordering_fn(order_bys)
+  def prepare(operation, query) do
+    %Ecto.Query{
+      from: %Ecto.Query.FromExpr{source: {_source, schema}},
+      order_bys: order_bys,
+      limit: limit
+    } = query
+
+    {ordering, ordering_fn} = Ordering.get_ordering_fn(schema, order_bys)
     limit = get_limit(limit)
     limit_fn = if limit == nil, do: & &1, else: &Stream.take(&1, limit)
-    {:nocache, {operation, query, {limit, limit_fn}, %{}, ordering_fn}}
+    {:nocache, {operation, query, {limit, limit_fn}, %{}, ordering, ordering_fn}}
   end
 
   @impl Ecto.Adapter.Queryable
@@ -39,7 +40,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
               select: %Ecto.Query.SelectExpr{
                 fields: select_fields
               }
-            }, {_limit, limit_fn}, %{}, ordering_fn}},
+            }, {_limit, limit_fn}, %{}, ordering, ordering_fn}},
         params,
         options
       ) do
@@ -51,7 +52,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       _ ->
         {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
 
-        future = execute_all(tenant, adapter_meta, context, query, params, options)
+        future = execute_all(tenant, adapter_meta, context, query, params, ordering, options)
 
         future =
           Future.apply(future, fn {objs, _continuation} ->
@@ -74,13 +75,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
             query = %Ecto.Query{
               from: %Ecto.Query.FromExpr{source: {source, schema}},
               wheres: wheres
-            }, {nil, _limit_fn}, %{}, _ordering_fn}},
+            }, {nil, _limit_fn}, %{}, _ordering, _ordering_fn}},
         params,
         _options
       ) do
     {context, %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
 
-    plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params)
+    plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params, [])
     num = Query.delete(tenant, adapter_meta, plan)
 
     {num, []}
@@ -90,7 +91,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         adapter_meta = %{opts: adapter_opts},
         _query_meta,
         _query_cache =
-          {:nocache, {:update_all, query, {nil, _limit_fn}, %{}, _ordering_fn}},
+          {:nocache, {:update_all, query, {nil, _limit_fn}, %{}, _ordering, _ordering_fn}},
         params,
         _options
       ) do
@@ -107,7 +108,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         adapter_meta = %{opts: adapter_opts},
         _query_meta,
         _query_cache =
-          {:nocache, {:all, query, {nil, _limit_fn}, %{}, _ordering_fn}},
+          {:nocache, {:all, query, {nil, _limit_fn}, %{}, [], _ordering_fn}},
         params,
         options
       ) do
@@ -115,6 +116,19 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
     tenant
     |> stream_all(adapter_meta, context, query, params, options)
+  end
+
+  def stream(
+        _adapter_meta,
+        _query_meta,
+        _query_cache =
+          {:nocache, {:all, _query, {nil, _limit_fn}, %{}, _ordering, _ordering_fn}},
+        _params,
+        _options
+      ) do
+    raise Unsupported, """
+    Stream ordering is not supported.
+    """
   end
 
   def execute_all_range(_module, _repo, queryable, id_s, id_e, {adapter_meta, options}) do
@@ -191,6 +205,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
            wheres: wheres
          },
          params,
+         ordering,
          options
        ) do
     # Steps:
@@ -203,7 +218,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     #   3. Use :erlfdb.get, :erlfdb.get_range
     #   4. Post-get filtering (Remove :not_found, remove index conflicts, )
     #   5. Arrange fields based on the select input
-    plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params)
+    plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params, ordering)
 
     Query.all(tenant, adapter_meta, plan, options)
   end
@@ -235,7 +250,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
          },
          params
        ) do
-    plan = QueryPlan.get(tenant, source, schema, context, wheres, updates, params)
+    plan = QueryPlan.get(tenant, source, schema, context, wheres, updates, params, [])
     Query.update(tenant, adapter_meta, plan, options)
   end
 
@@ -264,7 +279,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     end
 
     start_fun = fn ->
-      plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params)
+      plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params, [])
 
       %{
         adapter_meta: adapter_meta,
