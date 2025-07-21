@@ -93,4 +93,32 @@ defmodule Ecto.Integration.TimeSeriesTest do
       assert [] == TestRepo.all(query, prefix: tenant)
     end
   end
+
+  test "backward scan", context do
+    tenant = context[:tenant]
+
+    # Insert
+    f =
+      TestRepo.transactional(tenant, fn ->
+        TestRepo.async_insert_all!(Event, [
+          %Event{date: ~D[2666-01-01], user_id: "foo", time: ~T[00:00:00.000000]},
+          %Event{date: ~D[2555-01-01], user_id: "foo", time: ~T[00:00:00.000000]},
+          %Event{date: ~D[2777-01-01], user_id: "foo", time: ~T[00:00:00.000000]},
+          %Event{date: ~D[2444-01-01], user_id: "foo", time: ~T[00:00:00.000000]}
+        ])
+      end)
+
+    [_, _, _, _] = TestRepo.await(f)
+
+    # backward scan ensures that we get the latest events first
+    assert [%Event{date: ~D[2777-01-01]}, %Event{date: ~D[2666-01-01]}] =
+             TestRepo.all(
+               from(e in Event,
+                 where: e.date > ^~D[2444-01-01],
+                 order_by: [desc: e.date]
+               ),
+               prefix: tenant,
+               limit: 2
+             )
+  end
 end

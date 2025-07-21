@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.1 (TBD)
+
+### Enhancements
+
+* Improved support for `order_by` + `limit` queries.
+* Caller may provide query to run on assign_ready for SchemaMetadata watches.
+
 ## v0.5.0 (2025-07-08)
 
 ### Enhancements

@@ -333,6 +333,10 @@ defmodule EctoFoundationDB.Indexer.Default do
     end
   end
 
+  defp assert_constraints(_fields, []) do
+    :ok
+  end
+
   defp assert_constraints([field | fields], [%QueryPlan.Equal{field: eq_field} | constraints]) do
     if field == eq_field do
       assert_constraints(fields, constraints)

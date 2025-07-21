@@ -6,7 +6,7 @@ defmodule EctoFoundationDB.QueryPlan do
   alias EctoFoundationDB.QueryPlan.Equal
   alias EctoFoundationDB.QueryPlan.None
 
-  defstruct [:tenant, :source, :schema, :context, :constraints, :updates, :layer_data]
+  defstruct [:tenant, :source, :schema, :context, :constraints, :updates, :layer_data, :ordering]
 
   @type t() :: %__MODULE__{}
 
@@ -49,13 +49,12 @@ defmodule EctoFoundationDB.QueryPlan do
         }
       ],
       updates: [],
-      layer_data: %{}
+      layer_data: %{},
+      ordering: []
     }
   end
 
-  def get(tenant, source, schema, context, wheres, updates, params) do
-    if is_nil(tenant), do: raise("asda")
-
+  def get(tenant, source, schema, context, wheres, updates, params, ordering) do
     constraints =
       case walk_ast(wheres, schema, params, []) do
         [] ->
@@ -76,7 +75,8 @@ defmodule EctoFoundationDB.QueryPlan do
           _, _ -> false
         end),
       updates: resolve_updates(updates, params),
-      layer_data: %{}
+      layer_data: %{},
+      ordering: ordering
     }
   end
 
