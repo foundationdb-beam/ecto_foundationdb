@@ -586,7 +586,7 @@ defmodule EctoFoundationDB.Sync do
   end
 
   defp get_futures(state, repo) do
-    case get_in(state, [@data_key, repo, Access.key(:futures)]) do
+    case get_in(state, [Access.key(:private), @data_key, repo, Access.key(:futures)]) do
       nil ->
         %{}
 
@@ -597,9 +597,10 @@ defmodule EctoFoundationDB.Sync do
 
   defp put_futures(state, repo, futures) do
     state
-    |> update_in([@data_key], &default_map/1)
-    |> update_in([@data_key, repo], &default_map/1)
-    |> put_in([@data_key, repo, Access.key(:futures)], futures)
+    |> update_in([Access.key(:private)], &default_map/1)
+    |> update_in([Access.key(:private), @data_key], &default_map/1)
+    |> update_in([Access.key(:private), @data_key, repo], &default_map/1)
+    |> put_in([Access.key(:private), @data_key, repo, Access.key(:futures)], futures)
   end
 
   defp merge_futures(state, repo, new_futures) do
