@@ -99,7 +99,7 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
     to `Repo.assign_ready/3` to query the database for data to be stored in the assigns map.
     By default, `Repo.all(schema)` is used.
   """
-  def watch(schema, name, opts) do
+  def watch(schema, name, opts \\ []) do
     {tenant, tx} = assert_tenant_tx!()
     source = Schema.get_source(schema)
     future_ref = :erlfdb.watch(tx, key(tenant, source, name))

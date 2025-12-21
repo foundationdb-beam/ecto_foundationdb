@@ -1,0 +1,139 @@
+defmodule EctoIntegrationSyncTest do
+  use Ecto.Integration.Case, async: true
+
+  alias Ecto.Integration.TestRepo
+  alias EctoFoundationDB.Schemas.User
+  alias EctoFoundationDB.Sync
+
+  defmodule View do
+    use GenServer
+
+    def start_link(tenant, label, id) do
+      GenServer.start_link(__MODULE__, [tenant, label, id], [])
+    end
+
+    def cancel_user_sync(pid, label) do
+      switch_user(pid, label, nil)
+    end
+
+    def switch_user(pid, label, id) do
+      GenServer.cast(pid, {:switch_user, label, id})
+    end
+
+    def await(pid, timeout \\ 100) do
+      GenServer.call(pid, :await, timeout)
+    end
+
+    def init([tenant, label, id]) do
+      state = %{assigns: %{}, changed?: false, waiting: nil, private: %{tenant: tenant}}
+
+      {:ok,
+       state
+       |> Sync.sync_one!(TestRepo, User, label, id)
+       |> Sync.sync_all!(TestRepo, User, :user_collection, watch_action: :collection)}
+    end
+
+    def handle_call(:await, _from, state = %{changed?: true}) do
+      {:reply, state.assigns, %{state | changed?: false}}
+    end
+
+    def handle_call(:await, from, state) do
+      {:noreply, %{state | waiting: from}}
+    end
+
+    def handle_cast({:switch_user, label, nil}, state) do
+      {:noreply, Sync.cancel(state, TestRepo, label)}
+    end
+
+    def handle_cast({:switch_user, label, id}, state) do
+      {:noreply, Sync.sync_one!(state, TestRepo, User, label, id)}
+    end
+
+    def handle_info(msg = {_ref, :ready}, state) do
+      {:halt, state} = Sync.handle_ready(TestRepo, msg, state, post_hook: &send_updates/2)
+      {:noreply, state}
+    end
+
+    def terminate(_reason, state) do
+      Sync.cancel_all(state, TestRepo)
+    end
+
+    defp send_updates(state, _labels) do
+      if state.waiting do
+        GenServer.reply(state.waiting, state.assigns)
+        %{state | waiting: nil, changed?: false}
+      else
+        %{state | changed?: true}
+      end
+    end
+  end
+
+  test "syncing a record", context do
+    tenant = context[:tenant]
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+    {:ok, pid} = View.start_link(tenant, :user, alice.id)
+
+    alice
+    |> User.changeset(%{name: "Alicia"})
+    |> TestRepo.update!()
+
+    assert %{user: %User{name: "Alicia"}} = View.await(pid)
+  end
+
+  test "syncing a nested record", context do
+    tenant = context[:tenant]
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+    {:ok, pid} = View.start_link(tenant, [:user, "alice", 1], alice.id)
+
+    alice
+    |> User.changeset(%{name: "Alicia"})
+    |> TestRepo.update!()
+
+    assert %{user: %{"alice" => %{1 => %User{name: "Alicia"}}}} = View.await(pid)
+  end
+
+  test "syncing a collection", context do
+    tenant = context[:tenant]
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+
+    {:ok, pid} = View.start_link(tenant, :user, alice.id)
+
+    _bob = TestRepo.insert!(%User{name: "Bob"}, prefix: tenant)
+
+    assert %{user: %User{name: "Alice"}, user_collection: [_, _]} = View.await(pid)
+  end
+
+  test "change the sync target", context do
+    tenant = context[:tenant]
+
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+    bob = TestRepo.insert!(%User{name: "Bob"}, prefix: tenant)
+
+    {:ok, pid} = View.start_link(tenant, :user, alice.id)
+    View.switch_user(pid, :user, bob.id)
+
+    alice
+    |> User.changeset(%{name: "Alicia"})
+    |> TestRepo.update!()
+
+    bob
+    |> User.changeset(%{name: "Robert"})
+    |> TestRepo.update!()
+
+    assert %{user: %User{name: "Robert"}} = View.await(pid)
+  end
+
+  test "canceling a sync", context do
+    tenant = context[:tenant]
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+    {:ok, pid} = View.start_link(tenant, :user, alice.id)
+
+    View.cancel_user_sync(pid, :user)
+
+    alice
+    |> User.changeset(%{name: "Alicia"})
+    |> TestRepo.update!()
+
+    catch_exit(View.await(pid))
+  end
+end

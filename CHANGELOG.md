@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.2 (TBD)
+
+### Enhancements
+
+* `EctoFoundationDB.Sync`: Defines conventions for keeping a stateful process (e.g. LiveView) automatically up-to-date
+  with the latest data from the database.
+
 ## v0.5.1 (2025-12-19)
 
 ### Enhancements
