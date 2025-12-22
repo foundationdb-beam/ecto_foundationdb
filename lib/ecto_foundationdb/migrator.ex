@@ -33,7 +33,7 @@ defmodule EctoFoundationDB.Migrator do
   @spec up(Ecto.Repo.t(), Tenant.t() | Tenant.id(), Options.t()) :: :ok
   def up(repo, tenant_id, options) when is_binary(tenant_id) do
     db = FoundationDB.db(repo)
-    tenant = Tenant.Backend.db_open(db, tenant_id, options)
+    tenant = Tenant.Backend.db_open(db, repo, tenant_id, options)
     up(repo, tenant, options)
   end
 

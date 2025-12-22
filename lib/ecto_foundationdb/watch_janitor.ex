@@ -128,17 +128,14 @@ defmodule EctoFoundationDB.WatchJanitor do
 
     reg =
       Enum.reduce(pids, reg, fn pid, reg0 ->
-        case Map.fetch(reg, pid) do
-          {:ok, item} ->
-            case cleanup_item(item, now, check_older_than) do
-              {:ok, item} ->
-                Map.put(reg, pid, item)
-
-              :error ->
-                %{mref: mref} = item
-                Process.demonitor(mref)
-                Map.delete(reg, pid)
-            end
+        with {:ok, item} <- Map.fetch(reg, pid),
+             {:cont, item} <- cleanup_item(item, now, check_older_than) do
+          Map.put(reg0, pid, item)
+        else
+          {:halt, item} ->
+            %{mref: mref} = item
+            Process.demonitor(mref)
+            Map.delete(reg0, pid)
 
           :error ->
             reg0
@@ -156,10 +153,10 @@ defmodule EctoFoundationDB.WatchJanitor do
     reg =
       Stream.map(reg, fn {pid, item} ->
         case cleanup_item(item, now, check_older_than) do
-          {:ok, item} ->
+          {:cont, item} ->
             {true, {pid, item}}
 
-          :error ->
+          {:halt, item} ->
             %{mref: mref} = item
             Process.demonitor(mref)
             false
@@ -192,10 +189,10 @@ defmodule EctoFoundationDB.WatchJanitor do
 
     case futures do
       [] ->
-        :error
+        {:halt, Map.put(item, :futures, [])}
 
       _ ->
-        {:ok, Map.put(item, :futures, futures)}
+        {:cont, Map.put(item, :futures, futures)}
     end
   end
 

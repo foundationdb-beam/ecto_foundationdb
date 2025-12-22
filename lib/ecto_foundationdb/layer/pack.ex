@@ -151,8 +151,22 @@ defmodule EctoFoundationDB.Layer.Pack do
     namespaced_range(tenant, source, @index_namespace, vals)
   end
 
-  def schema_metadata_pack(tenant, source, field_name) do
-    namespaced_pack(tenant, source, @metadata_namespace, ["#{field_name}"])
+  def schema_metadata_pack(tenant, source, index_name, idx_len, index_values, signal_name) do
+    vals = schema_metadata_pack_vals(index_name, idx_len, index_values, signal_name)
+    namespaced_pack(tenant, source, @metadata_namespace, vals)
+  end
+
+  defp schema_metadata_pack_vals(_index_name, 0, [], nil) do
+    []
+  end
+
+  defp schema_metadata_pack_vals(_index_name, 0, [], signal_name) do
+    ["#{signal_name}"]
+  end
+
+  defp schema_metadata_pack_vals(index_name, idx_len, index_values, signal_name) do
+    ["#{index_name}", idx_len] ++
+      index_values ++ if(is_nil(signal_name), do: [], else: ["#{signal_name}"])
   end
 
   def namespaced_pack(tenant, source, namespace, vals) do

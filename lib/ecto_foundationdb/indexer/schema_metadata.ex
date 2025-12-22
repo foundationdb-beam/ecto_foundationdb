@@ -17,36 +17,69 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer
+  alias EctoFoundationDB.Layer.Metadata
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.Tx
+  alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
+  alias EctoFoundationDB.Tenant
 
   @behaviour Indexer
 
   @doc """
   Synchronous get on the `inserts` key.
   """
-  def inserts(schema, opts), do: sync_get(schema, :inserts, opts)
+  def inserts(schema, opts), do: inserts_by(schema, [], opts)
 
   @doc """
   Synchronous get on the `deletes` key.
   """
-  def deletes(schema, opts), do: sync_get(schema, :deletes, opts)
+  def deletes(schema, opts), do: deletes_by(schema, [], opts)
 
   @doc """
   Synchronous get on the `collection` key.
   """
-  def collection(schema, opts), do: sync_get(schema, :collection, opts)
+  def collection(schema, opts), do: collection_by(schema, [], opts)
 
   @doc """
   Synchronous get on the `updates` key.
   """
-  def updates(schema, opts), do: sync_get(schema, :updates, opts)
+  def updates(schema, opts), do: updates_by(schema, [], opts)
 
   @doc """
   Synchronous get on the `changes` key.
   """
-  def changes(schema, opts), do: sync_get(schema, :changes, opts)
+  def changes(schema, opts), do: changes_by(schema, [], opts)
+
+  @doc """
+  Synchronous get on the `inserts` key for the provided indexed values.
+  """
+  def inserts_by(schema, indexed_values, opts),
+    do: sync_get(schema, indexed_values, :inserts, opts)
+
+  @doc """
+  Synchronous get on the `deletes` key for the provided indexed values.
+  """
+  def deletes_by(schema, indexed_values, opts),
+    do: sync_get(schema, indexed_values, :deletes, opts)
+
+  @doc """
+  Synchronous get on the `collection` key for the provided indexed values.
+  """
+  def collection_by(schema, indexed_values, opts),
+    do: sync_get(schema, indexed_values, :collection, opts)
+
+  @doc """
+  Synchronous get on the `updates` key for the provided indexed values.
+  """
+  def updates_by(schema, indexed_values, opts),
+    do: sync_get(schema, indexed_values, :updates, opts)
+
+  @doc """
+  Synchronous get on the `changes` key for the provided indexed values.
+  """
+  def changes_by(schema, indexed_values, opts),
+    do: sync_get(schema, indexed_values, :changes, opts)
 
   @doc """
   Equivalent to `watch(schema, :inserts, opts)`
@@ -72,6 +105,36 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
   Equivalent to `watch(schema, :changes, opts)`
   """
   def watch_changes(schema, opts \\ []), do: watch(schema, :changes, opts)
+
+  @doc """
+  Equivalent to `watch_by(schema, indexed_values, :inserts, opts)`
+  """
+  def watch_inserts_by(schema, indexed_values, opts \\ []),
+    do: watch_by(schema, indexed_values, :inserts, opts)
+
+  @doc """
+  Equivalent to `watch_by(schema, indexed_values, :deletes, opts)`
+  """
+  def watch_deletes_by(schema, indexed_values, opts \\ []),
+    do: watch_by(schema, indexed_values, :deletes, opts)
+
+  @doc """
+  Equivalent to `watch_by(schema, indexed_values, :collection, opts)`
+  """
+  def watch_collection_by(schema, indexed_values, opts \\ []),
+    do: watch_by(schema, indexed_values, :collection, opts)
+
+  @doc """
+  Equivalent to `watch_by(schema, indexed_values, :updates, opts)`
+  """
+  def watch_updates_by(schema, indexed_values, opts \\ []),
+    do: watch_by(schema, indexed_values, :updates, opts)
+
+  @doc """
+  Equivalent to `watch_by(schema, indexed_values, :changes, opts)`
+  """
+  def watch_changes_by(schema, indexed_values, opts \\ []),
+    do: watch_by(schema, indexed_values, :changes, opts)
 
   @doc """
   Creates a watch on the provided SchemaMetadata named key.
@@ -100,65 +163,96 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
     By default, `Repo.all(schema)` is used.
   """
   def watch(schema, name, opts \\ []) do
+    watch_by(schema, [], name, opts)
+  end
+
+  def watch_by(schema, indexed_values, name, opts \\ []) do
     {tenant, tx} = assert_tenant_tx!()
+
     source = Schema.get_source(schema)
-    future_ref = :erlfdb.watch(tx, key(tenant, source, name))
+
+    idx = tx_lookup_idx!(tenant, source, indexed_values)
+
+    index_name = idx[:id]
+    # @todo values
+    values = []
+    future_ref = :erlfdb.watch(tx, key(tenant, source, index_name, values, name))
 
     Future.new_deferred(
       future_ref,
       fn _ ->
         {schema, {__MODULE__, name}, opts,
-         fn _, new_opts -> watch(schema, name, Keyword.merge(opts, new_opts)) end}
+         fn _, new_opts ->
+           watch_by(schema, indexed_values, name, Keyword.merge(opts, new_opts))
+         end}
       end
     )
+  end
+
+  defp select_index(metadata, []) do
+    %Metadata{indexes: indexes} = with_schema_metadata_indexes(metadata)
+
+    Enum.find(indexes, fn idx ->
+      Enum.empty?(idx[:fields])
+    end)
+  end
+
+  defp select_index(metadata, constraints) do
+    Metadata.select_index(with_schema_metadata_indexes(metadata), constraints)
   end
 
   @doc """
   Asynchronously get the `inserts` key.
   """
-  def async_inserts(schema), do: async_get(schema, :inserts)
+  def async_inserts(schema), do: async_get(schema, [], :inserts)
 
   @doc """
   Asynchronously get the `deletes` key.
   """
-  def async_deletes(schema), do: async_get(schema, :deletes)
+  def async_deletes(schema), do: async_get(schema, [], :deletes)
 
   @doc """
   Asynchronously get the `collection` key.
   """
-  def async_collection(schema), do: async_get(schema, :collection)
+  def async_collection(schema), do: async_get(schema, [], :collection)
 
   @doc """
   Asynchronously get the `updates` key.
   """
-  def async_updates(schema), do: async_get(schema, :updates)
+  def async_updates(schema), do: async_get(schema, [], :updates)
 
   @doc """
   Asynchronously get the `changes` key.
   """
-  def async_changes(schema), do: async_get(schema, :changes)
+  def async_changes(schema), do: async_get(schema, [], :changes)
 
-  defp sync_get(schema, name, prefix: tenant),
-    do: Tx.transactional(tenant, fn _ -> schema |> async_get(name) |> Future.result() end)
+  defp sync_get(schema, indexed_values, name, prefix: tenant),
+    do:
+      Tx.transactional(tenant, fn _ ->
+        schema |> async_get(indexed_values, name) |> Future.result()
+      end)
 
-  defp async_get(schema, name) when is_atom(schema) do
-    async_get(Schema.get_source(schema), name)
+  defp async_get(schema, indexed_values, name) when is_atom(schema) do
+    async_get(Schema.get_source(schema), indexed_values, name)
   end
 
-  defp async_get(source, name) do
+  defp async_get(source, indexed_values, name) do
     future = Future.new()
     {tenant, tx} = assert_tenant_tx!()
-    future_ref = :erlfdb.get(tx, key(tenant, source, name))
+    idx = tx_lookup_idx!(tenant, source, indexed_values)
+    index_name = idx[:id]
+    # @todo values
+    values = []
+    future_ref = :erlfdb.get(tx, key(tenant, source, index_name, values, name))
     Future.set(future, tx, future_ref, &decode_counter/1)
   end
 
-  # This defines the full set of possible values for the `include` param
-  # when creating the schema metadata index.
+  # This defines the full set of values that SchemaMetadata tracks.
   #
   # It might feel natural to add a `:count` field. However, this can't be done
   # accurately due to upserts.
   @doc false
-  def field_names() do
+  def signal_names() do
     [
       # A counter that's incremented whenever a new insert occurs. The counter value
       # is only meaningful when compared relative to a past value.
@@ -190,7 +284,9 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
 
   @impl true
   def drop_ranges(tenant, idx) do
-    for f <- idx[:fields], do: key(tenant, idx[:source], f)
+    # @todo index values
+    values = []
+    for f <- signal_names(), do: key(tenant, idx[:source], idx[:id], values, f)
   end
 
   @impl true
@@ -228,13 +324,18 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
     """
   end
 
-  defp key(tenant, source, name) do
-    Pack.schema_metadata_pack(tenant, source, name)
+  defp key(tenant, source, index_name, values, name) do
+    Pack.schema_metadata_pack(tenant, source, index_name, length(values), values, name)
   end
 
   defp add(tenant, tx, idx, name, num \\ 1) do
-    if name in idx[:fields] do
-      :erlfdb.add(tx, key(tenant, idx[:source], name), num)
+    options = Keyword.get(idx, :options, [])
+    signals = Keyword.get(options, :signals, signal_names())
+
+    if name in signals do
+      # @todo index values
+      values = []
+      :erlfdb.add(tx, key(tenant, idx[:source], idx[:id], values, name), num)
     end
   end
 
@@ -263,5 +364,41 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
       end
 
     {tenant, tx}
+  end
+
+  defp with_schema_metadata_indexes(md = %Metadata{indexes: indexes}) do
+    indexes =
+      Enum.filter(indexes, fn index ->
+        index[:indexer] == EctoFoundationDB.Indexer.SchemaMetadata
+      end)
+
+    %{md | indexes: indexes}
+  end
+
+  defp tx_lookup_idx!(tenant, source, indexed_values) do
+    adapter_meta = get_adapter_meta(Tenant.repo(tenant))
+
+    constraints =
+      for {f, v} <- indexed_values, do: %QueryPlan.Equal{field: f, is_pk?: false, param: v}
+
+    idx =
+      Metadata.transactional(tenant, adapter_meta, source, fn _tx, metadata ->
+        select_index(metadata, constraints)
+      end)
+
+    if is_nil(idx) do
+      raise """
+      SchemaMetadata index not found for input constraints:
+
+      #{inspect(indexed_values)}
+      """
+    end
+
+    idx
+  end
+
+  defp get_adapter_meta(repo) do
+    {adapter_meta, _} = Ecto.Repo.Supervisor.tuplet(repo, [])
+    adapter_meta
   end
 end
