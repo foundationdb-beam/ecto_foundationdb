@@ -143,13 +143,13 @@ defmodule EctoFoundationDBSchemaMetadataTest do
   defp receive_ready(assigns, futures, [watch_ref], opts) do
     receive do
       {^watch_ref, :ready} when is_reference(watch_ref) ->
-        {ready_assigns, futures} =
+        {ready_assigns, new_futures, other_futures} =
           TestRepo.assign_ready(futures, [watch_ref], opts)
 
         assert [_] = ready_assigns
         assert is_list(ready_assigns)
 
-        {Map.merge(assigns, Enum.into(ready_assigns, %{})), futures}
+        {Map.merge(assigns, Enum.into(ready_assigns, %{})), new_futures ++ other_futures}
     after
       100 ->
         raise "Future result not received within 100 msec"

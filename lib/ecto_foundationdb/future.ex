@@ -46,6 +46,8 @@ defmodule EctoFoundationDB.Future do
 
   def ref(%__MODULE__{ref: ref}), do: ref
 
+  def erlfdb_future(%__MODULE__{erlfdb_future: erlfdb_future}), do: erlfdb_future
+
   def cancel(future = %__MODULE__{}) do
     %{erlfdb_future: erlfdb_future} = future
     :erlfdb.cancel(erlfdb_future, flush: true)

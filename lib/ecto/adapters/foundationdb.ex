@@ -636,11 +636,11 @@ defmodule Ecto.Adapters.FoundationDB do
     # ...
 
     def handle_info({ref, :ready}, state=%{assigns: assigns, futures: futures, tenant: tenant}) when is_reference(ref) do
-      {new_assigns, new_futures} = MyRepo.assign_ready(futures, [ref], watch?: true, prefix: tenant)
+      {new_assigns, new_futures, other_futures} = MyRepo.assign_ready(futures, [ref], watch?: true, prefix: tenant)
       {:noreply, %{
             state |
               assigns: Map.merge(assigns, Enum.into(new_assigns, %{})),
-              futures: new_futures
+              futures: other_futures ++ new_futures
             }}
     end
   end

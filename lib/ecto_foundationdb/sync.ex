@@ -39,8 +39,6 @@ defmodule EctoFoundationDB.Sync do
         |> put_private(:tenant, open_tenant(socket))
         |> Sync.sync_one!(Repo, User, :user, user_id)}
     end
-
-    def terminate(_reason, socket), do: Sync.cancel_all(socket, Repo)
   end
   ```
 
@@ -67,8 +65,6 @@ defmodule EctoFoundationDB.Sync do
         |> put_private(:tenant, open_tenant(socket))
         |> Sync.sync_all!(Repo, User)}
     end
-
-    def terminate(_reason, socket), do: Sync.cancel_all(socket, Repo)
   end
   ```
 
@@ -114,6 +110,7 @@ defmodule EctoFoundationDB.Sync do
 
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer.SchemaMetadata
+  alias EctoFoundationDB.WatchJanitor
 
   @data_key :ecto_fdb_sync_data
   @hook_name :ecto_fdb_sync_hook
@@ -310,8 +307,10 @@ defmodule EctoFoundationDB.Sync do
       )
       |> Enum.unzip()
 
+    new_futures = Enum.into(new_futures, %{})
+
     state
-    |> merge_futures(repo, Enum.into(new_futures, %{}))
+    |> merge_futures(repo, new_futures)
     |> apply_assign(new_assigns, opts)
     |> apply_attach_hook(repo, opts)
   end
@@ -319,21 +318,7 @@ defmodule EctoFoundationDB.Sync do
   @doc """
   Cancels all syncing and detaches the hook.
 
-  For best performance, your application should cancel syncing before the process exits. This will ensure
-  that the database is not tracking watches that no longer have a purpose.
-
-  ## The consequences of not canceling
-
-  Suppose your process exits without canceling. In this case, the watches remain registered in the database.
-
-  - When the watched key eventually changes, the future will be silently resolved and everything will be cleaned up
-    automatically at that time.
-  - If the watched key never changes, a small amount of memory will remain in use indefinitely. If your application
-    creates many watches for keys that never change, you may eventually detect this as a memory leak.
-  - By default, each database connection can have no more than 10,000 watches that have not yet reported a change.
-    When this number is exceeded, an attempt to create a watch will return a `too_many_watches` error.
-  - When your application node exits or is restarted, the watches will remain registered in the database for
-    ~15 minutes. At that time, the database will automatically clean them up.
+  Canceling syncing is optional. EctoFoundationDB will automatically clean up watches when your process exits.
 
   ## Arguments
 
@@ -455,15 +440,16 @@ defmodule EctoFoundationDB.Sync do
       futures = get_futures(state, repo)
 
       case repo.assign_ready(futures, refs, watch?: true, prefix: tenant) do
-        {[], ^futures} ->
+        {[], [], ^futures} ->
           {:cont, state}
 
-        {new_assigns, futures} ->
+        {new_assigns, new_futures, other_futures} ->
           {labels, _} = Enum.unzip(new_assigns)
 
           {:halt,
            state
-           |> put_futures(repo, futures)
+           |> put_futures(repo, other_futures)
+           |> merge_futures(repo, new_futures)
            |> apply_assign(new_assigns, opts)
            |> apply_post_hook(labels, opts)}
       end
@@ -604,6 +590,7 @@ defmodule EctoFoundationDB.Sync do
   end
 
   defp merge_futures(state, repo, new_futures) do
+    WatchJanitor.register(WatchJanitor.get!(repo), self(), Map.values(new_futures))
     futures = get_futures(state, repo)
     futures_to_cancel = Map.intersect(new_futures, futures)
     Enum.each(futures_to_cancel, fn {_, f} -> Future.cancel(f) end)

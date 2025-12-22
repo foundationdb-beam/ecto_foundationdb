@@ -7,19 +7,26 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
   alias Ecto.Adapters.FoundationDB
 
   def assign_ready(_module, repo, futures, ready_refs, options) when is_list(ready_refs) do
-    Tx.transactional(options[:prefix], fn _tx ->
-      {labeled_futures_rev, futures} = filter_ready(repo, futures, ready_refs, options)
+    {labeled_res, untouched_futures} =
+      Tx.transactional(options[:prefix], fn _tx ->
+        {labeled_futures_rev, futures} = filter_ready(repo, futures, ready_refs, options)
 
-      labeled_futures = Enum.reverse(labeled_futures_rev)
-      {labels, assign_futures} = Enum.unzip(labeled_futures)
-      res = repo.await(assign_futures)
-      labeled_res = Enum.zip(labels, res)
-
-      Enum.reduce(labeled_res, {[], futures}, fn
-        {label, {new_assigns, new_future_or_nil}}, {assigns, futures} ->
-          {assigns ++ new_assigns, append_new_future(futures, label, new_future_or_nil)}
+        labeled_futures = Enum.reverse(labeled_futures_rev)
+        {labels, assign_futures} = Enum.unzip(labeled_futures)
+        res = repo.await(assign_futures)
+        labeled_res = Enum.zip(labels, res)
+        {labeled_res, futures}
       end)
-    end)
+
+    empty_futures = if is_list(futures), do: [], else: %{}
+
+    {assigns, new_futures} =
+      Enum.reduce(labeled_res, {[], empty_futures}, fn
+        {label, {new_assigns, new_future_or_nil}}, {assigns, new_futures} ->
+          {assigns ++ new_assigns, append_new_future(new_futures, label, new_future_or_nil)}
+      end)
+
+    {assigns, new_futures, untouched_futures}
   end
 
   defp filter_ready(repo, futures, ready_refs, options) do
