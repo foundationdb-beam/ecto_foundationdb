@@ -48,6 +48,10 @@ defmodule EctoFoundationDBSchemaMetadataTest do
     end)
 
     assert _ = TestRepo.await(future)
+
+    TestRepo.transactional(tenant, fn -> SchemaMetadata.clear(User) end)
+
+    assert [0, 0, 0, 0, 0] = idcuc(tenant, User)
   end
 
   test "labeled watch", context do

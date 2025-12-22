@@ -17,7 +17,10 @@ defmodule EctoFoundationDB.Integration.Migration.UserSchemaMetadata do
 
   @impl true
   def change() do
-    [create(metadata(User))]
+    [
+      create(metadata(User)),
+      create(metadata(User, [:name]))
+    ]
   end
 end
 

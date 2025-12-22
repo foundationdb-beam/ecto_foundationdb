@@ -81,6 +81,24 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
   def changes_by(schema, indexed_values, opts),
     do: sync_get(schema, indexed_values, :changes, opts)
 
+  def clear(schema), do: clear_by(schema, [])
+
+  def clear_by(schema, indexed_values) do
+    source = Schema.get_source(schema)
+    {tenant, tx} = assert_tenant_tx!()
+    idx = tx_lookup_idx!(tenant, source, indexed_values)
+    index_name = idx[:id]
+    index_values = Indexer.Default.get_index_values(schema, idx[:fields], indexed_values)
+
+    options = Keyword.get(idx, :options, [])
+    signals = Keyword.get(options, :signals, signal_names())
+
+    fields = idx[:fields]
+
+    for signal <- signals,
+        do: :erlfdb.clear(tx, key(tenant, source, index_name, fields, index_values, signal))
+  end
+
   @doc """
   Equivalent to `watch(schema, :inserts, opts)`
   """
@@ -174,9 +192,9 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
     idx = tx_lookup_idx!(tenant, source, indexed_values)
 
     index_name = idx[:id]
-    # @todo values
-    values = []
-    future_ref = :erlfdb.watch(tx, key(tenant, source, index_name, values, name))
+    fields = idx[:fields]
+    index_values = Indexer.Default.get_index_values(schema, idx[:fields], indexed_values)
+    future_ref = :erlfdb.watch(tx, key(tenant, source, index_name, fields, index_values, name))
 
     Future.new_deferred(
       future_ref,
@@ -226,24 +244,46 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
   """
   def async_changes(schema), do: async_get(schema, [], :changes)
 
+  @doc """
+  Asynchronously get the `inserts` key.
+  """
+  def async_inserts_by(schema, by), do: async_get(schema, by, :inserts)
+
+  @doc """
+  Asynchronously get the `deletes` key.
+  """
+  def async_deletes_by(schema, by), do: async_get(schema, by, :deletes)
+
+  @doc """
+  Asynchronously get the `collection` key.
+  """
+  def async_collection_by(schema, by), do: async_get(schema, by, :collection)
+
+  @doc """
+  Asynchronously get the `updates` key.
+  """
+  def async_updates_by(schema, by), do: async_get(schema, by, :updates)
+
+  @doc """
+  Asynchronously get the `changes` key.
+  """
+  def async_changes_by(schema, by), do: async_get(schema, by, :changes)
+
   defp sync_get(schema, indexed_values, name, prefix: tenant),
     do:
       Tx.transactional(tenant, fn _ ->
         schema |> async_get(indexed_values, name) |> Future.result()
       end)
 
-  defp async_get(schema, indexed_values, name) when is_atom(schema) do
-    async_get(Schema.get_source(schema), indexed_values, name)
-  end
-
-  defp async_get(source, indexed_values, name) do
+  defp async_get(schema, indexed_values, name) do
+    source = Schema.get_source(schema)
     future = Future.new()
     {tenant, tx} = assert_tenant_tx!()
     idx = tx_lookup_idx!(tenant, source, indexed_values)
     index_name = idx[:id]
-    # @todo values
-    values = []
-    future_ref = :erlfdb.get(tx, key(tenant, source, index_name, values, name))
+    fields = idx[:fields]
+    index_values = Indexer.Default.get_index_values(schema, fields, indexed_values)
+    future_ref = :erlfdb.get(tx, key(tenant, source, index_name, fields, index_values, name))
     Future.set(future, tx, future_ref, &decode_counter/1)
   end
 
@@ -284,9 +324,9 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
 
   @impl true
   def drop_ranges(tenant, idx) do
-    # @todo index values
-    values = []
-    for f <- signal_names(), do: key(tenant, idx[:source], idx[:id], values, f)
+    options = Keyword.get(idx, :options, [])
+    signals = Keyword.get(options, :signals, signal_names())
+    Pack.schema_metadata_ranges(tenant, idx[:source], idx[:id], length(idx[:fields]), signals)
   end
 
   @impl true
@@ -295,25 +335,47 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
   end
 
   @impl true
-  def set(tenant, tx, idx, _schema, _kv) do
-    add(tenant, tx, idx, :inserts)
-    add(tenant, tx, idx, :collection)
-    add(tenant, tx, idx, :changes)
+  def set(tenant, tx, idx, schema, {_kv_codec, data_object}) do
+    index_values = Indexer.Default.get_index_values(schema, idx[:fields], data_object)
+    add(tenant, tx, idx, index_values, :inserts)
+    add(tenant, tx, idx, index_values, :collection)
+    add(tenant, tx, idx, index_values, :changes)
     :ok
   end
 
   @impl true
-  def update(tenant, tx, idx, _schema, _kv, _updates) do
-    add(tenant, tx, idx, :updates)
-    add(tenant, tx, idx, :changes)
-    :ok
+  def update(tenant, tx, idx, schema, {_kv_codec, data_object}, updates) do
+    old_index_values = Indexer.Default.get_index_values(schema, idx[:fields], data_object)
+
+    data_object =
+      data_object
+      |> Keyword.merge(updates[:set] || [])
+      |> Keyword.drop(updates[:clear] || [])
+
+    case Indexer.Default.get_index_values(schema, idx[:fields], data_object) do
+      ^old_index_values ->
+        add(tenant, tx, idx, old_index_values, :updates)
+        add(tenant, tx, idx, old_index_values, :changes)
+
+      new_index_values ->
+        add(tenant, tx, idx, old_index_values, :deletes)
+        add(tenant, tx, idx, old_index_values, :collection)
+        add(tenant, tx, idx, old_index_values, :updates)
+        add(tenant, tx, idx, old_index_values, :changes)
+
+        add(tenant, tx, idx, new_index_values, :inserts)
+        add(tenant, tx, idx, new_index_values, :collection)
+        add(tenant, tx, idx, new_index_values, :updates)
+        add(tenant, tx, idx, new_index_values, :changes)
+    end
   end
 
   @impl true
-  def clear(tenant, tx, idx, _schema, _kv) do
-    add(tenant, tx, idx, :deletes)
-    add(tenant, tx, idx, :collection)
-    add(tenant, tx, idx, :changes)
+  def clear(tenant, tx, idx, schema, {_kv_codec, data_object}) do
+    index_values = Indexer.Default.get_index_values(schema, idx[:fields], data_object)
+    add(tenant, tx, idx, index_values, :deletes)
+    add(tenant, tx, idx, index_values, :collection)
+    add(tenant, tx, idx, index_values, :changes)
     :ok
   end
 
@@ -324,18 +386,17 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
     """
   end
 
-  defp key(tenant, source, index_name, values, name) do
-    Pack.schema_metadata_pack(tenant, source, index_name, length(values), values, name)
+  defp key(tenant, source, index_name, fields, values, name) do
+    Pack.schema_metadata_pack(tenant, source, index_name, length(fields), values, name)
   end
 
-  defp add(tenant, tx, idx, name, num \\ 1) do
+  defp add(tenant, tx, idx, index_values, name, num \\ 1) do
     options = Keyword.get(idx, :options, [])
     signals = Keyword.get(options, :signals, signal_names())
+    fields = idx[:fields]
 
     if name in signals do
-      # @todo index values
-      values = []
-      :erlfdb.add(tx, key(tenant, idx[:source], idx[:id], values, name), num)
+      :erlfdb.add(tx, key(tenant, idx[:source], idx[:id], fields, index_values, name), num)
     end
   end
 
