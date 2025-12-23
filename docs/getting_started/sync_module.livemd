@@ -2,7 +2,7 @@
 
 ```elixir
 Mix.install([
-  {:phoenix_playground, "~> 0.1.0"},
+  {:phoenix_playground, "~> 0.1"},
   {:ecto_foundationdb, github: "jessestimpson/ecto_foundationdb", branch: "sync"}
 ])
 ```
@@ -23,7 +23,7 @@ defmodule Product do
 
   alias Ecto.Changeset
 
-  @primary_key {:id, :binary_id, autogenerate: true}
+  @primary_key {:id, :binary_id, autogenerate: false}
 
   schema "products" do
     field(:name, :string)
@@ -31,9 +31,8 @@ defmodule Product do
     timestamps()
   end
 
-  def changeset(quote, params \\ %{}) do
-    quote
-    |> Changeset.cast(params, [:name, :description])
+  def changeset(product, params \\ %{}) do
+    Changeset.cast(product, params, [:name, :description])
   end
 end
 
@@ -52,9 +51,8 @@ defmodule Review do
     timestamps()
   end
 
-  def changeset(quote, params \\ %{}) do
-    quote
-    |> Changeset.cast(params, [:author, :content, :score])
+  def changeset(review, params \\ %{}) do
+    Changeset.cast(review, params, [:author, :content, :score])
   end
 end
 
@@ -108,91 +106,122 @@ Next, we create a product and some reviews.
 ```elixir
 {widget, widget_reviews} = 
   Repo.transactional(tenant, fn ->
-  widget = case Repo.get_by(Product, name: "Widget") do
-    nil ->
-        Repo.insert!(
-          %Product{name: "Widget", description: "You want to buy this!"}
+  widget = Repo.insert!(
+          %Product{id: "p1", name: "Widget", description: "You want to buy this!"}
         )
-    w ->
-      w
-  end
-
-  case Repo.all_by(Review, product_id: widget.id) do
-    [] ->
-      r = [
+  r = [
         %Review{product: widget, author: "Alice", content: "It's ok", score: 3},
         %Review{product: widget, author: "Bob", content: "It's great!", score: 5}
       ]
-      {widget, for(x <- r, do: Repo.insert!(x))}
-    r ->
-      {widget, r}
-  end
-
+  {widget, for(x <- r, do: Repo.insert!(x))}
 end)
 ```
 
 ```elixir
 {blivet, blivet_reviews} = 
   Repo.transactional(tenant, fn ->
-  blivet = case Repo.get_by(Product, name: "Blivet") do
-    nil ->
-        Repo.insert!(
-          %Product{name: "Blivet", description: "It's pretty useful"}
+  blivet = Repo.insert!(
+          %Product{id: "p2", name: "Blivet", description: "It's pretty useful"}
         )
-    b ->
-      b
-  end
-
-  case Repo.all_by(Review, product_id: blivet.id) do
-    [] ->
-      r = [
+  r = [
         %Review{product: blivet, author: "Charlie", content: "The blivet is supreme", score: 5},
         %Review{product: blivet, author: "Dan", content: "This blivet is useless!", score: 1}
       ]
-      {blivet, for(x <- r, do: Repo.insert!(x))}
-    r ->
-      {blivet, r}
-  end
-
+  {blivet, for(x <- r, do: Repo.insert!(x))}
 end)
 ```
 
 ## Setup LiveView
+
+Let's define a simple CSS stylesheet for our page. The values chosen here are not important for this demo.
+
+```elixir
+defmodule Style do
+  def style(), do: """
+<style type="text/css">
+  /* Global Resets & Layout */
+  body { font-family: sans-serif; line-height: 1.5; color: #333; }
+
+  /* Navigation Bar */
+  .catalog ul {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    padding: 1rem;
+    list-style: none;
+    background: #f4f4f4;
+    border-bottom: 1px solid #ddd;
+  }
+  .catalog a { text-decoration: none; color: #007bff; font-weight: bold; }
+  .catalog a:hover { text-decoration: underline; }
+
+  /* Product Card */
+  .card {
+    max-width: 500px;
+    margin: 2rem auto;
+    padding: 2rem;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  }
+
+  .card h1 { text-align: center; margin-top: 0; }
+  .card p { text-align: center; color: #666; }
+
+  /* Reviews Section */
+  .card ul { padding: 0; list-style: none; }
+  .card figure {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    background: #fafafa;
+    border-left: 4px solid #007bff;
+  }
+  blockquote { margin: 0; font-style: italic; }
+  figcaption { text-align: right; font-weight: bold; font-size: 0.9rem; }
+</style>
+"""
+end
+```
+
+With the stylesheet out of the way, we can showcase how the Sync module works in your LiveView.
 
 ```elixir
 defmodule DemoLive do
   use Phoenix.LiveView
 
   alias EctoFoundationDB.Sync
+  import Ecto.Query
 
   require Logger
-  def mount(%{"id" => id}, _session, socket) do
+  def mount(_params, _session, socket) do
     tenant = Tenant.open!(Repo, "sync-sample")
 
-    # @todo: watching collections per tenant is just not good enough. Can we
-    # watch collections per index value?
     {:ok, socket
       |> put_private(:tenant, tenant)
-      |> Sync.sync_one!(Repo, Product, :product, id)
-      |> Sync.sync_all!(Repo, Review, :reviews)}
+      |> Sync.sync_all!(Repo, :catalog, from(p in Product, order_by: p.name))}
   end
 
-  def handle_params(%{"id" => id}, socket) do
-    {:ok, socket
-      |> Sync.sync_one!(Repo, Product, :product, id)}
+  def handle_params(%{"id" => id}, _uri, socket) do
+    {:noreply, 
+      socket
+      |> Sync.sync_one!(Repo, :product, Product, id)
+      |> Sync.sync_all_by!(Repo, :reviews, Review, product_id: id)}
   end
-
-  def terminate(_reason, socket) do
-    Sync.cancel_all(socket, Repo)
-  end
+  def handle_params(_params, _uri, socket),
+    do: {:noreply, assign(socket, product: nil, reviews: [])}
 
   def render(assigns) do
     ~H"""
-    <div class="content">
+    <div class="catalog">
+      <ul>
+        <li :for={p <- @catalog}>
+          <.link patch={"/?id=#{p.id}"}>{p.name}</.link>
+        </li>
+      </ul>
+    </div>
+    <div :if={@product} class="card">
       <h1>{@product.name}</h1>
-      <p>
-      {@product.description}
-      </p>
+      <p>{@product.description}</p>
       <ul>
         <li :for={r <- @reviews}>
           <figure>
@@ -203,26 +232,24 @@ defmodule DemoLive do
       </ul>
     </div>
 
-    <style type="text/css">
-      h1 { text-align: center; }
-      h3 { text-align: right; }
-      h6 { text-align: right; }
-      p { text-align: center; }
-      ul li { list-style-type: none; }
-
-      .content {
-        max-width: 500px;
-        margin: auto;
-      }
-    </style>
+    {Phoenix.HTML.raw(Style.style())}
     """
   end
 
 end
 
-PhoenixPlayground.start(live: DemoLive, open_browser: false)
+PhoenixPlayground.start(live: DemoLive)
+```
+
+Now we can add anything to our database, and the page will update.
+
+```elixir
+foo = Repo.insert!(
+  %Product{id: "p3", name: "Foo", description: "Hello world!"},
+  prefix: tenant
+)
 ```
 
 ```elixir
-IO.puts("http://localhost:4000?id=#{widget.id}")
+Repo.insert(%Review{product: foo, author: "Ethan", content: "Test", score: 3}, prefix: tenant)
 ```
