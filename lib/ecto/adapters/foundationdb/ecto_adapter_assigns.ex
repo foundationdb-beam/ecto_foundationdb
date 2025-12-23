@@ -88,9 +88,9 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
           {:pk, pk} ->
             async_get(repo, label, futures, schema, pk, watch_options, options, new_watch_fn)
 
-          {SchemaMetadata, action}
+          {SchemaMetadata, by, action}
           when action in [:inserts, :deletes, :collection, :updates, :changes] ->
-            async_all(repo, label, futures, schema, watch_options, options, new_watch_fn)
+            async_all_by(repo, label, by, futures, schema, watch_options, options, new_watch_fn)
         end
     end
   end
@@ -114,15 +114,23 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
     end)
   end
 
-  defp async_all(repo, label, futures, schema, watch_options, options, new_watch_fn) do
+  defp async_all_by(repo, label, by, futures, schema, watch_options, options, new_watch_fn) do
     label = label || watch_options[:label]
     query = watch_options[:query] || schema
     tenant = options[:prefix]
 
     Tx.transactional(tenant, fn _tx ->
       assign_future =
-        repo.async_all(query, options)
-        |> Future.apply(fn result ->
+        case by do
+          [] ->
+            repo.async_all(query, options)
+
+          _ ->
+            repo.async_all_by(query, by, options)
+        end
+
+      assign_future =
+        Future.apply(assign_future, fn result ->
           result = usetenant(result, tenant)
           new_future = maybe_new_watch(result, watch_options, options, new_watch_fn)
 

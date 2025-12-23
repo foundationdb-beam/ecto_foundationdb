@@ -2,6 +2,7 @@ defmodule EctoIntegrationSyncTest do
   use Ecto.Integration.Case, async: true
 
   alias Ecto.Integration.TestRepo
+  alias EctoFoundationDB.Schemas.Post
   alias EctoFoundationDB.Schemas.User
   alias EctoFoundationDB.Sync
 
@@ -30,7 +31,8 @@ defmodule EctoIntegrationSyncTest do
       {:ok,
        state
        |> Sync.sync_one!(TestRepo, User, label, id)
-       |> Sync.sync_all!(TestRepo, User, :user_collection, watch_action: :collection)}
+       |> Sync.sync_all!(TestRepo, User, :user_collection, watch_action: :collection)
+       |> Sync.sync_all_by!(TestRepo, Post, :posts, [user_id: id], watch_action: :collection)}
     end
 
     def handle_call(:await, _from, state = %{changed?: true}) do
@@ -46,7 +48,10 @@ defmodule EctoIntegrationSyncTest do
     end
 
     def handle_cast({:switch_user, label, id}, state) do
-      {:noreply, Sync.sync_one!(state, TestRepo, User, label, id)}
+      {:noreply,
+       state
+       |> Sync.sync_one!(TestRepo, User, label, id)
+       |> Sync.sync_all_by!(TestRepo, Post, :posts, [user_id: id], watch_action: :collection)}
     end
 
     def handle_info(msg = {_ref, :ready}, state) do
@@ -135,5 +140,19 @@ defmodule EctoIntegrationSyncTest do
     |> TestRepo.update!()
 
     catch_exit(View.await(pid))
+  end
+
+  test "syncing an indexed collection", context do
+    tenant = context[:tenant]
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+
+    {:ok, pid} = View.start_link(tenant, :user, alice.id)
+
+    _ =
+      TestRepo.insert(%Post{user: alice, title: "My first post", content: "Hello World"},
+        prefix: tenant
+      )
+
+    assert %{posts: [_]} = View.await(pid)
   end
 end

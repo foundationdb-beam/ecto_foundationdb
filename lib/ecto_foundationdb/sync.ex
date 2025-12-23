@@ -200,7 +200,11 @@ defmodule EctoFoundationDB.Sync do
   Equivalent to `sync_groups!/4` with a single schema.
   """
   def sync_all!(state, repo, schema, label, opts \\ []) do
-    sync_groups!(state, repo, [{schema, label}], opts)
+    sync_groups!(state, repo, [{schema, label, []}], opts)
+  end
+
+  def sync_all_by!(state, repo, schema, label, by, opts \\ []) do
+    sync_groups!(state, repo, [{schema, label, by}], opts)
   end
 
   @doc """
@@ -214,13 +218,13 @@ defmodule EctoFoundationDB.Sync do
 
   - `state`: A map with key `:assigns` and `:private`. `private` must be a map with key `:tenant`
   - `repo`: An Ecto repository
-  - `schema_assigns`: A list of tuples with `{schema, label}` or `{schema, label, query}`
+  - `schema_assigns`: A list of tuples with `{schema, label, by}` or `{schema, label, by, query}`
   - `opts`: Options
 
   ## Defining a custom query
 
-  By default, `Repo.all(Schema, prefix: tenant)` is used to query the database. You can override this by providing your own
-  `Ecto.Query` in the `{schema, label, query}` tuple. This changes the query used to retrieve data, but does not change the
+  By default, `Repo.all(Schema, prefix: tenant)` or `Repo.all_by(Schema, by, prefix: tenant)` is used to query the database. You can override this by providing your own
+  `Ecto.Query` in the `{schema, label, by, query}` tuple. This changes the query used to retrieve data, but does not change the
   watch itself.
 
   ### Example
@@ -231,7 +235,7 @@ defmodule EctoFoundationDB.Sync do
   {:ok,
    socket
    |> put_private(:tenant, open_tenant(socket))
-   |> Sync.sync_all!(:sorted_users, Repo, [{User, :users, query}]))}
+   |> Sync.sync_all!(:sorted_users, Repo, [{User, :users, [], query}]))}
   ```
 
   ## Options
@@ -278,11 +282,17 @@ defmodule EctoFoundationDB.Sync do
             Enum.map(
               schema_assigns,
               fn
-                {schema, _label} ->
+                {schema, _label, []} ->
                   repo.async_all(schema)
 
-                {_schema, _label, query} ->
+                {schema, _label, by} ->
+                  repo.async_all_by(schema, by)
+
+                {_schema, _label, [], query} ->
                   repo.async_all(query)
+
+                {_schema, _label, by, query} ->
+                  repo.async_all_by(query, by)
               end
             )
 
@@ -290,16 +300,16 @@ defmodule EctoFoundationDB.Sync do
 
           Enum.zip(schema_assigns, lists)
           |> Enum.map(fn
-            {{schema, label}, list} ->
+            {{schema, label, by}, list} ->
               list = Enum.map(list, &FoundationDB.usetenant(&1, tenant))
-              watch_future = SchemaMetadata.watch(schema, watch_action)
+              watch_future = SchemaMetadata.watch_by(schema, by, watch_action)
               {{label, list}, {label, watch_future}}
 
-            {{schema, label, query}, list} ->
+            {{schema, label, by, query}, list} ->
               list = Enum.map(list, &FoundationDB.usetenant(&1, tenant))
 
               watch_future =
-                SchemaMetadata.watch(schema, watch_action, query: query)
+                SchemaMetadata.watch_by(schema, by, watch_action, query: query)
 
               {{label, list}, {label, watch_future}}
           end)

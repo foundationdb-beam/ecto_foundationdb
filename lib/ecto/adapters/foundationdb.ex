@@ -1073,6 +1073,9 @@ defmodule Ecto.Adapters.FoundationDB do
       def async_all(queryable, opts \\ []),
         do: async_query(fn -> all(queryable, opts ++ [returning: {:future, :all}]) end)
 
+      def async_all_by(queryable, by, opts \\ []),
+        do: async_query(fn -> all_by(queryable, by, opts ++ [returning: {:future, :all}]) end)
+
       defp async_query(fun) do
         repo = get_dynamic_repo()
         EctoAdapterAsync.async_query(__MODULE__, repo, fun)

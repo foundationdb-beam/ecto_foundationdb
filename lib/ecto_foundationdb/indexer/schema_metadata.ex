@@ -199,7 +199,7 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
     Future.new_deferred(
       future_ref,
       fn _ ->
-        {schema, {__MODULE__, name}, opts,
+        {schema, {__MODULE__, indexed_values, name}, opts,
          fn _, new_opts ->
            watch_by(schema, indexed_values, name, Keyword.merge(opts, new_opts))
          end}
