@@ -512,11 +512,15 @@ defmodule EctoFoundationDB.Sync do
 
   # Optional Phoenix.Component assign behavior
   if Code.ensure_loaded?(Phoenix.Component) do
+    def assign_impl(), do: Phoenix.Component
+
     defp assign(state, new_assigns) do
       new_assigns = create_nested_assigns(new_assigns)
       Phoenix.Component.assign(state, new_assigns)
     end
   else
+    def assign_impl(), do: nil
+
     defp assign(state, new_assigns) do
       new_assigns = create_nested_assigns(new_assigns)
       assigns = Map.get(state, :assigns, %{})
@@ -560,6 +564,8 @@ defmodule EctoFoundationDB.Sync do
 
   # Optional Phoenix.LiveView attach_hook/detach_hook behavior
   if Code.ensure_loaded?(Phoenix.LiveView) do
+    def hook_impl(), do: Phoenix.LiveView
+
     defp attach_hook(state, name, event, cb) do
       Phoenix.LiveView.attach_hook(state, name, event, cb)
     end
@@ -568,6 +574,8 @@ defmodule EctoFoundationDB.Sync do
       Phoenix.LiveView.detach_hook(state, name, event)
     end
   else
+    def hook_impl(), do: nil
+
     defp attach_hook(state, _name, _event, _cb) do
       state
     end
