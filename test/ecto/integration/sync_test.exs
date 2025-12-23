@@ -9,6 +9,15 @@ defmodule EctoIntegrationSyncTest do
   defmodule View do
     use GenServer
 
+    defp sync_opts(),
+      do: [
+        watch_action: :collection,
+        assign: &Sync.assign_map/2,
+        attach_hook: fn state, _name, _repo, _opts -> state end,
+        detach_hook: fn state, _name, _repo, _opts -> state end,
+        post_hook: &send_updates/2
+      ]
+
     def start_link(tenant, label, id) do
       GenServer.start_link(__MODULE__, [tenant, label, id], [])
     end
@@ -30,9 +39,9 @@ defmodule EctoIntegrationSyncTest do
 
       {:ok,
        state
-       |> Sync.sync_one!(TestRepo, User, label, id)
-       |> Sync.sync_all!(TestRepo, User, :user_collection, watch_action: :collection)
-       |> Sync.sync_all_by!(TestRepo, Post, :posts, [user_id: id], watch_action: :collection)}
+       |> Sync.sync_one!(TestRepo, User, label, id, sync_opts())
+       |> Sync.sync_all!(TestRepo, User, :user_collection, sync_opts())
+       |> Sync.sync_all_by!(TestRepo, Post, :posts, [user_id: id], sync_opts())}
     end
 
     def handle_call(:await, _from, state = %{changed?: true}) do
@@ -44,23 +53,31 @@ defmodule EctoIntegrationSyncTest do
     end
 
     def handle_cast({:switch_user, label, nil}, state) do
-      {:noreply, Sync.cancel(state, TestRepo, label)}
+      {:noreply, Sync.cancel(state, TestRepo, label, sync_opts())}
     end
 
     def handle_cast({:switch_user, label, id}, state) do
       {:noreply,
        state
-       |> Sync.sync_one!(TestRepo, User, label, id)
-       |> Sync.sync_all_by!(TestRepo, Post, :posts, [user_id: id], watch_action: :collection)}
+       |> Sync.sync_one!(TestRepo, User, label, id, sync_opts())
+       |> Sync.sync_all_by!(
+         TestRepo,
+         Post,
+         :posts,
+         [user_id: id],
+         sync_opts() ++ [watch_action: :collection]
+       )}
     end
 
     def handle_info(msg = {_ref, :ready}, state) do
-      {:halt, state} = Sync.handle_ready(TestRepo, msg, state, post_hook: &send_updates/2)
+      {:halt, state} =
+        Sync.handle_ready(TestRepo, msg, state, sync_opts())
+
       {:noreply, state}
     end
 
     def terminate(_reason, state) do
-      Sync.cancel_all(state, TestRepo)
+      Sync.cancel_all(state, TestRepo, sync_opts())
     end
 
     defp send_updates(state, _labels) do

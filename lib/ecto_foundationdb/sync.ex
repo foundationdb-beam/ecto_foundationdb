@@ -522,11 +522,15 @@ defmodule EctoFoundationDB.Sync do
     def assign_impl(), do: nil
 
     defp assign(state, new_assigns) do
-      new_assigns = create_nested_assigns(new_assigns)
-      assigns = Map.get(state, :assigns, %{})
-      assigns = Map.merge(assigns, Enum.into(new_assigns, %{}))
-      Map.put(state, :assigns, assigns)
+      assign_map(state, new_assigns)
     end
+  end
+
+  def assign_map(state, new_assigns) do
+    new_assigns = create_nested_assigns(new_assigns)
+    assigns = Map.get(state, :assigns, %{})
+    assigns = Map.merge(assigns, Enum.into(new_assigns, %{}))
+    Map.put(state, :assigns, assigns)
   end
 
   defp create_nested_assigns(new_assigns) do
@@ -570,7 +574,7 @@ defmodule EctoFoundationDB.Sync do
       Phoenix.LiveView.attach_hook(state, name, event, cb)
     end
 
-    defp detach_hook(state, name, event, cb) do
+    defp detach_hook(state, name, event) do
       Phoenix.LiveView.detach_hook(state, name, event)
     end
   else

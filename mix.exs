@@ -79,6 +79,14 @@ defmodule EctoFoundationdb.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.16", only: :dev, runtime: false},
       {:benchee, "~> 1.0", only: :bench}
+    ] ++ optional_deps()
+  end
+
+  defp optional_deps() do
+    [
+      # EctoFoundationDB.Sync
+      {:phoenix, "~> 1.0", optional: true},
+      {:phoenix_live_view, "~> 1.1", optional: true}
     ]
   end
 
