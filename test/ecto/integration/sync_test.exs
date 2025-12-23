@@ -6,6 +6,8 @@ defmodule EctoIntegrationSyncTest do
   alias EctoFoundationDB.Schemas.User
   alias EctoFoundationDB.Sync
 
+  import Ecto.Query
+
   defmodule View do
     use GenServer
 
@@ -40,7 +42,12 @@ defmodule EctoIntegrationSyncTest do
       {:ok,
        state
        |> Sync.sync_one!(TestRepo, User, label, id, sync_opts())
-       |> Sync.sync_all!(TestRepo, User, :user_collection, sync_opts())
+       |> Sync.sync_all!(
+         TestRepo,
+         from(u in User, order_by: u.name),
+         :user_collection,
+         sync_opts()
+       )
        |> Sync.sync_all_by!(TestRepo, Post, :posts, [user_id: id], sync_opts())}
     end
 

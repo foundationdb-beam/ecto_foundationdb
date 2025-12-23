@@ -159,7 +159,7 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
 
   ## Arguments
 
-  - `schema`: The schema to watch
+  - `queryable`: The schema to watch, or a query
   - `name`: The name of the watch
   - `opts`: The options for the watch
 
@@ -176,16 +176,24 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
   - `:label`: An optional atom label that if provided, will be used by subsequent calls
     to `Repo.assign_ready/3` to store the data into the assigns map. There is no default
     behavior. If a label is not provided, `assign_ready` will fail.
-  - `:query`: An optional `Ecto.Query` that if provided, will be used by subsequent calls
     to `Repo.assign_ready/3` to query the database for data to be stored in the assigns map.
     By default, `Repo.all(schema)` is used.
   """
-  def watch(schema, name, opts \\ []) do
-    watch_by(schema, [], name, opts)
+  def watch(queryable, name, opts \\ []) do
+    watch_by(queryable, [], name, opts)
   end
 
-  def watch_by(schema, indexed_values, name, opts \\ []) do
+  def watch_by(queryable, indexed_values, name, opts \\ []) do
     {tenant, tx} = assert_tenant_tx!()
+
+    {schema, query_opts} =
+      case queryable do
+        %Ecto.Query{from: %Ecto.Query.FromExpr{source: {_source, schema}}} ->
+          {schema, query: queryable}
+
+        schema ->
+          {schema, []}
+      end
 
     source = Schema.get_source(schema)
 
@@ -195,6 +203,8 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
     fields = idx[:fields]
     index_values = Indexer.Default.get_index_values(schema, idx[:fields], indexed_values)
     future_ref = :erlfdb.watch(tx, key(tenant, source, index_name, fields, index_values, name))
+
+    opts = Keyword.merge(opts, query_opts)
 
     Future.new_deferred(
       future_ref,
