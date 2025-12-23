@@ -571,7 +571,12 @@ defmodule EctoFoundationDB.Sync do
     def hook_impl(), do: Phoenix.LiveView
 
     defp attach_hook(state, name, event, cb) do
-      Phoenix.LiveView.attach_hook(state, name, event, cb)
+      # Detach, then attach. A future LiveView release may havr `replace: true` option. In the meantime, this is the
+      # correct way to replace a hook.
+      # https://elixirforum.com/t/complex-components-lead-to-us-always-calling-detach-hook-3-before-attach-hook-4/71233/16?u=jstimps
+      state
+      |> Phoenix.LiveView.detach_hook(name, event)
+      |> Phoenix.LiveView.attach_hook(name, event, cb)
     end
 
     defp detach_hook(state, name, event) do
