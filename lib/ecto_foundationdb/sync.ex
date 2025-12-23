@@ -108,12 +108,11 @@ defmodule EctoFoundationDB.Sync do
 
   alias Ecto.Adapters.FoundationDB
 
-  alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer.SchemaMetadata
-  alias EctoFoundationDB.WatchJanitor
+  alias EctoFoundationDB.Sync.Lifecycle
+  alias EctoFoundationDB.Sync.State
 
-  @data_key :ecto_fdb_sync_data
-  @hook_name :ecto_fdb_sync_hook
+  @container_hook_name :ecto_fdb_sync_hook
 
   defstruct futures: %{}
 
@@ -142,10 +141,8 @@ defmodule EctoFoundationDB.Sync do
 
   - `assign`: A function that takes the current socket and new assigns and returns the updated state.
     When not provided: if `Phoenix.Component` is available, we use `Phoenix.Component.assign/3`, otherwise we use `Map.put/3`.
-  - `attach_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to attach a hook.
+  - `attach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to attach a hook.
     When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.attach_hook/4`, otherwise we do nothing.
-  - `post_hook`: A function that takes `state, labels` and returns `state`. Executes after the hook. `labels` is a list of
-    labels that were assigned. Defaults to a noop
 
   ## Return
 
@@ -191,9 +188,9 @@ defmodule EctoFoundationDB.Sync do
       )
 
     state
-    |> merge_futures(repo, Enum.into(new_futures, %{}))
-    |> apply_assign(new_assigns, opts)
-    |> apply_attach_hook(repo, opts)
+    |> State.merge_futures(repo, Enum.into(new_futures, %{}))
+    |> apply_attach_container_hook(repo, opts)
+    |> apply_assign(repo, new_assigns, opts)
   end
 
   @doc """
@@ -242,9 +239,8 @@ defmodule EctoFoundationDB.Sync do
 
   - `assign`: A function that takes the current socket and new assigns and returns the updated state.
     When not provided: if `Phoenix.Component` is available, we use `Phoenix.Component.assign/3`, otherwise we use `Map.put/3`.
-  - `attach_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to attach a hook.
+  - `attach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to attach a hook.
     When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.attach_hook/4`, otherwise we do nothing.
-  - `post_hook`: A function that takes `state` and modifies it as desired after the hook is executed. Defaults to a noop
   - `watch_action`: An atom representing the signal from the `SchemaMetadata` you're interested in syncing. Defaults to `:changes`
 
   ### `watch_action`
@@ -306,10 +302,13 @@ defmodule EctoFoundationDB.Sync do
     new_futures = Enum.into(new_futures, %{})
 
     state
-    |> merge_futures(repo, new_futures)
-    |> apply_assign(new_assigns, opts)
-    |> apply_attach_hook(repo, opts)
+    |> State.merge_futures(repo, new_futures)
+    |> apply_attach_container_hook(repo, opts)
+    |> apply_assign(repo, new_assigns, opts)
   end
+
+  defdelegate attach_callback(state, repo, name, event, cb, opts \\ []), to: Lifecycle
+  defdelegate detach_callback(state, repo, name, event, opts \\ []), to: Lifecycle
 
   @doc """
   Cancels all syncing and detaches the hook.
@@ -324,7 +323,7 @@ defmodule EctoFoundationDB.Sync do
 
   ## Options
 
-  - `detach_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to detach a hook.
+  - `detach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to detach a container hook.
     When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.detach_hook/3`, otherwise we do nothing.
 
   ## Return
@@ -338,8 +337,8 @@ defmodule EctoFoundationDB.Sync do
   """
   def cancel_all(state, repo, opts \\ []) do
     state
-    |> cancel_futures(repo)
-    |> apply_detach_hook(repo, opts)
+    |> State.cancel_futures(repo)
+    |> apply_detach_container_hook(repo, opts)
   end
 
   @doc """
@@ -356,7 +355,7 @@ defmodule EctoFoundationDB.Sync do
 
   ## Options
 
-  - `detach_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to detach a hook.
+  - `detach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to detach a container hook.
     When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.detach_hook/3`, otherwise we do nothing.
 
   ## Return
@@ -369,11 +368,11 @@ defmodule EctoFoundationDB.Sync do
 
   """
   def cancel(state, repo, label, opts \\ []) do
-    state = cancel_futures(state, repo, [label])
-    futures = get_futures(state, repo)
+    state = State.cancel_futures(state, repo, [label])
+    futures = State.get_futures(state, repo)
 
     if map_size(futures) == 0 do
-      apply_detach_hook(state, repo, opts)
+      apply_detach_container_hook(state, repo, opts)
     else
       state
     end
@@ -433,21 +432,18 @@ defmodule EctoFoundationDB.Sync do
     if valid? do
       %{private: private} = state
       %{tenant: tenant} = private
-      futures = get_futures(state, repo)
+      futures = State.get_futures(state, repo)
 
       case repo.assign_ready(futures, refs, watch?: true, prefix: tenant) do
         {[], [], ^futures} ->
           {:cont, state}
 
         {new_assigns, new_futures, other_futures} ->
-          {labels, _} = Enum.unzip(new_assigns)
-
           {:halt,
            state
-           |> put_futures(repo, other_futures)
-           |> merge_futures(repo, new_futures)
-           |> apply_assign(new_assigns, opts)
-           |> apply_post_hook(labels, opts)}
+           |> State.put_futures(repo, other_futures)
+           |> State.merge_futures(repo, new_futures)
+           |> apply_assign(repo, new_assigns, opts)}
       end
     else
       {:cont, state}
@@ -458,31 +454,51 @@ defmodule EctoFoundationDB.Sync do
     {:cont, state}
   end
 
-  defp apply_assign(state, new_assigns, opts) do
-    apply_callback(:assign, [state, new_assigns], opts, fn state, new_assigns ->
-      assign(state, new_assigns)
-    end)
-  end
+  defp apply_assign(state, repo, new_assigns, opts) do
+    state =
+      apply_callback(:assign, [state, new_assigns], opts, fn state, new_assigns ->
+        assign(state, new_assigns)
+      end)
 
-  defp apply_attach_hook(state, repo, opts) do
-    name = get_hook_name(repo)
+    {labels, _} = Enum.unzip(new_assigns)
 
-    apply_callback(:attach_hook, [state, name, repo, opts], opts, fn state, name, repo, opts ->
-      attach_hook(state, name, :handle_info, &handle_ready(repo, &1, &2, opts))
-    end)
-  end
-
-  defp apply_detach_hook(state, repo, opts) do
-    name = get_hook_name(repo)
-
-    apply_callback(:detach_hook, [state, name, repo, opts], opts, fn state, name, _repo, _opts ->
-      detach_hook(state, name, :handle_info)
-    end)
-  end
-
-  defp apply_post_hook(state, labels, opts) do
-    apply_callback(:post_hook, [state, labels], opts, fn state, _labels ->
+    {_, state} =
       state
+      |> State.get_callbacks(repo)
+      |> Map.get(:on_assigns, %{})
+      |> Enum.reduce(
+        {:cont, state},
+        fn
+          {_name, cb}, {:cont, state0} ->
+            cb.(state0, labels)
+
+          _, {:halt, state0} ->
+            {:halt, state0}
+        end
+      )
+
+    state
+  end
+
+  defp apply_attach_container_hook(state, repo, opts) do
+    name = get_hook_name(repo)
+
+    apply_callback(:attach_container_hook, [state, name, repo, opts], opts, fn state,
+                                                                               name,
+                                                                               repo,
+                                                                               opts ->
+      attach_container_hook(state, name, :handle_info, &handle_ready(repo, &1, &2, opts))
+    end)
+  end
+
+  defp apply_detach_container_hook(state, repo, opts) do
+    name = get_hook_name(repo)
+
+    apply_callback(:detach_container_hook, [state, name, repo, opts], opts, fn state,
+                                                                               name,
+                                                                               _repo,
+                                                                               _opts ->
+      detach_container_hook(state, name, :handle_info)
     end)
   end
 
@@ -546,7 +562,7 @@ defmodule EctoFoundationDB.Sync do
     {cumm_k, map} =
       Enum.reduce(keys, {[], %{}}, fn k, {cumm_k, m} ->
         cumm_k = cumm_k ++ [Access.key(k)]
-        {cumm_k, update_in(m, cumm_k, &default_map/1)}
+        {cumm_k, update_in(m, cumm_k, &State.default_map/1)}
       end)
 
     put_in(map, cumm_k ++ [Access.key(last)], value)
@@ -556,7 +572,7 @@ defmodule EctoFoundationDB.Sync do
   if Code.ensure_loaded?(Phoenix.LiveView) do
     def hook_impl(), do: Phoenix.LiveView
 
-    defp attach_hook(state, name, event, cb) do
+    defp attach_container_hook(state, name, event, cb) do
       # Detach, then attach. A future LiveView release may havr `replace: true` option. In the meantime, this is the
       # correct way to replace a hook.
       # https://elixirforum.com/t/complex-components-lead-to-us-always-calling-detach-hook-3-before-attach-hook-4/71233/16?u=jstimps
@@ -565,64 +581,22 @@ defmodule EctoFoundationDB.Sync do
       |> Phoenix.LiveView.attach_hook(name, event, cb)
     end
 
-    defp detach_hook(state, name, event) do
+    defp detach_container_hook(state, name, event) do
       Phoenix.LiveView.detach_hook(state, name, event)
     end
   else
     def hook_impl(), do: nil
 
-    defp attach_hook(state, _name, _event, _cb) do
+    defp attach_container_hook(state, _name, _event, _cb) do
       state
     end
 
-    defp detach_hook(state, _name, _event) do
+    defp detach_container_hook(state, _name, _event) do
       state
     end
   end
 
   defp get_hook_name(repo) do
-    {@hook_name, repo}
+    {@container_hook_name, repo}
   end
-
-  defp get_futures(state, repo) do
-    case get_in(state, [Access.key(:private), @data_key, repo, Access.key(:futures)]) do
-      nil ->
-        %{}
-
-      futures ->
-        futures
-    end
-  end
-
-  defp put_futures(state, repo, futures) do
-    state
-    |> update_in([Access.key(:private)], &default_map/1)
-    |> update_in([Access.key(:private), @data_key], &default_map/1)
-    |> update_in([Access.key(:private), @data_key, repo], &default_map/1)
-    |> put_in([Access.key(:private), @data_key, repo, Access.key(:futures)], futures)
-  end
-
-  defp merge_futures(state, repo, new_futures) do
-    WatchJanitor.register(WatchJanitor.get!(repo), self(), Map.values(new_futures))
-    futures = get_futures(state, repo)
-    futures_to_cancel = Map.intersect(new_futures, futures)
-    Enum.each(futures_to_cancel, fn {_, f} -> Future.cancel(f) end)
-    put_futures(state, repo, Map.merge(futures, new_futures))
-  end
-
-  defp cancel_futures(state, repo) do
-    futures_to_cancel = get_futures(state, repo)
-    Enum.each(futures_to_cancel, fn {_, f} -> Future.cancel(f) end)
-    put_futures(state, repo, %{})
-  end
-
-  defp cancel_futures(state, repo, labels) do
-    futures = get_futures(state, repo)
-    {futures_to_cancel, futures_to_keep} = Map.split(futures, labels)
-    Enum.each(futures_to_cancel, fn {_, f} -> Future.cancel(f) end)
-    put_futures(state, repo, futures_to_keep)
-  end
-
-  defp default_map(nil), do: %{}
-  defp default_map(map), do: map
 end

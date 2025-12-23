@@ -15,9 +15,8 @@ defmodule EctoIntegrationSyncTest do
       do: [
         watch_action: :collection,
         assign: &Sync.assign_map/2,
-        attach_hook: fn state, _name, _repo, _opts -> state end,
-        detach_hook: fn state, _name, _repo, _opts -> state end,
-        post_hook: &send_updates/2
+        attach_container_hook: fn state, _name, _repo, _opts -> state end,
+        detach_container_hook: fn state, _name, _repo, _opts -> state end
       ]
 
     def start_link(tenant, label, id) do
@@ -48,7 +47,8 @@ defmodule EctoIntegrationSyncTest do
          from(u in User, order_by: u.name),
          sync_opts()
        )
-       |> Sync.sync_all_by!(TestRepo, :posts, Post, [user_id: id], sync_opts())}
+       |> Sync.sync_all_by!(TestRepo, :posts, Post, [user_id: id], sync_opts())
+       |> Sync.attach_callback(TestRepo, :send_updates, :on_assigns, &send_updates/2)}
     end
 
     def handle_call(:await, _from, state = %{changed?: true}) do
@@ -90,9 +90,9 @@ defmodule EctoIntegrationSyncTest do
     defp send_updates(state, _labels) do
       if state.waiting do
         GenServer.reply(state.waiting, state.assigns)
-        %{state | waiting: nil, changed?: false}
+        {:halt, %{state | waiting: nil, changed?: false}}
       else
-        %{state | changed?: true}
+        {:halt, %{state | changed?: true}}
       end
     end
   end
@@ -140,6 +140,8 @@ defmodule EctoIntegrationSyncTest do
 
     {:ok, pid} = View.start_link(tenant, :user, alice.id)
     View.switch_user(pid, :user, bob.id)
+
+    assert %{user: %User{name: "Bob"}} = View.await(pid)
 
     alice
     |> User.changeset(%{name: "Alicia"})
