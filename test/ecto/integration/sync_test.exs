@@ -41,14 +41,14 @@ defmodule EctoIntegrationSyncTest do
 
       {:ok,
        state
-       |> Sync.sync_one!(TestRepo, User, label, id, sync_opts())
+       |> Sync.sync_one!(TestRepo, label, User, id, sync_opts())
        |> Sync.sync_all!(
          TestRepo,
-         from(u in User, order_by: u.name),
          :user_collection,
+         from(u in User, order_by: u.name),
          sync_opts()
        )
-       |> Sync.sync_all_by!(TestRepo, Post, :posts, [user_id: id], sync_opts())}
+       |> Sync.sync_all_by!(TestRepo, :posts, Post, [user_id: id], sync_opts())}
     end
 
     def handle_call(:await, _from, state = %{changed?: true}) do
@@ -66,11 +66,11 @@ defmodule EctoIntegrationSyncTest do
     def handle_cast({:switch_user, label, id}, state) do
       {:noreply,
        state
-       |> Sync.sync_one!(TestRepo, User, label, id, sync_opts())
+       |> Sync.sync_one!(TestRepo, label, User, id, sync_opts())
        |> Sync.sync_all_by!(
          TestRepo,
-         Post,
          :posts,
+         Post,
          [user_id: id],
          sync_opts() ++ [watch_action: :collection]
        )}
