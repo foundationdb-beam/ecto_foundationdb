@@ -179,6 +179,8 @@ defmodule EctoIntegrationSyncIntegrationTest do
 
     View.cancel_user_sync(pid, :user)
 
+    _ = View.await(pid)
+
     alice
     |> User.changeset(%{name: "Alicia"})
     |> TestRepo.update!()

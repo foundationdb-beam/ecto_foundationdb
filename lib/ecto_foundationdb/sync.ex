@@ -388,6 +388,8 @@ defmodule EctoFoundationDB.Sync do
     |> apply_detach_container_hook(repo, opts)
   end
 
+  def cancel(state, repo, label, opts \\ []), do: cancel_many(state, repo, [label], opts)
+
   @doc """
   Cancels syncing for the provided label and, if none are left, detaches the hook.
 
@@ -402,6 +404,7 @@ defmodule EctoFoundationDB.Sync do
 
   ## Options
 
+  - `assign`: A boolean indicating whether or not to assign the label to `nil`. Defaults to `true`.
   - `detach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to detach a container hook.
     When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.detach_hook/3`, otherwise we do nothing.
 
@@ -414,8 +417,17 @@ defmodule EctoFoundationDB.Sync do
   - We cancel and clear the futures in `:ecto_fdb_sync_data`.
 
   """
-  def cancel(state, repo, label, opts \\ []) do
-    state = State.cancel_futures(state, repo, [label])
+  def cancel_many(state, repo, labels, opts \\ []) do
+    state = State.cancel_futures(state, repo, labels)
+
+    state =
+      if Keyword.get(opts, :assign, true) do
+        nil_assigns = for l <- labels, do: {l, nil}
+        apply_assign(state, repo, nil_assigns, opts)
+      else
+        state
+      end
+
     futures = State.get_futures(state, repo)
 
     if map_size(futures) == 0 do
