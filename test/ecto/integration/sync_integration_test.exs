@@ -14,10 +14,16 @@ defmodule EctoIntegrationSyncIntegrationTest do
     defp sync_opts(),
       do: [
         watch_action: :collection,
-        assign: &Sync.assign_map/2,
+        assign: &assign/2,
         attach_container_hook: fn state, _name, _repo, _opts -> state end,
         detach_container_hook: fn state, _name, _repo, _opts -> state end
       ]
+
+    defp assign(state, new_assigns) do
+      assigns = Map.get(state, :assigns, %{})
+      new_assigns_map = Sync.assign_map(assigns, new_assigns)
+      Map.put(state, :assigns, Map.merge(assigns, new_assigns_map))
+    end
 
     def start_link(tenant, label, id) do
       GenServer.start_link(__MODULE__, [tenant, label, id], [])

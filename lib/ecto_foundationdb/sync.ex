@@ -565,24 +565,27 @@ defmodule EctoFoundationDB.Sync do
     def assign_impl(), do: Phoenix.Component
 
     defp assign(state, new_assigns) do
-      new_assigns = create_nested_assigns(new_assigns)
-      Phoenix.Component.assign(state, new_assigns)
+      state.assigns
+      |> assign_map(new_assigns)
+      |> then(&Phoenix.Component.assign(state, &1))
     end
   else
     def assign_impl(), do: nil
 
     defp assign(state, new_assigns) do
-      assign_map(state, new_assigns)
+      assigns = Map.get(state, :assigns, %{})
+      new_assigns_map = assign_map(assigns, new_assigns)
+      Map.put(state, :assigns, Map.merge(assigns, new_assigns_map))
     end
   end
 
-  def assign_map(state, new_assigns) do
-    # @todo bug: when there are nested assigns, we're not merging with the existing nested structures in assigns
+  def assign_map(assigns, new_assigns) do
     {nested_assigns, regular_assigns} = create_nested_assigns(new_assigns)
-    assigns = Map.get(state, :assigns, %{})
-    assigns = Map.merge(assigns, regular_assigns)
-    assigns = nested_merge(assigns, nested_assigns)
-    Map.put(state, :assigns, assigns)
+
+    assigns
+    |> Map.take(Map.keys(nested_assigns))
+    |> nested_merge(nested_assigns)
+    |> Map.merge(regular_assigns)
   end
 
   defp nested_merge(map1, map2), do: nested_merge(nil, map1, map2)
