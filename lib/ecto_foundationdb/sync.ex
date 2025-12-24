@@ -417,7 +417,10 @@ defmodule EctoFoundationDB.Sync do
   - We cancel and clear the futures in `:ecto_fdb_sync_data`.
 
   """
-  def cancel_many(state, repo, labels, opts \\ []) do
+  def cancel_many(state, repo, labels, opts \\ [])
+  def cancel_many(state, _repo, [], _opts), do: state
+
+  def cancel_many(state, repo, labels, opts) do
     state = State.cancel_futures(state, repo, labels)
 
     state =
@@ -512,6 +515,8 @@ defmodule EctoFoundationDB.Sync do
   def handle_ready(_repo, _info, state, _opts) do
     {:cont, state}
   end
+
+  defp apply_assign(state, _repo, [], _opts), do: state
 
   defp apply_assign(state, repo, new_assigns, opts) do
     {labels, _} = Enum.unzip(new_assigns)
