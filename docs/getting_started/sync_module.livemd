@@ -3,19 +3,20 @@
 ```elixir
 Mix.install([
   {:phoenix_playground, "~> 0.1"},
+  {:phoenix_ecto, "~> 4.7"},
   {:ecto_foundationdb, github: "jessestimpson/ecto_foundationdb", branch: "sync"}
 ])
 ```
 
 ## Intro
 
-Using [FoundationDB Watches](https://hexdocs.pm/ecto_foundationdb/Ecto.Adapters.FoundationDB.html#module-watches), we can set up a mini read-path Sync Engine. It will automatically propagate new data to all mounted LiveViews with push-messaging delivered from the database directly to the LiveView process.
+Using [FoundationDB Watches](https://hexdocs.pm/ecto_foundationdb/Ecto.Adapters.FoundationDB.html#module-watches), we can set up a lightweight Sync Engine for database reads. It will automatically propagate new data to all mounted LiveViews with push-messaging delivered from the database directly to the LiveView process, without using PubSub.
 
-This is Part III, where capture the ideas from I and II into a module that removes as much boilerplate as possible, and keeps your LiveView lean.
+This is Part III, where capture the ideas from I and II into a module that removes as much boilerplate as possible, and keeps your LiveView lean, while maintaining clear data access semantics.
 
 ## Setup Ecto
 
-First, we set up Ecto, defining a schema, and starting the Repo.
+First, we set up Ecto, defining a schema, and starting the Repo. Our app will have a product catalog and each Product may have zero or more Reviews.
 
 ```elixir
 defmodule Product do
@@ -178,6 +179,15 @@ defmodule Style do
   }
   blockquote { margin: 0; font-style: italic; }
   figcaption { text-align: right; font-weight: bold; font-size: 0.9rem; }
+
+  .page-title {
+    text-align: center;
+    margin: 2rem 0;
+    font-size: 2rem;
+    color: #222;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
 </style>
 """
 end
@@ -192,26 +202,30 @@ defmodule DemoLive do
   alias EctoFoundationDB.Sync
   import Ecto.Query
 
+  @query_catalog from(p in Product, order_by: p.name)
+  @query_reviews from(r in Review, order_by: {:desc, r.inserted_at})
+
   require Logger
   def mount(_params, _session, socket) do
     tenant = Tenant.open!(Repo, "sync-sample")
 
     {:ok, socket
       |> put_private(:tenant, tenant)
-      |> Sync.sync_all!(Repo, :catalog, from(p in Product, order_by: p.name))}
+      |> Sync.sync_all!(Repo, :catalog, @query_catalog)}
   end
 
   def handle_params(%{"id" => id}, _uri, socket) do
     {:noreply, 
       socket
       |> Sync.sync_one!(Repo, :product, Product, id)
-      |> Sync.sync_all_by!(Repo, :reviews, Review, product_id: id)}
+      |> Sync.sync_all_by!(Repo, :reviews, @query_reviews, product_id: id)}
   end
   def handle_params(_params, _uri, socket),
     do: {:noreply, assign(socket, product: nil, reviews: [])}
 
   def render(assigns) do
     ~H"""
+    <h1 class="page-title">Catalog</h1>
     <div class="catalog">
       <ul>
         <li :for={p <- @catalog}>
@@ -252,4 +266,135 @@ foo = Repo.insert!(
 
 ```elixir
 Repo.insert(%Review{product: foo, author: "Ethan", content: "Test", score: 3}, prefix: tenant)
+```
+
+### LiveComponents
+
+Next, we're going to add another route to our phoenix app, so let's restart the `:phoenix_playground` to get a clean slate.
+
+```elixir
+Application.stop(:phoenix_playground)
+Application.start(:phoenix_playground)
+```
+
+Our app needs an admin page, where we can modify product details. We're going to use LiveComponents for this part of the demo.
+
+```elixir
+defmodule ProductAdminCard do
+  use Phoenix.LiveComponent
+  require Logger
+
+  def update(assigns, socket) do
+    {:ok,
+      socket
+      |> assign(assigns)
+      |> assign(form: to_form(Product.changeset(assigns.product)))}
+  end
+
+  def handle_event("save", %{"product" => params}, socket) do
+    Logger.info("save #{inspect(params)}")
+    changeset = Product.changeset(socket.assigns.product, params)
+    Logger.info("cs #{inspect(changeset)}")
+    res = Repo.update!(changeset)
+    Logger.info("res #{inspect(res)}")
+    {:noreply, socket}
+  end
+
+  def render(assigns) do
+    ~H"""
+    <div class="card">
+      <.form
+        for={@form}
+        id={"product-form-#{@product.id}"}
+        phx-submit="save"
+        phx-target={@myself}
+      >
+        <.input type="text" field={@form[:name]} />
+        <.input type="text" field={@form[:description]} />
+        <button>Save</button>
+      </.form>
+    </div>
+    """
+  end
+
+  attr :field, Phoenix.HTML.FormField
+  attr :rest, :global, include: ~w(type)
+  defp input(assigns) do
+    ~H"""
+    <input id={@field.id} name={@field.name} value={@field.value} {@rest} />
+    """
+  end
+end
+
+defmodule DemoAdminLive do
+    use Phoenix.LiveView
+
+  alias EctoFoundationDB.Sync
+  import Ecto.Query
+
+  require Logger
+
+  @query_catalog from(p in Product, select: p.id, order_by: p.inserted_at)
+
+  def mount(_params, _session, socket) do
+    tenant = Tenant.open!(Repo, "sync-sample")
+
+    {:ok, socket
+      |> put_private(:tenant, tenant)
+      |> Sync.attach_callback(Repo, :sync_products, :on_assigns, &sync_products/2)
+      |> Sync.sync_all!(Repo, :catalog, @query_catalog, watch_action: :collection)}
+  end
+
+  def sync_products(socket, [:catalog]) do
+    id_assigns = for p <- socket.assigns.catalog,
+      do: {[:products, p], Product, p}
+    Logger.info("ID ASSIGNS #{inspect(id_assigns)}")
+    {:halt, Sync.sync_many!(socket, Repo, id_assigns)}
+  end
+  def sync_products(socket, _) do
+    {:cont, socket}
+  end
+
+  def render(assigns) do
+    ~H"""
+    <h1 class="page-title">Admin</h1>
+    {inspect(@products)}
+
+    <div :for={{_, p} <- @products}>
+      <.live_component
+          module={ProductAdminCard}
+          id={p.id}
+          product={p} />
+    </div>
+
+    {Phoenix.HTML.raw(Style.style())}
+    """
+  end
+end
+
+defmodule DemoRouter do
+  use Phoenix.Router
+  import Phoenix.LiveView.Router
+
+  pipeline :browser do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :put_root_layout, html: {PhoenixPlayground.Layout, :root}
+    plug :put_secure_browser_headers
+  end
+
+  scope "/" do
+    pipe_through :browser
+
+    live "/", DemoLive
+    live "/admin", DemoAdminLive
+  end
+end
+
+PhoenixPlayground.start(plug: DemoRouter)
+```
+
+```elixir
+import Ecto.Query
+Repo.all(from(p in Product, select: p.id, order_by: p.inserted_at), prefix: tenant)
 ```

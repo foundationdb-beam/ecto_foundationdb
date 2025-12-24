@@ -472,6 +472,7 @@ defmodule EctoFoundationDB.Sync do
 
     {labels, _} = Enum.unzip(new_assigns)
 
+    # @todo: include any overlapping old_assigns so that the callback can handle diffs
     {_, state} =
       state
       |> State.get_callbacks(repo)
