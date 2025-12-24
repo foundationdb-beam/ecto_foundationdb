@@ -40,15 +40,15 @@ defmodule EctoIntegrationSyncTest do
 
       {:ok,
        state
-       |> Sync.sync_one!(TestRepo, label, User, id, sync_opts())
-       |> Sync.sync_all!(
+       |> Sync.sync_one(TestRepo, label, User, id, sync_opts())
+       |> Sync.sync_all(
          TestRepo,
          :user_collection,
          from(u in User, select: u.id, order_by: u.name),
          sync_opts()
        )
-       |> Sync.sync_all_by!(TestRepo, :posts, Post, [user_id: id], sync_opts())
-       |> Sync.attach_callback(TestRepo, :send_updates, :on_assigns, &send_updates/2)}
+       |> Sync.sync_all_by(TestRepo, :posts, Post, [user_id: id], sync_opts())
+       |> Sync.attach_callback(TestRepo, :handle_sync, :on_assigns, &handle_sync/2)}
     end
 
     def handle_call(:await, _from, state = %{changed?: true}) do
@@ -66,8 +66,8 @@ defmodule EctoIntegrationSyncTest do
     def handle_cast({:switch_user, label, id}, state) do
       {:noreply,
        state
-       |> Sync.sync_one!(TestRepo, label, User, id, sync_opts())
-       |> Sync.sync_all_by!(
+       |> Sync.sync_one(TestRepo, label, User, id, sync_opts())
+       |> Sync.sync_all_by(
          TestRepo,
          :posts,
          Post,
@@ -87,7 +87,13 @@ defmodule EctoIntegrationSyncTest do
       Sync.cancel_all(state, TestRepo, sync_opts())
     end
 
-    defp send_updates(state, _labels) do
+    defp handle_sync(state, [:user_collection]) do
+      id_assigns = for id <- state.assigns.user_collection, do: {[:user_map, id], User, id}
+
+      handle_sync(Sync.sync_many(state, TestRepo, id_assigns, sync_opts()), [])
+    end
+
+    defp handle_sync(state, _labels) do
       if state.waiting do
         GenServer.reply(state.waiting, state.assigns)
         {:halt, %{state | waiting: nil, changed?: false}}
@@ -180,5 +186,22 @@ defmodule EctoIntegrationSyncTest do
       )
 
     assert %{posts: [_]} = View.await(pid)
+  end
+
+  test "sync individual entries from a collection", context do
+    tenant = context[:tenant]
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+    bob = TestRepo.insert!(%User{name: "Bob"}, prefix: tenant)
+
+    {:ok, pid} = View.start_link(tenant, :user, alice.id)
+
+    charlie = TestRepo.insert!(%User{name: "Charlie"}, prefix: tenant)
+
+    alice_id = alice.id
+    bob_id = bob.id
+    charlie_id = charlie.id
+
+    assert %{user_map: %{^alice_id => %User{}, ^bob_id => %User{}, ^charlie_id => %User{}}} =
+             View.await(pid)
   end
 end

@@ -20,7 +20,7 @@ defmodule EctoFoundationDB.Sync do
 
   ### Syncing a single record
 
-  Suppose you have a LiveView that displays a single user. You can use `sync_one!/5` to
+  Suppose you have a LiveView that displays a single user. You can use `sync_one/5` to
   automatically update the user whenever it is created, updated, or deleted.
 
   ```elixir
@@ -37,14 +37,14 @@ defmodule EctoFoundationDB.Sync do
       {:ok,
         socket
         |> put_private(:tenant, open_tenant(socket))
-        |> Sync.sync_one!(Repo, User, :user, user_id)}
+        |> Sync.sync_one(Repo, User, :user, user_id)}
     end
   end
   ```
 
   ### Syncing multiple records
 
-  Suppose you have a LiveView that displays a list of users. You can use `sync_all!/4` to
+  Suppose you have a LiveView that displays a list of users. You can use `sync_all/4` to
   automatically update the list whenever a user is created, updated, or deleted.
 
   You must have already defined a `SchemaMetadata` index for the `User` schema for `sync_all/4`
@@ -63,7 +63,7 @@ defmodule EctoFoundationDB.Sync do
       {:ok,
         socket
         |> put_private(:tenant, open_tenant(socket))
-        |> Sync.sync_all!(Repo, User)}
+        |> Sync.sync_all(Repo, User)}
     end
   end
   ```
@@ -117,10 +117,10 @@ defmodule EctoFoundationDB.Sync do
   defstruct futures: %{}
 
   @doc """
-  Equivalent to `sync_many!/5` with a single record.
+  Equivalent to `sync_many/5` with a single record.
   """
-  def sync_one!(state, repo, label, schema, id, opts \\ []) do
-    sync_many!(state, repo, [{label, schema, id}], opts)
+  def sync_one(state, repo, label, schema, id, opts \\ []) do
+    sync_many(state, repo, [{label, schema, id}], opts)
   end
 
   @doc """
@@ -158,7 +158,7 @@ defmodule EctoFoundationDB.Sync do
   - We add or append to the `:ecto_fdb_sync_data`.
 
   """
-  def sync_many!(state, repo, id_assigns, opts \\ []) do
+  def sync_many(state, repo, id_assigns, opts \\ []) do
     %{private: private} = state
     %{tenant: tenant} = private
 
@@ -191,14 +191,14 @@ defmodule EctoFoundationDB.Sync do
   end
 
   @doc """
-  Equivalent to `sync_groups!/4` with a single schema.
+  Equivalent to `sync_groups/4` with a single schema.
   """
-  def sync_all!(state, repo, label, queryable, opts \\ []) do
-    sync_groups!(state, repo, [{label, queryable, []}], opts)
+  def sync_all(state, repo, label, queryable, opts \\ []) do
+    sync_groups(state, repo, [{label, queryable, []}], opts)
   end
 
-  def sync_all_by!(state, repo, label, queryable, by, opts \\ []) do
-    sync_groups!(state, repo, [{label, queryable, by}], opts)
+  def sync_all_by(state, repo, label, queryable, by, opts \\ []) do
+    sync_groups(state, repo, [{label, queryable, by}], opts)
   end
 
   @doc """
@@ -229,7 +229,7 @@ defmodule EctoFoundationDB.Sync do
   {:ok,
    socket
    |> put_private(:tenant, open_tenant(socket))
-   |> Sync.sync_all!(:sorted_users, Repo, [{User, :users, [], query}]))}
+   |> Sync.sync_all(:sorted_users, Repo, [{User, :users, [], query}]))}
   ```
 
   ## Options
@@ -261,7 +261,7 @@ defmodule EctoFoundationDB.Sync do
   - We add or append to the `:ecto_fdb_sync_data`.
 
   """
-  def sync_groups!(state, repo, queryable_assigns, opts \\ []) do
+  def sync_groups(state, repo, queryable_assigns, opts \\ []) do
     %{private: private} = state
     %{tenant: tenant} = private
 
@@ -542,23 +542,22 @@ defmodule EctoFoundationDB.Sync do
   def assign_map(state, new_assigns) do
     new_assigns = create_nested_assigns(new_assigns)
     assigns = Map.get(state, :assigns, %{})
-    assigns = Map.merge(assigns, Enum.into(new_assigns, %{}))
+    assigns = Map.merge(assigns, new_assigns)
     Map.put(state, :assigns, assigns)
   end
 
   defp create_nested_assigns(new_assigns) do
-    new_assigns =
-      Enum.reduce(new_assigns, [], fn
-        {label = [assign_key | rest], value}, acc
-        when is_list(label) and is_atom(assign_key) ->
-          map = create_nested_assign_map(rest, value)
-          [{assign_key, map} | acc]
+    Enum.reduce(new_assigns, %{}, fn
+      {label = [assign_key | rest], value}, acc
+      when is_list(label) and is_atom(assign_key) ->
+        map1 = Map.get(acc, assign_key, %{})
+        map2 = create_nested_assign_map(rest, value)
+        map = Map.merge(map1, map2)
+        Map.put(acc, assign_key, map)
 
-        {label, value}, acc ->
-          [{label, value} | acc]
-      end)
-
-    Enum.reverse(new_assigns)
+      {label, value}, acc ->
+        Map.put(acc, label, value)
+    end)
   end
 
   defp create_nested_assign_map(keys, value) do
