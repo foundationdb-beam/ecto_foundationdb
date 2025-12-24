@@ -138,114 +138,116 @@ Let's define a simple CSS stylesheet for our page. The values chosen here are no
 
 ```elixir
 defmodule Style do
-  def style(), do: """
-<style type="text/css">
-  /* Global Resets & Layout */
-  body { font-family: sans-serif; line-height: 1.5; color: #333; }
-
-  /* Navigation Bar */
-  .catalog ul {
-    display: flex;
-    justify-content: center;
-    gap: 20px;
-    padding: 1rem;
-    list-style: none;
-    background: #f4f4f4;
-    border-bottom: 1px solid #ddd;
-  }
-  .catalog a { text-decoration: none; color: #007bff; font-weight: bold; }
-  .catalog a:hover { text-decoration: underline; }
-
-  /* Product Card */
-  .card {
-    max-width: 500px;
-    margin: 2rem auto;
-    padding: 2rem;
-    border: 1px solid #eee;
-    border-radius: 8px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-  }
-
-  .card h1 { text-align: center; margin-top: 0; }
-  .card p { text-align: center; color: #666; }
-
-  /* Reviews Section */
-  .card ul { padding: 0; list-style: none; }
-  .card figure {
-    margin: 1.5rem 0;
-    padding: 1rem;
-    background: #fafafa;
-    border-left: 4px solid #007bff;
-  }
-  blockquote { margin: 0; font-style: italic; }
-  figcaption { text-align: right; font-weight: bold; font-size: 0.9rem; }
-  
-    /* Form Layout */
-  .card form {
-    display: flex;
-    flex-direction: column;
-    gap: 15px; /* Adds space between inputs and button */
-    margin-top: 1rem;
-  }
-  
-  /* Input Styling */
-  .card input[type="text"] {
-    width: 100%;
-    padding: 10px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 1rem;
-    box-sizing: border-box; /* Ensures padding doesn't break width */
-  }
-  
-  .card input[type="text"]:focus {
-    outline: none;
-    border-color: #007bff;
-    box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
-  }
-  
-  /* Button Styling */
-  .card button {
-    padding: 10px 20px;
-    background-color: #007bff;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-
-  .card button:hover {
-    background-color: #0056b3;
-  }
-
-  /* Label Styling */
-  .card label {
-    display: block;
-    font-weight: bold;
-    font-size: 0.85rem;
-    color: #555;
-    margin-bottom: -10px; /* Pulls the label closer to its specific input */
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  
-  /* Add a bit of extra space between form groups */
-  .card input + label {
-    margin-top: 10px;
-  }
-
-  .page-title {
-    text-align: center;
-    margin: 2rem 0;
-    font-size: 2rem;
-    color: #222;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
-</style>
-"""
+  def style() do
+    """
+    <style type="text/css">
+      /* Global Resets & Layout */
+      body { font-family: sans-serif; line-height: 1.5; color: #333; }
+    
+      /* Navigation Bar */
+      .catalog ul {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        padding: 1rem;
+        list-style: none;
+        background: #f4f4f4;
+        border-bottom: 1px solid #ddd;
+      }
+      .catalog a { text-decoration: none; color: #007bff; font-weight: bold; }
+      .catalog a:hover { text-decoration: underline; }
+    
+      /* Product Card */
+      .card {
+        max-width: 500px;
+        margin: 2rem auto;
+        padding: 2rem;
+        border: 1px solid #eee;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      }
+    
+      .card h1 { text-align: center; margin-top: 0; }
+      .card p { text-align: center; color: #666; }
+    
+      /* Reviews Section */
+      .card ul { padding: 0; list-style: none; }
+      .card figure {
+        margin: 1.5rem 0;
+        padding: 1rem;
+        background: #fafafa;
+        border-left: 4px solid #007bff;
+      }
+      blockquote { margin: 0; font-style: italic; }
+      figcaption { text-align: right; font-weight: bold; font-size: 0.9rem; }
+      
+        /* Form Layout */
+      .card form {
+        display: flex;
+        flex-direction: column;
+        gap: 15px; /* Adds space between inputs and button */
+        margin-top: 1rem;
+      }
+      
+      /* Input Styling */
+      .card input[type="text"] {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 1rem;
+        box-sizing: border-box; /* Ensures padding doesn't break width */
+      }
+      
+      .card input[type="text"]:focus {
+        outline: none;
+        border-color: #007bff;
+        box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+      }
+      
+      /* Button Styling */
+      .card button {
+        padding: 10px 20px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+    
+      .card button:hover {
+        background-color: #0056b3;
+      }
+    
+      /* Label Styling */
+      .card label {
+        display: block;
+        font-weight: bold;
+        font-size: 0.85rem;
+        color: #555;
+        margin-bottom: -10px; /* Pulls the label closer to its specific input */
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      
+      /* Add a bit of extra space between form groups */
+      .card input + label {
+        margin-top: 10px;
+      }
+    
+      .page-title {
+        text-align: center;
+        margin: 2rem 0;
+        font-size: 2rem;
+        color: #222;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+    </style>
+    """
+  end
 end
 ```
 
@@ -341,6 +343,7 @@ defmodule ProductAdminCard do
   require Logger
 
   def update(assigns, socket) do
+    Logger.info("LC #{inspect(assigns)}")
     {:ok,
       socket
       |> assign(assigns)
@@ -372,7 +375,9 @@ defmodule ProductAdminCard do
     """
   end
 end
+```
 
+```elixir
 defmodule DemoAdminLive do
     use Phoenix.LiveView
 
@@ -392,11 +397,16 @@ defmodule DemoAdminLive do
       |> Sync.sync_all(Repo, :catalog, @query_catalog, watch_action: :collection)}
   end
 
-  def handle_assigns(socket, [:catalog]) do
+  def handle_assigns(socket, catalog: old_catalog) do
+    id_deleted = for p <- (old_catalog || []),
+      do: [:products, p]
+    
     id_assigns = for p <- socket.assigns.catalog,
       do: {[:products, p], Product, p}
 
-    {:halt, Sync.sync_many(socket, Repo, id_assigns)}
+    {:halt, socket
+      |> Sync.cancel_many(Repo, id_deleted)
+      |> Sync.sync_many(Repo, id_assigns, replace: false)}
   end
   def handle_assigns(socket, _) do
     {:cont, socket}
@@ -442,5 +452,6 @@ PhoenixPlayground.start(plug: DemoRouter)
 
 ```elixir
 Repo.delete!(widget, prefix: tenant)
+:timer.sleep(500)
 Repo.insert!(widget, prefix: tenant)
 ```
