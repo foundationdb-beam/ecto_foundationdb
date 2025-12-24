@@ -143,6 +143,7 @@ defmodule EctoFoundationDB.Sync do
     When not provided: if `Phoenix.Component` is available, we use `Phoenix.Component.assign/3`, otherwise we use `Map.put/3`.
   - `attach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to attach a hook.
     When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.attach_hook/4`, otherwise we do nothing.
+  - `replace`: A boolean indicating whether to replace existing watches with new ones for the given labels. Defaults to `true`.
 
   ## Return
 
@@ -159,6 +160,21 @@ defmodule EctoFoundationDB.Sync do
 
   """
   def sync_many(state, repo, id_assigns, opts \\ []) do
+    id_assigns =
+      if Keyword.get(opts, :replace, true) do
+        id_assigns
+      else
+        Enum.filter(id_assigns, &(!watching?(state, repo, elem(&1, 0))))
+      end
+
+    sync_many_(state, repo, id_assigns, opts)
+  end
+
+  defp sync_many_(state, _repo, [], _opts) do
+    state
+  end
+
+  defp sync_many_(state, repo, id_assigns, opts) do
     %{private: private} = state
     %{tenant: tenant} = private
 
@@ -239,6 +255,7 @@ defmodule EctoFoundationDB.Sync do
   - `attach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to attach a hook.
     When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.attach_hook/4`, otherwise we do nothing.
   - `watch_action`: An atom representing the signal from the `SchemaMetadata` you're interested in syncing. Defaults to `:changes`
+  - `replace`: A boolean indicating whether to replace existing watches with new ones for the given labels. Defaults to `true`.
 
   ### `watch_action`
 
@@ -262,6 +279,21 @@ defmodule EctoFoundationDB.Sync do
 
   """
   def sync_groups(state, repo, queryable_assigns, opts \\ []) do
+    queryable_assigns =
+      if Keyword.get(opts, :replace, true) do
+        queryable_assigns
+      else
+        Enum.filter(queryable_assigns, &(!watching?(state, repo, elem(&1, 0))))
+      end
+
+    sync_groups_(state, repo, queryable_assigns, opts)
+  end
+
+  defp sync_groups_(state, _repo, [], _opts) do
+    state
+  end
+
+  defp sync_groups_(state, repo, queryable_assigns, opts) do
     %{private: private} = state
     %{tenant: tenant} = private
 
@@ -317,8 +349,13 @@ defmodule EctoFoundationDB.Sync do
     )
   end
 
-  defdelegate attach_callback(state, repo, name, event, cb, opts \\ []), to: Lifecycle
-  defdelegate detach_callback(state, repo, name, event, opts \\ []), to: Lifecycle
+  def watching?(state, repo, label) do
+    futures = State.get_futures(state, repo)
+    Map.has_key?(futures, label)
+  end
+
+  defdelegate attach_callback(state, repo, name \\ :default, event, cb, opts \\ []), to: Lifecycle
+  defdelegate detach_callback(state, repo, name \\ :default, event, opts \\ []), to: Lifecycle
 
   @doc """
   Cancels all syncing and detaches the hook.
@@ -476,7 +513,7 @@ defmodule EctoFoundationDB.Sync do
     {_, state} =
       state
       |> State.get_callbacks(repo)
-      |> Map.get(:on_assigns, %{})
+      |> Map.get(:handle_assigns, %{})
       |> Enum.reduce(
         {:cont, state},
         fn

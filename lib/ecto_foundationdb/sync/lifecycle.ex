@@ -2,7 +2,7 @@ defmodule EctoFoundationDB.Sync.Lifecycle do
   @moduledoc false
   alias EctoFoundationDB.Sync.State
 
-  def attach_callback(state, repo, name, event = :on_assigns, cb, opts \\ []) do
+  def attach_callback(state, repo, name \\ :default, event = :handle_assigns, cb, opts \\ []) do
     callbacks = State.get_callbacks(state, repo)
     event_callbacks = Map.get(callbacks, event, %{})
 
@@ -22,7 +22,7 @@ defmodule EctoFoundationDB.Sync.Lifecycle do
     State.put_callbacks(state, repo, callbacks)
   end
 
-  def detach_callback(state, repo, name, event = :on_assigns, _opts \\ []) do
+  def detach_callback(state, repo, name \\ :default, event = :handle_assigns, _opts \\ []) do
     callbacks = State.get_callbacks(state, repo)
     event_callbacks = Map.get(callbacks, event, %{})
     event_callbacks = Map.drop(event_callbacks, [name])

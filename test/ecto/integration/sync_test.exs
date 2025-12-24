@@ -48,7 +48,7 @@ defmodule EctoIntegrationSyncTest do
          sync_opts()
        )
        |> Sync.sync_all_by(TestRepo, :posts, Post, [user_id: id], sync_opts())
-       |> Sync.attach_callback(TestRepo, :handle_sync, :on_assigns, &handle_sync/2)}
+       |> Sync.attach_callback(TestRepo, :handle_assigns, &handle_assigns/2)}
     end
 
     def handle_call(:await, _from, state = %{changed?: true}) do
@@ -87,13 +87,19 @@ defmodule EctoIntegrationSyncTest do
       Sync.cancel_all(state, TestRepo, sync_opts())
     end
 
-    defp handle_sync(state, [:user_collection]) do
+    defp handle_assigns(state, [:user_collection]) do
       id_assigns = for id <- state.assigns.user_collection, do: {[:user_map, id], User, id}
 
-      handle_sync(Sync.sync_many(state, TestRepo, id_assigns, sync_opts()), [])
+      state
+      |> Sync.sync_many(TestRepo, id_assigns, [{:replace, false} | sync_opts()])
+      |> notify()
     end
 
-    defp handle_sync(state, _labels) do
+    defp handle_assigns(state, _labels) do
+      notify(state)
+    end
+
+    defp notify(state) do
       if state.waiting do
         GenServer.reply(state.waiting, state.assigns)
         {:halt, %{state | waiting: nil, changed?: false}}
