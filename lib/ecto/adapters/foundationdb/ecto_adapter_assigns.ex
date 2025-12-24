@@ -141,9 +141,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
     end)
   end
 
-  defp usetenant(nil, _tenant), do: nil
   defp usetenant(list, tenant) when is_list(list), do: Enum.map(list, &usetenant(&1, tenant))
-  defp usetenant(struct, tenant), do: FoundationDB.usetenant(struct, tenant)
+
+  defp usetenant(struct, tenant) when is_struct(struct),
+    do: FoundationDB.usetenant(struct, tenant)
+
+  defp usetenant(data, _tenant), do: data
 
   defp maybe_new_watch(result, watch_options, options, new_watch_fn) do
     if Keyword.get(options, :watch?, false) do

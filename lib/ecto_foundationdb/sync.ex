@@ -171,10 +171,7 @@ defmodule EctoFoundationDB.Sync do
 
           labels = for {label, _schema, _id} <- id_assigns, do: label
 
-          values =
-            for value <- repo.await(get_futures) do
-              if is_nil(value), do: value, else: FoundationDB.usetenant(value, tenant)
-            end
+          values = usetenant(repo.await(get_futures), tenant)
 
           labeled_values = Enum.zip(labels, values)
 
@@ -291,7 +288,7 @@ defmodule EctoFoundationDB.Sync do
           Enum.zip(queryable_assigns, lists)
           |> Enum.map(fn
             {{label, queryable, by}, list} ->
-              list = Enum.map(list, &FoundationDB.usetenant(&1, tenant))
+              list = usetenant(list, tenant)
               watch_future = SchemaMetadata.watch_by(queryable, by, watch_action)
               {{label, list}, {label, watch_future}}
           end)
@@ -305,6 +302,19 @@ defmodule EctoFoundationDB.Sync do
     |> State.merge_futures(repo, new_futures)
     |> apply_attach_container_hook(repo, opts)
     |> apply_assign(repo, new_assigns, opts)
+  end
+
+  defp usetenant(list, tenant) do
+    Enum.map(
+      list,
+      fn
+        struct when is_struct(struct) ->
+          FoundationDB.usetenant(struct, tenant)
+
+        data ->
+          data
+      end
+    )
   end
 
   defdelegate attach_callback(state, repo, name, event, cb, opts \\ []), to: Lifecycle

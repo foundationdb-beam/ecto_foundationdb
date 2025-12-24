@@ -1025,7 +1025,7 @@ defmodule Ecto.Adapters.FoundationDB do
       end
 
       def async_all_range(queryable, id_s, id_e, opts \\ []) do
-        async_query(fn ->
+        async_query(queryable, fn ->
           repo = get_dynamic_repo()
 
           EctoAdapterQueryable.execute_all_range(
@@ -1051,34 +1051,48 @@ defmodule Ecto.Adapters.FoundationDB do
       end
 
       def async_get(queryable, id, opts \\ []),
-        do: async_query(fn -> get(queryable, id, opts ++ [returning: {:future, :one}]) end)
+        do:
+          async_query(queryable, fn ->
+            get(queryable, id, opts ++ [returning: {:future, :one}])
+          end)
 
       def async_get!(queryable, id, opts \\ []),
-        do: async_query(fn -> get!(queryable, id, opts ++ [returning: {:future, :one}]) end)
+        do:
+          async_query(queryable, fn ->
+            get!(queryable, id, opts ++ [returning: {:future, :one}])
+          end)
 
       def async_get_by(queryable, clauses, opts \\ []),
         do:
-          async_query(fn -> get_by(queryable, clauses, opts ++ [returning: {:future, :one}]) end)
+          async_query(queryable, fn ->
+            get_by(queryable, clauses, opts ++ [returning: {:future, :one}])
+          end)
 
       def async_get_by!(queryable, clauses, opts \\ []),
         do:
-          async_query(fn -> get_by!(queryable, clauses, opts ++ [returning: {:future, :one}]) end)
+          async_query(queryable, fn ->
+            get_by!(queryable, clauses, opts ++ [returning: {:future, :one}])
+          end)
 
       def async_one(queryable, opts \\ []),
-        do: async_query(fn -> one(queryable, opts ++ [returning: {:future, :one}]) end)
+        do: async_query(queryable, fn -> one(queryable, opts ++ [returning: {:future, :one}]) end)
 
       def async_one!(queryable, opts \\ []),
-        do: async_query(fn -> one!(queryable, opts ++ [returning: {:future, :one}]) end)
+        do:
+          async_query(queryable, fn -> one!(queryable, opts ++ [returning: {:future, :one}]) end)
 
       def async_all(queryable, opts \\ []),
-        do: async_query(fn -> all(queryable, opts ++ [returning: {:future, :all}]) end)
+        do: async_query(queryable, fn -> all(queryable, opts ++ [returning: {:future, :all}]) end)
 
       def async_all_by(queryable, by, opts \\ []),
-        do: async_query(fn -> all_by(queryable, by, opts ++ [returning: {:future, :all}]) end)
+        do:
+          async_query(queryable, fn ->
+            all_by(queryable, by, opts ++ [returning: {:future, :all}])
+          end)
 
-      defp async_query(fun) do
+      defp async_query(queryable, fun) do
         repo = get_dynamic_repo()
-        EctoAdapterAsync.async_query(__MODULE__, repo, fun)
+        EctoAdapterAsync.async_query(__MODULE__, repo, queryable, fun)
       end
 
       def await(futures) when is_list(futures) do

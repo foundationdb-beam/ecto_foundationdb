@@ -36,7 +36,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
           {:nocache,
            {:all,
             query = %Ecto.Query{
-              from: %Ecto.Query.FromExpr{source: {source, schema}},
+              from: %Ecto.Query.FromExpr{source: {_source, _schema}},
               select: %Ecto.Query.SelectExpr{
                 fields: select_fields
               }
@@ -62,7 +62,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
             |> select(Fields.parse_select_fields(select_fields), nil)
           end)
 
-        handle_returning({source, schema}, future, options)
+        handle_returning(future, options)
     end
   end
 
@@ -160,7 +160,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
     options = options ++ [returning: {:future, return_handler}]
 
-    handle_returning({source, schema}, future, options)
+    handle_returning(future, options)
   end
 
   # Extract limit from an `Ecto.Query`
@@ -223,12 +223,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     Query.all(tenant, adapter_meta, plan, options)
   end
 
-  defp handle_returning({source, schema}, future, options) do
+  defp handle_returning(future, options) do
     case options[:returning] do
       {:future, return_handler} ->
         Process.put(
           Future.token(),
-          {{source, schema}, Future.apply(future, fn res -> {return_handler, res} end)}
+          Future.apply(future, fn res -> {return_handler, res} end)
         )
 
         {0, []}

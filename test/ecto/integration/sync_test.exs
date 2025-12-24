@@ -44,7 +44,7 @@ defmodule EctoIntegrationSyncTest do
        |> Sync.sync_all!(
          TestRepo,
          :user_collection,
-         from(u in User, order_by: u.name),
+         from(u in User, select: u.id, order_by: u.name),
          sync_opts()
        )
        |> Sync.sync_all_by!(TestRepo, :posts, Post, [user_id: id], sync_opts())
