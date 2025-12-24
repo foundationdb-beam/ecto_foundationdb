@@ -179,6 +179,62 @@ defmodule Style do
   }
   blockquote { margin: 0; font-style: italic; }
   figcaption { text-align: right; font-weight: bold; font-size: 0.9rem; }
+  
+    /* Form Layout */
+  .card form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px; /* Adds space between inputs and button */
+    margin-top: 1rem;
+  }
+  
+  /* Input Styling */
+  .card input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1rem;
+    box-sizing: border-box; /* Ensures padding doesn't break width */
+  }
+  
+  .card input[type="text"]:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+  }
+  
+  /* Button Styling */
+  .card button {
+    padding: 10px 20px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .card button:hover {
+    background-color: #0056b3;
+  }
+
+  /* Label Styling */
+  .card label {
+    display: block;
+    font-weight: bold;
+    font-size: 0.85rem;
+    color: #555;
+    margin-bottom: -10px; /* Pulls the label closer to its specific input */
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  
+  /* Add a bit of extra space between form groups */
+  .card input + label {
+    margin-top: 10px;
+  }
 
   .page-title {
     text-align: center;
@@ -211,14 +267,14 @@ defmodule DemoLive do
 
     {:ok, socket
       |> put_private(:tenant, tenant)
-      |> Sync.sync_all!(Repo, :catalog, @query_catalog)}
+      |> Sync.sync_all(Repo, :catalog, @query_catalog)}
   end
 
   def handle_params(%{"id" => id}, _uri, socket) do
     {:noreply, 
       socket
-      |> Sync.sync_one!(Repo, :product, Product, id)
-      |> Sync.sync_all_by!(Repo, :reviews, @query_reviews, product_id: id)}
+      |> Sync.sync_one(Repo, :product, Product, id)
+      |> Sync.sync_all_by(Repo, :reviews, @query_reviews, product_id: id)}
   end
   def handle_params(_params, _uri, socket),
     do: {:noreply, assign(socket, product: nil, reviews: [])}
@@ -290,13 +346,10 @@ defmodule ProductAdminCard do
       |> assign(assigns)
       |> assign(form: to_form(Product.changeset(assigns.product)))}
   end
-
+  
   def handle_event("save", %{"product" => params}, socket) do
-    Logger.info("save #{inspect(params)}")
     changeset = Product.changeset(socket.assigns.product, params)
-    Logger.info("cs #{inspect(changeset)}")
-    res = Repo.update!(changeset)
-    Logger.info("res #{inspect(res)}")
+    Repo.update!(changeset)
     {:noreply, socket}
   end
 
@@ -309,19 +362,13 @@ defmodule ProductAdminCard do
         phx-submit="save"
         phx-target={@myself}
       >
-        <.input type="text" field={@form[:name]} />
-        <.input type="text" field={@form[:description]} />
+        <label for={@form[:name].id}>Product Name</label>
+        <input type="text" id={@form[:name].id} name={@form[:name].name} value={@form[:name].value} />
+        <label for={@form[:description].id}>Description</label>
+        <input type="text" id={@form[:description].id} name={@form[:description].name} value={@form[:description].value}} />
         <button>Save</button>
       </.form>
     </div>
-    """
-  end
-
-  attr :field, Phoenix.HTML.FormField
-  attr :rest, :global, include: ~w(type)
-  defp input(assigns) do
-    ~H"""
-    <input id={@field.id} name={@field.name} value={@field.value} {@rest} />
     """
   end
 end
@@ -334,37 +381,36 @@ defmodule DemoAdminLive do
 
   require Logger
 
-  @query_catalog from(p in Product, select: p.id, order_by: p.inserted_at)
+  @query_catalog from(p in Product, select: p.id)
 
   def mount(_params, _session, socket) do
     tenant = Tenant.open!(Repo, "sync-sample")
 
     {:ok, socket
       |> put_private(:tenant, tenant)
-      |> Sync.attach_callback(Repo, :sync_products, :on_assigns, &sync_products/2)
-      |> Sync.sync_all!(Repo, :catalog, @query_catalog, watch_action: :collection)}
+      |> Sync.attach_callback(Repo, :handle_assigns, &handle_assigns/2)
+      |> Sync.sync_all(Repo, :catalog, @query_catalog, watch_action: :collection)}
   end
 
-  def sync_products(socket, [:catalog]) do
+  def handle_assigns(socket, [:catalog]) do
     id_assigns = for p <- socket.assigns.catalog,
       do: {[:products, p], Product, p}
-    Logger.info("ID ASSIGNS #{inspect(id_assigns)}")
-    {:halt, Sync.sync_many!(socket, Repo, id_assigns)}
+
+    {:halt, Sync.sync_many(socket, Repo, id_assigns)}
   end
-  def sync_products(socket, _) do
+  def handle_assigns(socket, _) do
     {:cont, socket}
   end
 
   def render(assigns) do
     ~H"""
     <h1 class="page-title">Admin</h1>
-    {inspect(@products)}
-
-    <div :for={{_, p} <- @products}>
+    <div :for={id <- @catalog}>
       <.live_component
+          :if={@products[id]}
           module={ProductAdminCard}
-          id={p.id}
-          product={p} />
+          id={id}
+          product={@products[id]} />
     </div>
 
     {Phoenix.HTML.raw(Style.style())}
@@ -395,6 +441,6 @@ PhoenixPlayground.start(plug: DemoRouter)
 ```
 
 ```elixir
-import Ecto.Query
-Repo.all(from(p in Product, select: p.id, order_by: p.inserted_at), prefix: tenant)
+Repo.delete!(widget, prefix: tenant)
+Repo.insert!(widget, prefix: tenant)
 ```
