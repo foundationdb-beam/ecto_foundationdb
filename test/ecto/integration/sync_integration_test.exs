@@ -1,4 +1,4 @@
-defmodule EctoIntegrationSyncTest do
+defmodule EctoIntegrationSyncIntegrationTest do
   use Ecto.Integration.Case, async: true
 
   alias Ecto.Integration.TestRepo

@@ -577,23 +577,30 @@ defmodule EctoFoundationDB.Sync do
   end
 
   def assign_map(state, new_assigns) do
-    new_assigns = create_nested_assigns(new_assigns)
+    # @todo bug: when there are nested assigns, we're not merging with the existing nested structures in assigns
+    {nested_assigns, regular_assigns} = create_nested_assigns(new_assigns)
     assigns = Map.get(state, :assigns, %{})
-    assigns = Map.merge(assigns, new_assigns)
+    assigns = Map.merge(assigns, regular_assigns)
+    assigns = nested_merge(assigns, nested_assigns)
     Map.put(state, :assigns, assigns)
   end
 
-  defp create_nested_assigns(new_assigns) do
-    Enum.reduce(new_assigns, %{}, fn
-      {label = [assign_key | rest], value}, acc
-      when is_list(label) and is_atom(assign_key) ->
-        map1 = Map.get(acc, assign_key, %{})
-        map2 = create_nested_assign_map(rest, value)
-        map = Map.merge(map1, map2)
-        Map.put(acc, assign_key, map)
+  defp nested_merge(map1, map2), do: nested_merge(nil, map1, map2)
+  defp nested_merge(_key, x1, x2) when is_struct(x1) or is_struct(x2), do: x2
+  defp nested_merge(_key, map1 = %{}, map2 = %{}), do: Map.merge(map1, map2, &nested_merge/3)
+  defp nested_merge(_key, _x1, x2), do: x2
 
-      {label, value}, acc ->
-        Map.put(acc, label, value)
+  defp create_nested_assigns(new_assigns) do
+    Enum.reduce(new_assigns, {%{}, %{}}, fn
+      {label = [assign_key | rest], value}, {nested_assigns, regular_assigns}
+      when is_list(label) and is_atom(assign_key) ->
+        map1 = Map.get(nested_assigns, assign_key, %{})
+        map2 = create_nested_assign_map(rest, value)
+        map = nested_merge(map1, map2)
+        {Map.put(nested_assigns, assign_key, map), regular_assigns}
+
+      {label, value}, {nested_assigns, regular_assigns} ->
+        {nested_assigns, Map.put(regular_assigns, label, value)}
     end)
   end
 
