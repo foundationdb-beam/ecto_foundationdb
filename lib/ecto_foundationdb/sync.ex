@@ -502,14 +502,14 @@ defmodule EctoFoundationDB.Sync do
   end
 
   defp apply_assign(state, repo, new_assigns, opts) do
+    {labels, _} = Enum.unzip(new_assigns)
+    old_assigns = get_labeled_assigns(state, labels)
+
     state =
       apply_callback(:assign, [state, new_assigns], opts, fn state, new_assigns ->
         assign(state, new_assigns)
       end)
 
-    {labels, _} = Enum.unzip(new_assigns)
-
-    # @todo: include any overlapping old_assigns so that the callback can handle diffs
     {_, state} =
       state
       |> State.get_callbacks(repo)
@@ -518,7 +518,7 @@ defmodule EctoFoundationDB.Sync do
         {:cont, state},
         fn
           {_name, cb}, {:cont, state0} ->
-            cb.(state0, labels)
+            cb.(state0, old_assigns)
 
           _, {:halt, state0} ->
             {:halt, state0}
@@ -595,8 +595,7 @@ defmodule EctoFoundationDB.Sync do
 
   defp create_nested_assigns(new_assigns) do
     Enum.reduce(new_assigns, {%{}, %{}}, fn
-      {label = [assign_key | rest], value}, {nested_assigns, regular_assigns}
-      when is_list(label) and is_atom(assign_key) ->
+      {[assign_key | rest], value}, {nested_assigns, regular_assigns} when is_atom(assign_key) ->
         map1 = Map.get(nested_assigns, assign_key, %{})
         map2 = create_nested_assign_map(rest, value)
         map = nested_merge(map1, map2)
@@ -623,6 +622,23 @@ defmodule EctoFoundationDB.Sync do
       end)
 
     put_in(map, cumm_k ++ [Access.key(last)], value)
+  end
+
+  defp get_labeled_assigns(state, labels) do
+    assigns = Map.get(state, :assigns, %{})
+
+    l_assigns =
+      Enum.reduce(labels, [], fn
+        label = [assign_key | _rest], acc when is_atom(assign_key) ->
+          path = for k <- label, do: Access.key(k)
+          [{label, get_in(assigns, path)} | acc]
+
+        label, acc ->
+          val = Map.get(assigns, label, nil)
+          [{label, val} | acc]
+      end)
+
+    Enum.reverse(l_assigns)
   end
 
   # Optional Phoenix.LiveView attach_hook/detach_hook behavior

@@ -93,7 +93,7 @@ defmodule EctoIntegrationSyncIntegrationTest do
       Sync.cancel_all(state, TestRepo, sync_opts())
     end
 
-    defp handle_assigns(state, [:user_collection]) do
+    defp handle_assigns(state, user_collection: _) do
       id_assigns = for id <- state.assigns.user_collection, do: {[:user_map, id], User, id}
 
       state
