@@ -336,19 +336,6 @@ defmodule EctoFoundationDB.Sync do
     |> apply_assign(repo, new_assigns, opts)
   end
 
-  defp usetenant(list, tenant) do
-    Enum.map(
-      list,
-      fn
-        struct when is_struct(struct) ->
-          FoundationDB.usetenant(struct, tenant)
-
-        data ->
-          data
-      end
-    )
-  end
-
   def watching?(state, repo, label) do
     futures = State.get_futures(state, repo)
     Map.has_key?(futures, label)
