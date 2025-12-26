@@ -6,19 +6,16 @@ defmodule EctoFoundationDB.Sync.Lifecycle do
     callbacks = State.get_callbacks(state, repo)
     event_callbacks = Map.get(callbacks, event, %{})
 
-    named_callbacks =
+    event_callbacks =
       case {Keyword.get(opts, :replace, false), Map.fetch(event_callbacks, name)} do
         {false, {:ok, _}} ->
           raise "Callback #{inspect(name)} already exists for #{inspect(repo)}"
 
-        {false, :error} ->
-          %{}
-
-        {_, {:ok, cbs}} ->
-          cbs
+        _ ->
+          event_callbacks
       end
 
-    callbacks = Map.put(callbacks, event, Map.put(named_callbacks, name, cb))
+    callbacks = Map.put(callbacks, event, Map.put(event_callbacks, name, cb))
     State.put_callbacks(state, repo, callbacks)
   end
 

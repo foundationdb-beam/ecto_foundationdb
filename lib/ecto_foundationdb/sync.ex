@@ -689,4 +689,17 @@ defmodule EctoFoundationDB.Sync do
   defp get_hook_name(repo) do
     {@container_hook_name, repo}
   end
+
+  defp usetenant(list, tenant) do
+    Enum.map(
+      list,
+      fn
+        struct when is_struct(struct) ->
+          FoundationDB.usetenant(struct, tenant)
+
+        data ->
+          data
+      end
+    )
+  end
 end
