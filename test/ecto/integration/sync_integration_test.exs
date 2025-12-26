@@ -218,4 +218,15 @@ defmodule EctoIntegrationSyncIntegrationTest do
     assert %{user_map: %{^alice_id => %User{}, ^bob_id => %User{}, ^charlie_id => %User{}}} =
              View.await(pid)
   end
+
+  test "deleting a record", context do
+    tenant = context[:tenant]
+    alice = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+
+    {:ok, pid} = View.start_link(tenant, :user, alice.id)
+
+    TestRepo.delete!(alice)
+
+    assert %{user: nil} = View.await(pid)
+  end
 end
