@@ -4,6 +4,7 @@
 
 ### Enhancements
 
+* SchemaMetadata now supports indexed fields
 * `EctoFoundationDB.Sync`: Defines conventions for keeping a stateful process (e.g. LiveView) automatically up-to-date
   with the latest data from the database.
 

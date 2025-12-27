@@ -699,6 +699,15 @@ defmodule Ecto.Adapters.FoundationDB do
     end
   ```
 
+  You may also track metadata by indexed fields. The following metadata creation will track the counters listed above for each value of `name`.
+  In other words, there will be a set of counters specific to all operations on `User` where `name: "Alice"`, and so on.
+
+  ```elixir
+  def change() do
+    [create metadata(User, [:name])]
+  end
+  ```
+
   For more on these watches, see [Sync Engine Part II - Collections](collection_syncing.html)
 
   ## Upserts
