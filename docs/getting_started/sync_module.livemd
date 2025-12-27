@@ -271,7 +271,6 @@ defmodule DemoLive do
   # contrained by the product.id below.
   @query_reviews from(r in Review, order_by: {:desc, r.inserted_at})
 
-  require Logger
   def mount(_params, _session, socket) do
     tenant = Tenant.open!(Repo, "sync-sample")
 
@@ -285,11 +284,11 @@ defmodule DemoLive do
   def handle_params(%{"id" => id}, _uri, socket) do
     # When a specific product is being viewed, sync that product as well
     # as all of its reviews. `sync_all_by` accepts a query and then further
-    # contrains it by the provided index values.
+    # constrains it by the provided index values.
     #
     # The product is stored into the `:product` assign.
     #
-    # The views indexed by `product_id: id` are stored
+    # The reviews indexed by `product_id: id` are stored
     # into the `:reviews` assign.
     {:noreply, 
       socket
