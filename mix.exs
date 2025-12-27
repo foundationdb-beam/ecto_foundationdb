@@ -4,7 +4,7 @@ defmodule EctoFoundationdb.MixProject do
   def project do
     [
       app: :ecto_foundationdb,
-      version: "0.5.1",
+      version: "0.5.2",
       description: "FoundationDB adapter for Ecto",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
@@ -36,12 +36,13 @@ defmodule EctoFoundationdb.MixProject do
       main: "Ecto.Adapters.FoundationDB",
       source_url: "https://github.com/foundationdb-beam/ecto_foundationdb",
       filter_modules:
-        ~r/^Elixir.Ecto.Adapters.FoundationDB|EctoFoundationDB(.CLI|.Database|.Exception.Unsupported|.Exception.IncorrectTenancy|.Future|.Index|.Indexer|.Layer|.Migrator|.Options|.QueryPlan|.Sandbox|.Tenant|.Tenant.DirectoryTenant|.Tenant.ManagedTenant|.Versionstamp|.Indexer.SchemaMetadata)?$/,
+        ~r/^Elixir.Ecto.Adapters.FoundationDB|EctoFoundationDB(.CLI|.Database|.Exception.Unsupported|.Exception.IncorrectTenancy|.Future|.Index|.Indexer|.Layer|.Migrator|.Options|.QueryPlan|.Sandbox|.Sync|.Tenant|.Tenant.DirectoryTenant|.Tenant.ManagedTenant|.Versionstamp|.Indexer.SchemaMetadata)?$/,
       extras: [
         "CHANGELOG.md",
         "docs/getting_started/introduction.livemd",
         "docs/getting_started/watches.livemd",
         "docs/getting_started/collection_syncing.livemd",
+        "docs/getting_started/sync_module.livemd",
         "docs/developer_guides/testing.md",
         "docs/developer_guides/operators_manual.md",
         "docs/design/metadata.md"
@@ -79,6 +80,14 @@ defmodule EctoFoundationdb.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.16", only: :dev, runtime: false},
       {:benchee, "~> 1.0", only: :bench}
+    ] ++ optional_deps()
+  end
+
+  defp optional_deps() do
+    [
+      # EctoFoundationDB.Sync
+      {:phoenix, "~> 1.0", optional: true},
+      {:phoenix_live_view, "~> 1.1", optional: true}
     ]
   end
 

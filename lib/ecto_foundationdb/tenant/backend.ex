@@ -30,10 +30,10 @@ defmodule EctoFoundationDB.Tenant.Backend do
   @callback extend_tuple(tuple :: tuple(), meta :: meta()) :: tuple()
   @callback extract_tuple(tuple :: tuple(), meta :: meta()) :: tuple()
 
-  @spec db_open!(Database.t(), Tenant.id(), Options.t()) :: Tenant.t()
-  def db_open!(db, id, options) do
+  @spec db_open!(Database.t(), Ecto.Repo.t(), Tenant.id(), Options.t()) :: Tenant.t()
+  def db_open!(db, repo, id, options) do
     :ok = ensure_created(db, id, options)
-    db_open(db, id, options)
+    db_open(db, repo, id, options)
   end
 
   @doc """
@@ -58,8 +58,8 @@ defmodule EctoFoundationDB.Tenant.Backend do
     end
   end
 
-  @spec db_open(Database.t(), Tenant.id(), Options.t()) :: Tenant.t()
-  def db_open(db, id, options) do
+  @spec db_open(Database.t(), Ecto.Repo.t(), Tenant.id(), Options.t()) :: Tenant.t()
+  def db_open(db, repo, id, options) do
     module = get_module(options)
     tenant_name = module.get_name(id, options)
     opened = module.open(db, tenant_name, options)
@@ -68,6 +68,7 @@ defmodule EctoFoundationDB.Tenant.Backend do
 
     %Tenant{
       id: id,
+      repo: repo,
       backend: meta.__struct__,
       ref: ref,
       txobj: module.txobj(db, opened, meta),
@@ -99,7 +100,7 @@ defmodule EctoFoundationDB.Tenant.Backend do
 
   @spec clear(Database.t(), Tenant.id(), Options.t()) :: :ok
   def clear(db, id, options) do
-    tenant = db_open(db, id, options)
+    tenant = db_open(db, nil, id, options)
 
     ranges =
       get_module(options).all_data_ranges(tenant.meta)
@@ -113,7 +114,7 @@ defmodule EctoFoundationDB.Tenant.Backend do
 
   @spec empty(Database.t(), Tenant.id(), Options.t()) :: :ok
   def empty(db, id, options) do
-    tenant = db_open(db, id, options)
+    tenant = db_open(db, nil, id, options)
 
     {start_key, end_key} =
       Pack.adapter_repo_range(tenant)

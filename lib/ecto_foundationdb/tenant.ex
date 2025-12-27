@@ -29,7 +29,7 @@ defmodule EctoFoundationDB.Tenant do
   """
 
   @derive {Inspect, only: [:id, :ref]}
-  defstruct [:id, :backend, :ref, :txobj, :meta, :options]
+  defstruct [:repo, :id, :backend, :ref, :txobj, :meta, :options]
 
   alias Ecto.Adapters.FoundationDB, as: FDB
 
@@ -44,6 +44,7 @@ defmodule EctoFoundationDB.Tenant do
   @type prefix() :: String.t()
 
   def txobj(%Tenant{txobj: txobj}), do: txobj
+  def repo(%Tenant{repo: repo}), do: repo
 
   @doc """
   Returns true if the tenant already exists in the database.
@@ -87,7 +88,7 @@ defmodule EctoFoundationDB.Tenant do
   @spec open(Ecto.Repo.t(), id(), Options.t()) :: t()
   def open(repo, id, options \\ []) when byte_size(id) > 0 do
     config = Keyword.merge(repo.config(), options)
-    tenant = Backend.db_open(FDB.db(repo), id, config)
+    tenant = Backend.db_open(FDB.db(repo), repo, id, config)
     handle_open(repo, tenant, config)
     tenant
   end
@@ -105,7 +106,7 @@ defmodule EctoFoundationDB.Tenant do
   @spec open!(Ecto.Repo.t(), id(), Options.t()) :: t()
   def open!(repo, id, options \\ []) when byte_size(id) > 0 do
     config = Keyword.merge(repo.config(), options)
-    tenant = Backend.db_open!(FDB.db(repo), id, config)
+    tenant = Backend.db_open!(FDB.db(repo), repo, id, config)
     handle_open(repo, tenant, config)
     tenant
   end

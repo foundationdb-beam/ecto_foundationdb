@@ -46,6 +46,23 @@ defmodule EctoFoundationDB.Future do
 
   def ref(%__MODULE__{ref: ref}), do: ref
 
+  def erlfdb_future(%__MODULE__{erlfdb_future: erlfdb_future}), do: erlfdb_future
+
+  def cancel(future = %__MODULE__{}) do
+    %{erlfdb_future: erlfdb_future} = future
+    :erlfdb.cancel(erlfdb_future, flush: true)
+
+    %{
+      future
+      | tx: nil,
+        ref: nil,
+        erlfdb_future: nil,
+        result: nil,
+        handler: &Function.identity/1,
+        must_wait?: false
+    }
+  end
+
   @doc """
   Creates a Future that will be resolved outside of the transaction in which it was created.
 
@@ -172,22 +189,33 @@ defmodule EctoFoundationDB.Future do
     %__MODULE__{fut | handler: &f.(g.(&1))}
   end
 
-  def find_ready(futs, ready_ref) do
+  def find_ready(futs, ready_ref) when is_map(futs) do
+    {label, found_future, futs} = find_ready(Enum.into(futs, []), ready_ref)
+    {label, found_future, Enum.into(futs, %{})}
+  end
+
+  def find_ready(futs, ready_ref) when is_list(futs) do
     # Must only be called if you've received a {ready_ref, :ready}
     # message in your mailbox.
 
     find_ready(futs, ready_ref, [])
   end
 
-  defp find_ready([], _ready_ref, acc), do: {nil, Enum.reverse(acc)}
+  defp find_ready([], _ready_ref, acc), do: {nil, nil, Enum.reverse(acc)}
 
-  defp find_ready([h | t], ready_ref, acc) do
-    %__MODULE__{erlfdb_future: erlfdb_future} = h
-
+  defp find_ready([h = %__MODULE__{erlfdb_future: erlfdb_future} | t], ready_ref, acc) do
     if match_ref?(erlfdb_future, ready_ref) do
-      {h, Enum.reverse(acc) ++ t}
+      {nil, h, Enum.reverse(acc) ++ t}
     else
       find_ready(t, ready_ref, [h | acc])
+    end
+  end
+
+  defp find_ready([{label, h = %__MODULE__{erlfdb_future: erlfdb_future}} | t], ready_ref, acc) do
+    if match_ref?(erlfdb_future, ready_ref) do
+      {label, h, Enum.reverse(acc) ++ t}
+    else
+      find_ready(t, ready_ref, [{label, h} | acc])
     end
   end
 

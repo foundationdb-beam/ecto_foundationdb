@@ -95,13 +95,14 @@ defmodule EctoFoundationDB.Migration do
     %{index | name: index.name || default_index_name(index)}
   end
 
-  def metadata(schema, include \\ nil, opts \\ []) do
+  def metadata(schema, columns \\ [], opts \\ []) do
     options = opts[:options] || []
     options = Keyword.put(options, :indexer, SchemaMetadata)
+    options = Keyword.put_new(options, :signals, SchemaMetadata.signal_names())
     opts = Keyword.put(opts, :options, options)
     validate_index_opts!(opts)
-    index = struct(%Index{schema: schema, columns: get_metadata_include(include)}, opts)
-    %{index | name: index.name || default_metadata_name(%{index | columns: []})}
+    index = struct(%Index{schema: schema, columns: columns}, opts)
+    %{index | name: index.name || default_metadata_name(index)}
   end
 
   defp validate_index_opts!(opts), do: Keyword.validate!(opts, [:options])
@@ -124,9 +125,4 @@ defmodule EctoFoundationDB.Migration do
     |> Enum.join("_")
     |> String.to_atom()
   end
-
-  # The include param is always explicitly defined in the DB so that new entries to
-  # SchemaMetadata can be added without affecting existing indexes.
-  defp get_metadata_include(nil), do: SchemaMetadata.field_names()
-  defp get_metadata_include(include) when is_list(include), do: include
 end

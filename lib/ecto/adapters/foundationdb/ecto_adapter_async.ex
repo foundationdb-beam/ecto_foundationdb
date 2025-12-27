@@ -63,7 +63,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAsync do
     end)
   end
 
-  def async_query(_module, repo, fun) do
+  def async_query(_module, repo, queryable, fun) do
     # Executes the repo function (e.g. get, get_by, all, etc). Caller must ensure
     # that the proper `:returning` option is used to adhere to the async/await
     # contract.
@@ -73,19 +73,17 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAsync do
       nil ->
         raise "Pipelining failure"
 
-      {{source, schema}, future} ->
+      future ->
         Future.apply(future, fn {return_handler, result} ->
-          invoke_return_handler(repo, source, schema, return_handler, result)
+          invoke_return_handler(repo, queryable, return_handler, result)
         end)
     end
   after
     Process.delete(Future.token())
   end
 
-  defp invoke_return_handler(repo, source, schema, return_handler, result) do
+  defp invoke_return_handler(repo, queryable, return_handler, result) do
     if is_nil(result), do: raise("Pipelining failure")
-
-    queryable = if is_nil(schema), do: source, else: schema
 
     # Abuse a :noop option here to signal to the backend that we don't
     # actually want to run a query. Instead, we just want the result to
@@ -99,8 +97,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAsync do
 
       :all_from_source ->
         {select_fields, data_result} = result
-        query = from(_ in source, select: ^select_fields)
-        repo.all(query, noop: data_result)
+
+        queryable =
+          if is_struct(queryable), do: queryable, else: from(queryable, select: ^select_fields)
+
+        repo.all(queryable, noop: data_result)
     end
   end
 
