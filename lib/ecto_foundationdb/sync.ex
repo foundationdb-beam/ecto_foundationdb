@@ -1,24 +1,28 @@
 defmodule EctoFoundationDB.Sync do
   @moduledoc """
-  This module defines some conventions for integrating with Phoenix LiveView. Via
-  EctoFoundationDB watches, your application can automatically be kept up-to-date with
+  This module defines some conventions for integrating with Phoenix LiveView or any other stateful
+  process. Via EctoFoundationDB watches, your application can automatically be kept up-to-date with
   changes to the database.
 
-  Simply call one of these functions in `mount/3` or `handle_params/3`, and this module will do the following:
+  Simply call one of the provided `sync*` functions in `mount/3` or `handle_params/3`, and this module will do the following:
 
   1. Read from the database and create necessary watches
   1. Call `Phoenix.Component.assign/2`, using the provided `label`
   1. Call `Phoenix.LiveView.attach_hook/4` to set up a callback as a hook
 
   Then, upon receiving a watch-ready message, the hook calls `Phoenix.Component.assign/2`
-  again with the updated data, and creates new watches.
+  again with the updated data, and creates new watches as needed.
 
-  Note: these functions will store a key called `:ecto_fdb_sync_data` in the `:private` field
-  of the provided `socket`.
+  Socket requirements:
+
+  * The tenant must be stored in the `:private` field of the provided `socket`.
+  * The sync functions will store a key called `:ecto_fdb_sync_data` in the `:private` field.
 
   ## Examples
 
-  ### Syncing a single record
+  These are quick, short examples. Please see [Sync Engine III](sync_module.html) for end-to-end detail.
+
+  ### Quick example 1: Syncing a single record
 
   Suppose you have a LiveView that displays a single user. You can use `sync_one/5` to
   automatically update the user whenever it is created, updated, or deleted.
@@ -42,7 +46,7 @@ defmodule EctoFoundationDB.Sync do
   end
   ```
 
-  ### Syncing multiple records
+  ### Quick example 2: Syncing a list of records
 
   Suppose you have a LiveView that displays a list of users. You can use `sync_all/4` to
   automatically update the list whenever a user is created, updated, or deleted.
@@ -64,6 +68,30 @@ defmodule EctoFoundationDB.Sync do
         socket
         |> put_private(:tenant, open_tenant(socket))
         |> Sync.sync_all(Repo, User)}
+    end
+  end
+  ```
+
+  ### Quick example 3: Syncing a group of records indivudually
+
+  Suppose your page displays serveral records simulataneously, but you wish to subscribe to change individually.
+  You can use `sync_many/6`. This integrates nicely with LiveComponents.
+
+  ```elixir
+  defmodule MyApp.UserLive do
+    use Phoenix.LiveView
+
+    alias EctoFoundationDB.Sync
+
+    alias MyApp.Repo
+    alias MyApp.User
+
+    def mount(_params, _session, socket) do
+      user_ids = ["1", "2", "3"]
+      {:ok,
+        socket
+        |> put_private(:tenant, open_tenant(socket))
+        |> Sync.sync_many(Repo, User, :users, user_ids)}
     end
   end
   ```
@@ -101,10 +129,20 @@ defmodule EctoFoundationDB.Sync do
 
   defstruct futures: %{}
 
+  @doc """
+  Sets up syncing for a single record in the database.
+
+  See `sync/4` for more.
+  """
   def sync_one(state, repo, label, schema, id, opts \\ []) do
     sync(state, repo, [%One{label: label, schema: schema, id: id}], opts)
   end
 
+  @doc """
+  Sets up syncing for a list of records in the database, with indivudual watches.
+
+  See `sync/4` for more.
+  """
   def sync_many(state, repo, label, schema, ids, opts \\ [])
 
   def sync_many(state, repo, label, _schema, cancel, opts) when cancel in [nil, []] do
@@ -115,11 +153,28 @@ defmodule EctoFoundationDB.Sync do
     sync(state, repo, [%Many{label: label, schema: schema, ids: ids}], opts)
   end
 
+  @doc """
+  Sets up syncing for a list of records in the database.
+
+  A watch is created for changes to the list with SchemaMetadata.
+
+  See `sync/4` for more.
+
+  ## Options
+
+  - `watch_action`: An atom representing the signal from the `SchemaMetadata` you're interested in syncing. Defaults to `:changes`
+  """
   def sync_all(state, repo, label, queryable, opts \\ []) do
     sync_all_by(state, repo, label, queryable, [], opts)
   end
 
   @doc """
+  Sets up syncing for a list of records in the database, constrained by an indexed field.
+
+  A watch is created for changes to the list with SchemaMetadata.
+
+  See `sync/4` for more.
+
   ## Options
 
   - `watch_action`: An atom representing the signal from the `SchemaMetadata` you're interested in syncing. Defaults to `:changes`
@@ -332,7 +387,30 @@ defmodule EctoFoundationDB.Sync do
     Map.has_key?(std, label) or Map.has_key?(idlist, label)
   end
 
+  @doc """
+  Attaches a callback to the `:handle_assigns` event.
+
+  The callback will be called when the `Sync` module changes your assigns.
+
+  ## Arguments
+
+  - `state`: A map with key `:assigns` and `:private`. `private` must be a map with key `:tenant`
+  - `repo`: An Ecto repository
+  - `name`: The name of the callback. Defaults to `:default`.
+  - `event`: The event to attach the callback to. Only `:handle_assigns` is supported.
+  - `cb`: The callback function. Arity must be 2, with the first argument being the `state` and
+    the second being a map with the old assigns.
+  - `opts`: Options
+
+  ## Options
+
+  - `:replace`: A boolean indicating whether to replace an existing callback with the same name and event. Defaults to `false`.
+  """
   defdelegate attach_callback(state, repo, name \\ :default, event, cb, opts \\ []), to: Lifecycle
+
+  @doc """
+  Detaches a callback from the `:handle_assigns` event.
+  """
   defdelegate detach_callback(state, repo, name \\ :default, event, opts \\ []), to: Lifecycle
 
   @doc """
@@ -430,8 +508,8 @@ defmodule EctoFoundationDB.Sync do
   process handle_info `:ready` messages from EctoFDB.
 
   This hook is designed to be used with LiveView's `attach_hook`. If you're using
-  one of the `sync_*` function in this module, the hook is attached automatically. You
-  do not need to call this function.
+  one of the `sync_*` function in this module along with LiveView, the hook is
+  attached automatically. You do not need to call this function.
 
   ## Arguments
 

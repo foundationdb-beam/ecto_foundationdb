@@ -1,10 +1,10 @@
-# Sync Engine Part III - Removing boilerplate
+# Sync Engine Part III - Batteries Included
 
 ```elixir
 Mix.install([
   {:phoenix_playground, "~> 0.1"},
   {:phoenix_ecto, "~> 4.7"},
-  {:ecto_foundationdb, github: "jessestimpson/ecto_foundationdb", branch: "sync"}
+  {:ecto_foundationdb, github: "foundatiodb-beam/ecto_foundationdb"}
 ])
 ```
 
@@ -105,7 +105,7 @@ tenant = Tenant.open_empty!(Repo, "sync-sample")
 Next, we create a product and some reviews by inserting into the database.
 
 ```elixir
-{cereal, cereal_reviews} = 
+{cereal, cereal_reviews} =
   Repo.transactional(tenant, fn ->
   cereal = Repo.insert!(
           %Product{id: "p1", name: "Glo-Grain Cereal", description: "A breakfast cereal made from bioluminescent oats that naturally glows a soft neon blue when submerged in milk."}
@@ -121,7 +121,7 @@ end)
 Let's insert one more product into the database.
 
 ```elixir
-{headphones, headphones_reviews} = 
+{headphones, headphones_reviews} =
   Repo.transactional(tenant, fn ->
   headphones = Repo.insert!(
           %Product{id: "p2", name: "Echo-Free Headphones", description: "High-end audio gear that uses \"Inverse Silence\" technology to make the wearer completely invisible to bats and sonar-based equipment."}
@@ -147,7 +147,7 @@ defmodule Style do
     <style type="text/css">
       /* Global Resets & Layout */
       body { font-family: sans-serif; line-height: 1.5; color: #333; }
-    
+
       /* Navigation Bar */
       .catalog ul {
         display: flex;
@@ -160,7 +160,7 @@ defmodule Style do
       }
       .catalog a { text-decoration: none; color: #007bff; font-weight: bold; }
       .catalog a:hover { text-decoration: underline; }
-    
+
       /* Product Card */
       .card {
         max-width: 500px;
@@ -170,10 +170,10 @@ defmodule Style do
         border-radius: 8px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
       }
-    
+
       .card h1 { text-align: center; margin-top: 0; }
       .card p { text-align: center; color: #666; }
-    
+
       /* Reviews Section */
       .card ul { padding: 0; list-style: none; }
       .card figure {
@@ -184,7 +184,7 @@ defmodule Style do
       }
       blockquote { margin: 0; font-style: italic; }
       figcaption { text-align: right; font-weight: bold; font-size: 0.9rem; }
-      
+
         /* Form Layout */
       .card form {
         display: flex;
@@ -192,7 +192,7 @@ defmodule Style do
         gap: 15px; /* Adds space between inputs and button */
         margin-top: 1rem;
       }
-      
+
       /* Input Styling */
       .card input[type="text"] {
         width: 100%;
@@ -202,13 +202,13 @@ defmodule Style do
         font-size: 1rem;
         box-sizing: border-box; /* Ensures padding doesn't break width */
       }
-      
+
       .card input[type="text"]:focus {
         outline: none;
         border-color: #007bff;
         box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
       }
-      
+
       /* Button Styling */
       .card button {
         padding: 10px 20px;
@@ -220,11 +220,11 @@ defmodule Style do
         cursor: pointer;
         transition: background 0.2s;
       }
-    
+
       .card button:hover {
         background-color: #0056b3;
       }
-    
+
       /* Label Styling */
       .card label {
         display: block;
@@ -235,12 +235,12 @@ defmodule Style do
         text-transform: uppercase;
         letter-spacing: 0.5px;
       }
-      
+
       /* Add a bit of extra space between form groups */
       .card input + label {
         margin-top: 10px;
       }
-    
+
       .page-title {
         text-align: center;
         margin: 2rem 0;
@@ -290,7 +290,7 @@ defmodule DemoLive do
     #
     # The reviews indexed by `product_id: id` are stored
     # into the `:reviews` assign.
-    {:noreply, 
+    {:noreply,
       socket
       |> Sync.sync_one(Repo, :product, Product, id)
       |> Sync.sync_all_by(Repo, :reviews, @query_reviews, product_id: id)}
@@ -385,7 +385,7 @@ defmodule ProductAdminCard do
       |> assign(assigns)
       |> assign(form: to_form(Product.changeset(assigns.product)))}
   end
-  
+
   def handle_event("save", %{"product" => params}, socket) do
     changeset = Product.changeset(socket.assigns.product, params)
     Repo.update!(changeset)
@@ -440,7 +440,7 @@ defmodule DemoAdminLive do
       |> Sync.sync_all(Repo, :catalog_ids, @query_catalog, watch_action: :collection)}
   end
 
-  defp handle_assigns(socket, %{catalog_ids: _}) do 
+  defp handle_assigns(socket, %{catalog_ids: _}) do
     {:halt, Sync.sync_many(socket, Repo, :products, Product, socket.assigns.catalog_ids)}
   end
   defp handle_assigns(socket, %{products: _}), do: {:cont, socket}
