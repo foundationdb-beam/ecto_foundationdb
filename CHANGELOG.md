@@ -1,12 +1,20 @@
 # Changelog
 
-## v0.5.2 (TBD)
+## v0.6.0 (2025-12-27)
 
 ### Enhancements
 
 * SchemaMetadata now supports indexed fields
 * `EctoFoundationDB.Sync`: Defines conventions for keeping a stateful process (e.g. LiveView) automatically up-to-date
   with the latest data from the database.
+
+### Dependencies
+
+* `ecto ~> 3.13`
+
+### New documentation
+
+* [Sync Engine Part III - Batteries Included](sync_module.livemd): New Livebook that demonstrates how to use the `EctoFoundationDB.Sync` module in LiveView.
 
 ## v0.5.1 (2025-12-19)
 

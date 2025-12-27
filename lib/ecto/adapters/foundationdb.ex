@@ -26,7 +26,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ```elixir
   defp deps do
     [
-      {:ecto_foundationdb, "~> 0.5"}
+      {:ecto_foundationdb, "~> 0.6"}
     ]
   end
   ```
