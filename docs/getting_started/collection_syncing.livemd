@@ -149,7 +149,7 @@ defmodule DemoLive do
 
     %{assigns: assigns} = socket
 
-    {new_assigns, futures} = Repo.assign_ready(
+    {new_assigns, new_futures, other_futures} = Repo.assign_ready(
         assigns.futures,
         [ref],
         watch?: true,
@@ -157,7 +157,7 @@ defmodule DemoLive do
       )
     {:halt, socket
             |> assign(new_assigns)
-            |> assign(futures: futures)}
+            |> assign(futures: new_futures ++ other_futures)}
   end
 
   def render(assigns) do

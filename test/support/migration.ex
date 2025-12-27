@@ -17,7 +17,34 @@ defmodule EctoFoundationDB.Integration.Migration.UserSchemaMetadata do
 
   @impl true
   def change() do
-    [create(metadata(User))]
+    [
+      create(metadata(User)),
+      create(metadata(User, [:name]))
+    ]
+  end
+end
+
+defmodule EctoFoundationDB.Integration.Migration.PostIndex do
+  @moduledoc false
+  alias EctoFoundationDB.Schemas.Post
+  use EctoFoundationDB.Migration
+
+  @impl true
+  def change() do
+    [create(index(Post, [:user_id]))]
+  end
+end
+
+defmodule EctoFoundationDB.Integration.Migration.PostSchemaMetadata do
+  @moduledoc false
+  alias EctoFoundationDB.Schemas.Post
+  use EctoFoundationDB.Migration
+
+  @impl true
+  def change() do
+    [
+      create(metadata(Post, [:user_id]))
+    ]
   end
 end
 

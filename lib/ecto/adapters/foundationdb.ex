@@ -636,11 +636,11 @@ defmodule Ecto.Adapters.FoundationDB do
     # ...
 
     def handle_info({ref, :ready}, state=%{assigns: assigns, futures: futures, tenant: tenant}) when is_reference(ref) do
-      {new_assigns, new_futures} = MyRepo.assign_ready(futures, [ref], watch?: true, prefix: tenant)
+      {new_assigns, new_futures, other_futures} = MyRepo.assign_ready(futures, [ref], watch?: true, prefix: tenant)
       {:noreply, %{
             state |
               assigns: Map.merge(assigns, Enum.into(new_assigns, %{})),
-              futures: new_futures
+              futures: other_futures ++ new_futures
             }}
     end
   end
@@ -697,6 +697,15 @@ defmodule Ecto.Adapters.FoundationDB do
         # ...
       ]
     end
+  ```
+
+  You may also track metadata by indexed fields. The following metadata creation will track the counters listed above for each value of `name`.
+  In other words, there will be a set of counters specific to all operations on `User` where `name: "Alice"`, and so on.
+
+  ```elixir
+  def change() do
+    [create metadata(User, [:name])]
+  end
   ```
 
   For more on these watches, see [Sync Engine Part II - Collections](collection_syncing.html)
@@ -1025,7 +1034,7 @@ defmodule Ecto.Adapters.FoundationDB do
       end
 
       def async_all_range(queryable, id_s, id_e, opts \\ []) do
-        async_query(fn ->
+        async_query(queryable, fn ->
           repo = get_dynamic_repo()
 
           EctoAdapterQueryable.execute_all_range(
@@ -1051,31 +1060,48 @@ defmodule Ecto.Adapters.FoundationDB do
       end
 
       def async_get(queryable, id, opts \\ []),
-        do: async_query(fn -> get(queryable, id, opts ++ [returning: {:future, :one}]) end)
+        do:
+          async_query(queryable, fn ->
+            get(queryable, id, opts ++ [returning: {:future, :one}])
+          end)
 
       def async_get!(queryable, id, opts \\ []),
-        do: async_query(fn -> get!(queryable, id, opts ++ [returning: {:future, :one}]) end)
+        do:
+          async_query(queryable, fn ->
+            get!(queryable, id, opts ++ [returning: {:future, :one}])
+          end)
 
       def async_get_by(queryable, clauses, opts \\ []),
         do:
-          async_query(fn -> get_by(queryable, clauses, opts ++ [returning: {:future, :one}]) end)
+          async_query(queryable, fn ->
+            get_by(queryable, clauses, opts ++ [returning: {:future, :one}])
+          end)
 
       def async_get_by!(queryable, clauses, opts \\ []),
         do:
-          async_query(fn -> get_by!(queryable, clauses, opts ++ [returning: {:future, :one}]) end)
+          async_query(queryable, fn ->
+            get_by!(queryable, clauses, opts ++ [returning: {:future, :one}])
+          end)
 
       def async_one(queryable, opts \\ []),
-        do: async_query(fn -> one(queryable, opts ++ [returning: {:future, :one}]) end)
+        do: async_query(queryable, fn -> one(queryable, opts ++ [returning: {:future, :one}]) end)
 
       def async_one!(queryable, opts \\ []),
-        do: async_query(fn -> one!(queryable, opts ++ [returning: {:future, :one}]) end)
+        do:
+          async_query(queryable, fn -> one!(queryable, opts ++ [returning: {:future, :one}]) end)
 
       def async_all(queryable, opts \\ []),
-        do: async_query(fn -> all(queryable, opts ++ [returning: {:future, :all}]) end)
+        do: async_query(queryable, fn -> all(queryable, opts ++ [returning: {:future, :all}]) end)
 
-      defp async_query(fun) do
+      def async_all_by(queryable, by, opts \\ []),
+        do:
+          async_query(queryable, fn ->
+            all_by(queryable, by, opts ++ [returning: {:future, :all}])
+          end)
+
+      defp async_query(queryable, fun) do
         repo = get_dynamic_repo()
-        EctoAdapterAsync.async_query(__MODULE__, repo, fun)
+        EctoAdapterAsync.async_query(__MODULE__, repo, queryable, fun)
       end
 
       def await(futures) when is_list(futures) do

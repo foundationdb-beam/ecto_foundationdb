@@ -91,7 +91,7 @@ defmodule EctoFoundationDB.Layer.Query do
          plan = %QueryPlan{constraints: constraints, layer_data: layer_data},
          options
        ) do
-    case Metadata.select_index(metadata, constraints) do
+    case Metadata.select_index(with_queryable_indexes(metadata), constraints) do
       nil ->
         raise Unsupported,
               """
@@ -337,4 +337,15 @@ defmodule EctoFoundationDB.Layer.Query do
   end
 
   defp idx_backward?(_, _), do: false
+
+  defp with_queryable_indexes(md = %Metadata{indexes: indexes}) do
+    # @todo: custom indexes may wish to be unqueryable as well. Right now we don't expose
+    # a way to exclude them.
+    indexes =
+      Enum.filter(indexes, fn index ->
+        index[:indexer] != EctoFoundationDB.Indexer.SchemaMetadata
+      end)
+
+    %{md | indexes: indexes}
+  end
 end

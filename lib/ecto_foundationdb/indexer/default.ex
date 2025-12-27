@@ -294,12 +294,7 @@ defmodule EctoFoundationDB.Indexer.Default do
 
     index_fields = index_fields -- [pk_field]
 
-    types = Schema.field_types(schema, index_fields)
-
-    index_values =
-      for idx_field <- index_fields do
-        indexkey_encoder(Keyword.get(data_object, idx_field), types[idx_field])
-      end
+    index_values = get_index_values(schema, index_fields, data_object)
 
     vs? = PrimaryKVCodec.vs?(kv_codec)
     mapped? = Keyword.get(index_options, :mapped?, true)
@@ -391,5 +386,13 @@ defmodule EctoFoundationDB.Indexer.Default do
     end
 
     Tenant.extend_tuple(tenant, offset_fun)
+  end
+
+  def get_index_values(schema, index_fields, data_object) do
+    types = Schema.field_types(schema, index_fields)
+
+    for idx_field <- index_fields do
+      indexkey_encoder(Keyword.get(data_object, idx_field), types[idx_field])
+    end
   end
 end
