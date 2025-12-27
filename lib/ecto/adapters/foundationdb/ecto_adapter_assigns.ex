@@ -46,14 +46,16 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
 
   defp append_new_future(futures, label, future) when is_map(futures) do
     case Map.fetch(futures, label) do
+      {:ok, fl} when is_list(fl) ->
+        Map.put(futures, label, [future | fl])
+
       {:ok, f} ->
         Future.cancel(f)
+        Map.put(futures, label, future)
 
       _ ->
-        :ok
+        Map.put(futures, label, future)
     end
-
-    Map.put(futures, label, future)
   end
 
   def async_assign_ready(_module, repo, futures, ready_ref, options)

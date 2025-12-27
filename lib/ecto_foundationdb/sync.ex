@@ -70,8 +70,8 @@ defmodule EctoFoundationDB.Sync do
 
   ## Labels
 
-  The `label` argument is used to identify the data being synced. Typically, the `label` is
-  simply used as the key in the `assigns` map. It can be any term. Usually, you'll use an
+  The `label` argument is used to identify the data being synced. The `label` is
+  used as the key in the `assigns` map. It can be any term. Usually, you'll use an
   atom for compatibility with Phoenix.
 
   For example, you can provide the label `:user` and your assigns map will look like this:
@@ -84,141 +84,54 @@ defmodule EctoFoundationDB.Sync do
     email: "alice@example.com"
   }}
   ```
-
-  **Special case:** when `label` is a list, with the first element being an atom, the `label`
-  is interpretted by `Sync` as a *path of keys* into nested maps. For example, suppose
-  you provide the label `[:users, "alice"]`. The assigns map will be updated as follows:
-
-  ```elixir
-  iex> assigns
-  %{
-    users: %{
-      "alice" => %User{
-        id: 1,
-        name: "Alice",
-        email: "alice@example.com"
-      }
-    }
-  }
-  ```
-
-  In such a case, empty maps will be created as necessary.
-
   """
 
   alias Ecto.Adapters.FoundationDB
 
+  alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer.SchemaMetadata
+  alias EctoFoundationDB.Sync.All
+  alias EctoFoundationDB.Sync.IdList
   alias EctoFoundationDB.Sync.Lifecycle
+  alias EctoFoundationDB.Sync.Many
+  alias EctoFoundationDB.Sync.One
   alias EctoFoundationDB.Sync.State
 
   @container_hook_name :ecto_fdb_sync_hook
 
   defstruct futures: %{}
 
-  @doc """
-  Equivalent to `sync_many/5` with a single record.
-  """
   def sync_one(state, repo, label, schema, id, opts \\ []) do
-    sync_many(state, repo, [{label, schema, id}], opts)
+    sync(state, repo, [%One{label: label, schema: schema, id: id}], opts)
   end
 
-  @doc """
-  Initializes a Sync of one or more individual records.
+  def sync_many(state, repo, label, schema, ids, opts \\ [])
 
-  This is to be paired with `handle_ready/3` to provide automatic updating of `assigns` in `state`. If you're using
-  the default LiveView attach_hook as described in the Options, then `handle_ready/3` will be set up for you
-  automatically.
-
-  ## Arguments
-
-  - `state`: A map with key `:assigns` and `:private`. `private` must be a map with key `:tenant`
-  - `repo`: An Ecto repository
-  - `id_assigns`: A list of tuples with label, schema, and id
-  - `opts`: Options
-
-  ## Options
-
-  - `assign`: A function that takes the current socket and new assigns and returns the updated state.
-    When not provided: if `Phoenix.Component` is available, we use `Phoenix.Component.assign/3`, otherwise we use `Map.put/3`.
-  - `attach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to attach a hook.
-    When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.attach_hook/4`, otherwise we do nothing.
-  - `replace`: A boolean indicating whether to replace existing watches with new ones for the given labels. Defaults to `true`.
-
-  ## Return
-
-  Returns an updated `state`, with `:assigns` and `:private` updated with the following values:
-
-  ### `assigns`
-
-  - Provided labels from `id_assigns` are used to register the results from `repo.get/3`. For
-    any records not found, `nil` is assigned, and no watch is created.
-
-  ### `private`
-
-  - We add or append to the `:ecto_fdb_sync_data`.
-
-  """
-  def sync_many(state, repo, id_assigns, opts \\ []) do
-    id_assigns =
-      if Keyword.get(opts, :replace, true) do
-        id_assigns
-      else
-        Enum.filter(id_assigns, &(!watching?(state, repo, elem(&1, 0))))
-      end
-
-    sync_many_(state, repo, id_assigns, opts)
+  def sync_many(state, repo, label, _schema, cancel, opts) when cancel in [nil, []] do
+    cancel(state, repo, label, opts)
   end
 
-  defp sync_many_(state, _repo, [], _opts) do
-    state
+  def sync_many(state, repo, label, schema, ids, opts) do
+    sync(state, repo, [%Many{label: label, schema: schema, ids: ids}], opts)
   end
 
-  defp sync_many_(state, repo, id_assigns, opts) do
-    %{private: private} = state
-    %{tenant: tenant} = private
-
-    {new_assigns, new_futures} =
-      repo.transactional(
-        tenant,
-        fn ->
-          get_futures =
-            for {_label, schema, id} <- id_assigns, do: repo.async_get(schema, id)
-
-          labels = for {label, _schema, _id} <- id_assigns, do: label
-
-          values = usetenant(repo.await(get_futures), tenant)
-
-          labeled_values = Enum.zip(labels, values)
-
-          watch_futures =
-            for {label, value} <- labeled_values,
-                not is_nil(value),
-                do: {label, repo.watch(value)}
-
-          {labeled_values, watch_futures}
-        end
-      )
-
-    state
-    |> State.merge_futures(repo, Enum.into(new_futures, %{}))
-    |> apply_attach_container_hook(repo, opts)
-    |> apply_assign(repo, new_assigns, opts)
-  end
-
-  @doc """
-  Equivalent to `sync_groups/4` with a single schema.
-  """
   def sync_all(state, repo, label, queryable, opts \\ []) do
-    sync_groups(state, repo, [{label, queryable, []}], opts)
-  end
-
-  def sync_all_by(state, repo, label, queryable, by, opts \\ []) do
-    sync_groups(state, repo, [{label, queryable, by}], opts)
+    sync_all_by(state, repo, label, queryable, [], opts)
   end
 
   @doc """
-  Initializes a Sync of one or more schemas from a tenant using `EctoFoundationDB.Indexer.SchemaMetadata` for collection tracking.
+  ## Options
+
+  - `watch_action`: An atom representing the signal from the `SchemaMetadata` you're interested in syncing. Defaults to `:changes`
+  """
+  def sync_all_by(state, repo, label, queryable, by, opts \\ []) do
+    watch_action = Keyword.get(opts, :watch_action, :changes)
+    entry = %All{label: label, queryable: queryable, by: by, watch_action: watch_action}
+    sync(state, repo, [entry], opts)
+  end
+
+  @doc """
+  Initializes a Sync of one or more queryables.
 
   This is to be paired with `handle_ready/3` to provide automatic updating of `assigns` in `state`. If you're using
   the default LiveView attach_hook as described in the Options, then `handle_ready/3` will be set up for you
@@ -228,25 +141,8 @@ defmodule EctoFoundationDB.Sync do
 
   - `state`: A map with key `:assigns` and `:private`. `private` must be a map with key `:tenant`
   - `repo`: An Ecto repository
-  - `queryable_assigns`: A list of tuples with `{label, queryable, by}`
+  - `queryable_assigns`: A list of `All`, `One`, or `Many` structs
   - `opts`: Options
-
-  ## Defining a custom query
-
-  By default, `Repo.all(Schema, prefix: tenant)` or `Repo.all_by(Schema, by, prefix: tenant)` is used to query the database. You can override this by providing your own
-  `Ecto.Query` in the `{label, query, by}` tuple. This changes the query used to retrieve data, but does not change the
-  watch itself.
-
-  ### Example
-
-  ```elixir
-  query = from u in User, order_by: [desc: u.inserted_at]
-
-  {:ok,
-   socket
-   |> put_private(:tenant, open_tenant(socket))
-   |> Sync.sync_all(:sorted_users, Repo, [{User, :users, [], query}]))}
-  ```
 
   ## Options
 
@@ -254,16 +150,6 @@ defmodule EctoFoundationDB.Sync do
     When not provided: if `Phoenix.Component` is available, we use `Phoenix.Component.assign/3`, otherwise we use `Map.put/3`.
   - `attach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to attach a hook.
     When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.attach_hook/4`, otherwise we do nothing.
-  - `watch_action`: An atom representing the signal from the `SchemaMetadata` you're interested in syncing. Defaults to `:changes`
-  - `replace`: A boolean indicating whether to replace existing watches with new ones for the given labels. Defaults to `true`.
-
-  ### `watch_action`
-
-  - `inserts`: Receive signal for each insert or upsert
-  - `deletes`: Receive signal for each delete
-  - `collection`: Receive signal for each insert, upsert, or delete
-  - `updates`: Receive signal for each update (via `Repo.update/*`)
-  - `changes`: Receive signal for each insert, upsert, delete, or update
 
   ## Return
 
@@ -271,74 +157,179 @@ defmodule EctoFoundationDB.Sync do
 
   ### `assigns`
 
-  - Provided labels from `queryable_assigns` are used to register the results from `repo.all/3`
+  - Provided labels from `queryable_assigns` are used to register the results from the database.
 
   ### `private`
 
-  - We add or append to the `:ecto_fdb_sync_data`.
+  - We add or append to the `:ecto_fdb_sync_data` as needed for internal purposes.
 
   """
-  def sync_groups(state, repo, queryable_assigns, opts \\ []) do
-    queryable_assigns =
-      if Keyword.get(opts, :replace, true) do
-        queryable_assigns
-      else
-        Enum.filter(queryable_assigns, &(!watching?(state, repo, elem(&1, 0))))
-      end
-
-    sync_groups_(state, repo, queryable_assigns, opts)
-  end
-
-  defp sync_groups_(state, _repo, [], _opts) do
-    state
-  end
-
-  defp sync_groups_(state, repo, queryable_assigns, opts) do
+  def sync(state, repo, queryable_assigns, opts \\ []) do
     %{private: private} = state
     %{tenant: tenant} = private
 
-    watch_action = Keyword.get(opts, :watch_action, :changes)
-
-    {new_assigns, new_futures} =
+    {std_assigns, std_watches, idlist_assigns, idlist_watches, cancellations} =
       repo.transactional(
         tenant,
         fn ->
-          get_futures =
-            Enum.map(
-              queryable_assigns,
-              fn
-                {_label, queryable, []} ->
-                  repo.async_all(queryable)
+          {std_labeled_futures, idlist_futures, cancellations} =
+            do_reads(state, repo, queryable_assigns, {[], [], []})
 
-                {_label, queryable, by} ->
-                  repo.async_all_by(queryable, by)
-              end
-            )
+          {std_q, std_futures} = Enum.unzip(std_labeled_futures)
+          std_results = repo.await(std_futures)
+          std_results = Enum.zip(std_q, std_results)
 
-          lists = repo.await(get_futures)
+          # get_range only exists in 'std' path, so there's no performance benefit in a single overall await
+          idlist_results =
+            Enum.map(idlist_futures, fn {q, fl} ->
+              {q,
+               Enum.map(fl, fn
+                 future = %Future{} -> repo.await(future)
+                 x -> x
+               end)}
+            end)
 
-          Enum.zip(queryable_assigns, lists)
-          |> Enum.map(fn
-            {{label, queryable, by}, list} ->
-              list = usetenant(list, tenant)
-              watch_future = SchemaMetadata.watch_by(queryable, by, watch_action)
-              {{label, list}, {label, watch_future}}
-          end)
+          {std_assigns, std_watches} = do_watches(repo, std_results, tenant, {[], %{}})
+          {idlist_assigns, idlist_watches} = do_watches(repo, idlist_results, tenant, {[], %{}})
+
+          {std_assigns, std_watches, idlist_assigns, idlist_watches, cancellations}
         end
       )
-      |> Enum.unzip()
 
-    new_futures = Enum.into(new_futures, %{})
+    # Safe to skip empty assigns since we're about to assign to a new list
+    {_, state} = State.cancel_futures(state, repo, :idlist, cancellations)
 
     state
-    |> State.merge_futures(repo, new_futures)
+    |> State.update_futures(repo, :std, std_watches)
+    |> State.update_futures(repo, :idlist, idlist_watches)
     |> apply_attach_container_hook(repo, opts)
-    |> apply_assign(repo, new_assigns, opts)
+    |> apply_assign(repo, std_assigns, idlist_assigns, [{:idlist, :replace} | opts])
+  end
+
+  defp do_reads(_state, _repo, [], {std_assigns, idlist_assigns, cancellations}) do
+    {Enum.reverse(std_assigns), Enum.reverse(idlist_assigns),
+     List.flatten(Enum.reverse(cancellations))}
+  end
+
+  defp do_reads(
+         state,
+         repo,
+         [q = %Many{label: label, schema: schema, ids: ids} | queryable_assigns],
+         {std_assigns, idlist_assigns, cancellations}
+       ) do
+    assigns = Map.get(state, :assigns, %{})
+    existing = Map.get(assigns, label, [])
+    {futures, to_cancel} = Many.do_reads(repo, schema, existing, ids)
+    entry = {q, futures}
+    to_cancel = for id <- to_cancel, do: {label, id}
+    acc = {std_assigns, [entry | idlist_assigns], [to_cancel | cancellations]}
+    do_reads(state, repo, queryable_assigns, acc)
+  end
+
+  defp do_reads(
+         state,
+         repo,
+         [q = %One{schema: schema, id: id} | queryable_assigns],
+         {std_assigns, idlist_assigns, cancellations}
+       ) do
+    entry = {q, repo.async_get(schema, id)}
+    acc = {[entry | std_assigns], idlist_assigns, cancellations}
+    do_reads(state, repo, queryable_assigns, acc)
+  end
+
+  defp do_reads(
+         state,
+         repo,
+         [q = %All{queryable: queryable, by: []} | queryable_assigns],
+         {std_assigns, idlist_assigns, cancellations}
+       ) do
+    entry = {q, repo.async_all(queryable)}
+    acc = {[entry | std_assigns], idlist_assigns, cancellations}
+    do_reads(state, repo, queryable_assigns, acc)
+  end
+
+  defp do_reads(
+         state,
+         repo,
+         [q = %All{queryable: queryable, by: by} | queryable_assigns],
+         {std_assigns, idlist_assigns, cancellations}
+       ) do
+    entry = {q, repo.async_all_by(queryable, by)}
+    acc = {[entry | std_assigns], idlist_assigns, cancellations}
+    do_reads(state, repo, queryable_assigns, acc)
+  end
+
+  defp do_watches(_repo, [], _tenant, {acc_assigns, acc_watches}),
+    do: {Enum.reverse(acc_assigns), acc_watches}
+
+  defp do_watches(
+         repo,
+         [{%Many{label: label}, values} | results],
+         tenant,
+         {acc_assigns, acc_watches}
+       ) do
+    values = usetenant(values, tenant)
+    values = Enum.filter(values, &(&1 != nil))
+
+    watch_futures =
+      Stream.map(values, fn
+        val when is_struct(val) ->
+          {true, {{label, val.id}, repo.watch(val)}}
+
+        _ ->
+          false
+      end)
+      |> Stream.filter(fn
+        {true, _} -> true
+        _ -> false
+      end)
+      |> Stream.map(fn {true, x} -> x end)
+      |> Enum.into(%{})
+
+    values = IdList.Markup.new(values)
+    acc = {[{label, values} | acc_assigns], Map.merge(acc_watches, watch_futures)}
+    do_watches(repo, results, tenant, acc)
+  end
+
+  defp do_watches(
+         repo,
+         [{%One{label: label}, value} | results],
+         tenant,
+         {acc_assigns, acc_watches}
+       ) do
+    value = usetenant(value, tenant)
+
+    acc =
+      if is_nil(value) do
+        {[{label, value} | acc_assigns], acc_watches}
+      else
+        watch_future = repo.watch(value)
+        {[{label, value} | acc_assigns], Map.put(acc_watches, label, watch_future)}
+      end
+
+    do_watches(repo, results, tenant, acc)
+  end
+
+  defp do_watches(
+         repo,
+         [
+           {%All{label: label, queryable: queryable, by: by, watch_action: watch_action}, values}
+           | results
+         ],
+         tenant,
+         {acc_assigns, acc_watches}
+       ) do
+    values = usetenant(values, tenant)
+    watch_future = SchemaMetadata.watch_by(queryable, by, watch_action)
+    acc = {[{label, values} | acc_assigns], Map.put(acc_watches, label, watch_future)}
+    do_watches(repo, results, tenant, acc)
   end
 
   def watching?(state, repo, label) do
     futures = State.get_futures(state, repo)
-    Map.has_key?(futures, label)
+    std = Map.get(futures, :std, %{})
+    idlist = Map.get(futures, :idlist, %{})
+    Map.has_key?(std, label) or Map.has_key?(idlist, label)
   end
 
   defdelegate attach_callback(state, repo, name \\ :default, event, cb, opts \\ []), to: Lifecycle
@@ -370,12 +361,20 @@ defmodule EctoFoundationDB.Sync do
 
   """
   def cancel_all(state, repo, opts \\ []) do
-    state
-    |> State.cancel_futures(repo)
-    |> apply_detach_container_hook(repo, opts)
-  end
+    {std_labels, state} = State.cancel_futures(state, repo, :std)
+    {idlist_labels, state} = State.cancel_futures(state, repo, :idlist)
 
-  def cancel(state, repo, label, opts \\ []), do: cancel_many(state, repo, [label], opts)
+    state =
+      if Keyword.get(opts, :assign, true) do
+        nil_assigns = for l <- std_labels, do: {l, nil}
+        empty_assigns = for l <- idlist_labels, do: {l, IdList.Markup.new([])}
+        apply_assign(state, repo, nil_assigns, empty_assigns, [{:idlist, :replace} | opts])
+      else
+        state
+      end
+
+    apply_detach_container_hook(state, repo, opts)
+  end
 
   @doc """
   Cancels syncing for the provided label and, if none are left, detaches the hook.
@@ -391,7 +390,7 @@ defmodule EctoFoundationDB.Sync do
 
   ## Options
 
-  - `assign`: A boolean indicating whether or not to assign the label to `nil`. Defaults to `true`.
+  - `assign`: A boolean indicating whether or not to assign the label to `nil` or `[]`. Defaults to `true`.
   - `detach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to detach a container hook.
     When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.detach_hook/3`, otherwise we do nothing.
 
@@ -404,23 +403,22 @@ defmodule EctoFoundationDB.Sync do
   - We cancel and clear the futures in `:ecto_fdb_sync_data`.
 
   """
-  def cancel_many(state, repo, labels, opts \\ [])
-  def cancel_many(state, _repo, [], _opts), do: state
+  def cancel(state, repo, label, opts \\ []), do: cancel_(state, repo, [label], opts)
 
-  def cancel_many(state, repo, labels, opts) do
-    state = State.cancel_futures(state, repo, labels)
+  defp cancel_(state, repo, labels, opts) do
+    {std_labels, state} = State.cancel_futures(state, repo, :std, labels)
+    {idlist_labels, state} = State.cancel_futures(state, repo, :idlist, labels)
 
     state =
       if Keyword.get(opts, :assign, true) do
-        nil_assigns = for l <- labels, do: {l, nil}
-        apply_assign(state, repo, nil_assigns, opts)
+        nil_assigns = for l <- std_labels, do: {l, nil}
+        empty_assigns = for l <- idlist_labels, do: {l, IdList.Markup.new([])}
+        apply_assign(state, repo, nil_assigns, empty_assigns, [{:idlist, :replace} | opts])
       else
         state
       end
 
-    futures = State.get_futures(state, repo)
-
-    if map_size(futures) == 0 do
+    if State.futures_empty?(state, repo) do
       apply_detach_container_hook(state, repo, opts)
     else
       state
@@ -462,40 +460,21 @@ defmodule EctoFoundationDB.Sync do
   """
   def handle_ready(repo, info, state, opts \\ [])
 
-  def handle_ready(repo, {ref, :ready}, state, opts) when is_reference(ref) do
-    handle_ready(repo, [{ref, :ready}], state, opts)
-  end
+  def handle_ready(repo, msg = {ref, :ready}, state, opts) when is_reference(ref) do
+    case assign_ready_(state, repo, :std, msg) do
+      {:cont, state} ->
+        case assign_ready_(state, repo, :idlist, msg) do
+          {:cont, state} ->
+            {:cont, state}
 
-  def handle_ready(repo, msg_list, state, opts) when is_list(msg_list) do
-    {valid?, refs} =
-      Enum.reduce(msg_list, {true, []}, fn
-        {ref, :ready}, {true, acc} when is_reference(ref) ->
-          {true, [ref | acc]}
+          {:halt, idlist_assigns, state} ->
+            idlist_assigns = get_idlist_assigns_for_merge(idlist_assigns)
 
-        _, {_all?, _acc} ->
-          {false, []}
-      end)
+            {:halt, apply_assign(state, repo, [], idlist_assigns, [{:idlist, :merge} | opts])}
+        end
 
-    refs = Enum.reverse(refs)
-
-    if valid? do
-      %{private: private} = state
-      %{tenant: tenant} = private
-      futures = State.get_futures(state, repo)
-
-      case repo.assign_ready(futures, refs, watch?: true, prefix: tenant) do
-        {[], [], ^futures} ->
-          {:cont, state}
-
-        {new_assigns, new_futures, other_futures} ->
-          {:halt,
-           state
-           |> State.put_futures(repo, other_futures)
-           |> State.merge_futures(repo, new_futures)
-           |> apply_assign(repo, new_assigns, opts)}
-      end
-    else
-      {:cont, state}
+      {:halt, std_assigns, state} ->
+        {:halt, apply_assign(state, repo, std_assigns, [], [{:idlist, :merge} | opts])}
     end
   end
 
@@ -503,15 +482,56 @@ defmodule EctoFoundationDB.Sync do
     {:cont, state}
   end
 
-  defp apply_assign(state, _repo, [], _opts), do: state
+  defp assign_ready_(state, repo, key, {ready_ref, :ready}) do
+    %{private: private} = state
+    %{tenant: tenant} = private
+    futures = State.get_futures(state, repo)
+    future_map = Map.get(futures, key, %{})
 
-  defp apply_assign(state, repo, new_assigns, opts) do
-    {labels, _} = Enum.unzip(new_assigns)
-    old_assigns = get_labeled_assigns(state, labels)
+    empty_map = %{}
+
+    case repo.assign_ready(future_map, [ready_ref], watch?: true, prefix: tenant) do
+      {[], ^empty_map, ^future_map} ->
+        {:cont, state}
+
+      {new_assigns, new_f, rem_f} ->
+        {:halt, new_assigns, State.merge_futures(state, repo, key, rem_f, new_f)}
+    end
+  end
+
+  defp get_idlist_assigns_for_merge(idlist_assigns) do
+    # the assign_ready function uses the label from the futures map, so we
+    # transform {{label, id}, value} into {label, [value, ...]}
+    Enum.reduce(idlist_assigns, %{}, fn
+      {{label, id}, nil}, acc ->
+        list = Map.get(acc, label, IdList.Markup.new([]))
+        list = IdList.Markup.add_head(list, IdList.Markup.remove(id))
+        Map.put(acc, label, list)
+
+      {{label, _id}, value}, acc ->
+        list = Map.get(acc, label, IdList.Markup.new([]))
+        list = IdList.Markup.add_head(list, value)
+        Map.put(acc, label, list)
+    end)
+    |> Enum.into([])
+  end
+
+  defp apply_assign(state, _repo, [], [], _opts) do
+    state
+  end
+
+  defp apply_assign(state, repo, std_assigns, idlist_assigns, opts) do
+    {std_labels, _} = Enum.unzip(std_assigns)
+    {idlist_labels, _} = Enum.unzip(idlist_assigns)
+
+    old_assigns = get_old_assigns(state, std_labels, idlist_labels)
 
     state =
-      apply_callback(:assign, [state, new_assigns], opts, fn state, new_assigns ->
-        assign(state, new_assigns)
+      apply_callback(:assign, [state, std_assigns, idlist_assigns, opts], opts, fn state,
+                                                                                   std_assigns,
+                                                                                   idlist_assigns,
+                                                                                   opts ->
+        assign(state, std_assigns, idlist_assigns, opts)
       end)
 
     {_, state} =
@@ -568,81 +588,42 @@ defmodule EctoFoundationDB.Sync do
   if Code.ensure_loaded?(Phoenix.Component) do
     def assign_impl(), do: Phoenix.Component
 
-    defp assign(state, new_assigns) do
+    defp assign(state, std_assigns, idlist_assigns, opts) do
       state.assigns
-      |> assign_map(new_assigns)
+      |> assign_map(std_assigns, idlist_assigns, opts)
       |> then(&Phoenix.Component.assign(state, &1))
     end
   else
     def assign_impl(), do: nil
 
-    defp assign(state, new_assigns) do
+    defp assign(state, std_assigns, idlist_assigns, opts) do
       assigns = Map.get(state, :assigns, %{})
-      new_assigns_map = assign_map(assigns, new_assigns)
+      new_assigns_map = assign_map(assigns, std_assigns, idlist_assigns, opts)
       Map.put(state, :assigns, Map.merge(assigns, new_assigns_map))
     end
   end
 
-  def assign_map(assigns, new_assigns) do
-    {nested_assigns, regular_assigns} = create_nested_assigns(new_assigns)
+  def assign_map(assigns, std_assigns, idlist_assigns, opts \\ []) do
+    idlist_assigns_map =
+      Enum.reduce(idlist_assigns, %{}, fn {label, new_item_list}, acc ->
+        old_item_list = Map.get(assigns, label, [])
 
-    assigns
-    |> Map.take(Map.keys(nested_assigns))
-    |> nested_merge(nested_assigns)
-    |> Map.merge(regular_assigns)
-  end
+        item_list =
+          case Keyword.get(opts, :idlist, :merge) do
+            :merge ->
+              # removes can be ignored on merge since they come from the assign_ready, which
+              # handles the removal of futures that no longer have a data object
+              {result, _removes} = IdList.merge(old_item_list, new_item_list)
+              result
 
-  defp nested_merge(map1, map2), do: nested_merge(nil, map1, map2)
-  defp nested_merge(_key, x1, x2) when is_struct(x1) or is_struct(x2), do: x2
-  defp nested_merge(_key, map1 = %{}, map2 = %{}), do: Map.merge(map1, map2, &nested_merge/3)
-  defp nested_merge(_key, _x1, x2), do: x2
+            :replace ->
+              IdList.replace(old_item_list, new_item_list)
+          end
 
-  defp create_nested_assigns(new_assigns) do
-    Enum.reduce(new_assigns, {%{}, %{}}, fn
-      {[assign_key | rest], value}, {nested_assigns, regular_assigns} when is_atom(assign_key) ->
-        map1 = Map.get(nested_assigns, assign_key, %{})
-        map2 = create_nested_assign_map(rest, value)
-        map = nested_merge(map1, map2)
-        {Map.put(nested_assigns, assign_key, map), regular_assigns}
-
-      {label, value}, {nested_assigns, regular_assigns} ->
-        {nested_assigns, Map.put(regular_assigns, label, value)}
-    end)
-  end
-
-  defp create_nested_assign_map(keys, value) do
-    {keys, last} = Enum.split(keys, -1)
-
-    last =
-      case last do
-        [] -> []
-        [last] -> last
-      end
-
-    {cumm_k, map} =
-      Enum.reduce(keys, {[], %{}}, fn k, {cumm_k, m} ->
-        cumm_k = cumm_k ++ [Access.key(k)]
-        {cumm_k, update_in(m, cumm_k, &State.default_map/1)}
+        Map.put(acc, label, item_list)
       end)
 
-    put_in(map, cumm_k ++ [Access.key(last)], value)
-  end
-
-  defp get_labeled_assigns(state, labels) do
-    assigns = Map.get(state, :assigns, %{})
-
-    l_assigns =
-      Enum.reduce(labels, [], fn
-        label = [assign_key | _rest], acc when is_atom(assign_key) ->
-          path = for k <- label, do: Access.key(k)
-          [{label, get_in(assigns, path)} | acc]
-
-        label, acc ->
-          val = Map.get(assigns, label, nil)
-          [{label, val} | acc]
-      end)
-
-    Enum.reverse(l_assigns)
+    Map.merge(idlist_assigns_map, Enum.into(std_assigns, %{}))
   end
 
   # Optional Phoenix.LiveView attach_hook/detach_hook behavior
@@ -677,7 +658,9 @@ defmodule EctoFoundationDB.Sync do
     {@container_hook_name, repo}
   end
 
-  defp usetenant(list, tenant) do
+  defp usetenant(nil, _tenant), do: nil
+
+  defp usetenant(list, tenant) when is_list(list) do
     Enum.map(
       list,
       fn
@@ -688,5 +671,26 @@ defmodule EctoFoundationDB.Sync do
           data
       end
     )
+  end
+
+  defp usetenant(val, tenant) do
+    FoundationDB.usetenant(val, tenant)
+  end
+
+  defp get_old_assigns(state, std_labels, idlist_labels) do
+    assigns = Map.get(state, :assigns, %{})
+
+    Map.merge(
+      take_with_default(assigns, std_labels, nil),
+      take_with_default(assigns, idlist_labels, [])
+    )
+  end
+
+  defp take_with_default(map, keys, default) do
+    Enum.reduce(keys, %{}, fn key, acc ->
+      map
+      |> Map.get(key, default)
+      |> then(&Map.put(acc, key, &1))
+    end)
   end
 end

@@ -42,6 +42,10 @@ defmodule EctoIntegrationWatchTest do
     [watch_future] = futures
     watch_ref = Future.ref(watch_future)
 
+    # An irrelevant ref has no effect on the result
+    assert {[], [], ^futures} =
+             TestRepo.assign_ready(futures, [make_ref()], watch?: true, prefix: tenant)
+
     # Here we emulate our process's event loop (e.g. handle_info). When we receive a {ref, :ready}
     # message, we use TestRepo to retrieve the result according to the previously specified :label.
     # The returned map is merged into our assigns. We also create another watch so that the event loop
@@ -106,5 +110,63 @@ defmodule EctoIntegrationWatchTest do
       end
 
     assert {:ok, nil} = Map.fetch(assigns, :mykey)
+  end
+
+  test "watch with future map", context do
+    tenant = context[:tenant]
+
+    assigns = %{mykey: nil}
+
+    {assigns, futures} =
+      TestRepo.transactional(
+        tenant,
+        fn ->
+          alice = TestRepo.insert!(%User{name: "Alice"})
+          future = TestRepo.watch(alice, label: :mykey)
+          {%{assigns | mykey: alice}, %{mykey: future}}
+        end
+      )
+
+    assert %User{name: "Alice"} = assigns.mykey
+
+    {:ok, _alicia} =
+      TestRepo.transactional(
+        tenant,
+        fn ->
+          TestRepo.get_by!(User, name: "Alice")
+          |> User.changeset(%{name: "Alicia"})
+          |> TestRepo.update()
+        end
+      )
+
+    watch_future = futures[:mykey]
+    watch_ref = Future.ref(watch_future)
+
+    empty_map = %{}
+
+    assert {[], ^empty_map, ^futures} =
+             TestRepo.assign_ready(futures, [make_ref()], watch?: true, prefix: tenant)
+
+    # Here we emulate our process's event loop (e.g. handle_info). When we receive a {ref, :ready}
+    # message, we use TestRepo to retrieve the result according to the previously specified :label.
+    # The returned map is merged into our assigns. We also create another watch so that the event loop
+    # could continue in the same manner. Instead of looping, we end our test.
+    {assigns, _futures} =
+      receive do
+        {^watch_ref, :ready} when is_reference(watch_ref) ->
+          {ready_assigns, new_futures, other_futures} =
+            TestRepo.assign_ready(futures, [watch_ref], watch?: true, prefix: tenant)
+
+          assert [_] = ready_assigns
+          assert is_list(ready_assigns)
+
+          {Map.merge(assigns, Enum.into(ready_assigns, %{})),
+           Map.merge(other_futures, new_futures)}
+      after
+        100 ->
+          raise "Future result not received within 100 msec"
+      end
+
+    assert %User{name: "Alicia"} = assigns.mykey
   end
 end
