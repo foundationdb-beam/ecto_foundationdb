@@ -12,7 +12,7 @@ Mix.install([
 
 Using [FoundationDB Watches](https://hexdocs.pm/ecto_foundationdb/Ecto.Adapters.FoundationDB.html#module-watches), we can set up a lightweight Sync Engine for database reads. It will automatically propagate new data to all mounted LiveViews with push-messaging delivered from the database directly to the LiveView process, without using PubSub.
 
-This is Part III, where capture the ideas from I and II into a module that removes as much boilerplate as possible, and keeps your LiveView lean, while maintaining clear data access semantics.
+This is Part III, where we capture the ideas from I and II into a module that removes as much boilerplate as possible, and keeps your LiveView lean, while maintaining clear data access semantics.
 
 ## Setup Ecto
 
@@ -102,39 +102,43 @@ tenant = Tenant.open_empty!(Repo, "sync-sample")
 
 ```
 
-Next, we create a product and some reviews.
+Next, we create a product and some reviews by inserting into the database.
 
 ```elixir
-{widget, widget_reviews} = 
+{cereal, cereal_reviews} = 
   Repo.transactional(tenant, fn ->
-  widget = Repo.insert!(
-          %Product{id: "p1", name: "Widget", description: "You want to buy this!"}
+  cereal = Repo.insert!(
+          %Product{id: "p1", name: "Glo-Grain Cereal", description: "A breakfast cereal made from bioluminescent oats that naturally glows a soft neon blue when submerged in milk."}
         )
   r = [
-        %Review{product: widget, author: "Alice", content: "It's ok", score: 3},
-        %Review{product: widget, author: "Bob", content: "It's great!", score: 5}
+        %Review{product: cereal, author: "Sarah J.", content: "The kids love the glow, but it makes the milk look like radioactive sludge. Tastes like honey and marshmallows though!", score: 3},
+        %Review{product: cereal, author: "Marcus T.", content: "Finally, a cereal I can eat in the dark while watching movies without spilling. 10/10 for utility.", score: 5}
       ]
-  {widget, for(x <- r, do: Repo.insert!(x))}
+  {cereal, for(x <- r, do: Repo.insert!(x))}
 end)
 ```
 
+Let's insert one more product into the database.
+
 ```elixir
-{blivet, blivet_reviews} = 
+{headphones, headphones_reviews} = 
   Repo.transactional(tenant, fn ->
-  blivet = Repo.insert!(
-          %Product{id: "p2", name: "Blivet", description: "It's pretty useful"}
+  headphones = Repo.insert!(
+          %Product{id: "p2", name: "Echo-Free Headphones", description: "High-end audio gear that uses \"Inverse Silence\" technology to make the wearer completely invisible to bats and sonar-based equipment."}
         )
   r = [
-        %Review{product: blivet, author: "Charlie", content: "The blivet is supreme", score: 5},
-        %Review{product: blivet, author: "Dan", content: "This blivet is useless!", score: 1}
+        %Review{product: headphones, author: "TechGeek99", content: "The sound quality is crisp, but I haven't been chased by a bat yet, so I can't verify the main feature.", score: 5},
+        %Review{product: headphones, author: "NatureLover", content: "A bit bulky for hiking, but the noise cancellation is so good I forgot I was outside.", score: 1}
       ]
-  {blivet, for(x <- r, do: Repo.insert!(x))}
+  {headphones, for(x <- r, do: Repo.insert!(x))}
 end)
 ```
 
 ## Setup LiveView
 
-Let's define a simple CSS stylesheet for our page. The values chosen here are not important for this demo.
+With the database setup, we can move on to the LiveView page.
+
+First, we'll define a simple CSS stylesheet for our page. The values chosen here are not important for this demo.
 
 ```elixir
 defmodule Style do
@@ -260,19 +264,33 @@ defmodule DemoLive do
   alias EctoFoundationDB.Sync
   import Ecto.Query
 
+  # Define a Query for the list of products for the navigation bar
   @query_catalog from(p in Product, order_by: p.name)
+
+  # Define a Query for the list of reviews. The query will be further
+  # contrained by the product.id below.
   @query_reviews from(r in Review, order_by: {:desc, r.inserted_at})
 
   require Logger
   def mount(_params, _session, socket) do
     tenant = Tenant.open!(Repo, "sync-sample")
 
+    # Sync the list of products for the navigation bar
+    # into the `:catalog` assign.
     {:ok, socket
       |> put_private(:tenant, tenant)
       |> Sync.sync_all(Repo, :catalog, @query_catalog)}
   end
 
   def handle_params(%{"id" => id}, _uri, socket) do
+    # When a specific product is being viewed, sync that product as well
+    # as all of its reviews. `sync_all_by` accepts a query and then further
+    # contrains it by the provided index values.
+    #
+    # The product is stored into the `:product` assign.
+    #
+    # The views indexed by `product_id: id` are stored
+    # into the `:reviews` assign.
     {:noreply, 
       socket
       |> Sync.sync_one(Repo, :product, Product, id)
@@ -303,6 +321,9 @@ defmodule DemoLive do
         </li>
       </ul>
     </div>
+    <div :if={is_nil(@product)} class="card">
+    Choose a product to view.
+    </div>
 
     {Phoenix.HTML.raw(Style.style())}
     """
@@ -313,37 +334,53 @@ end
 PhoenixPlayground.start(live: DemoLive)
 ```
 
-Now we can add anything to our database, and the page will update.
+Now we can add or change anything in our database, and the page will update.
 
 ```elixir
-foo = Repo.insert!(
-  %Product{id: "p3", name: "Foo", description: "Hello world!"},
+seeds = Repo.insert!(
+  %Product{id: "p3", name: "Instant-Tree Seeds", description: "A small packet of genetically modified seeds that grows into a fully matured 6-foot oak tree within exactly 45 seconds of watering."},
   prefix: tenant
 )
 ```
 
 ```elixir
-Repo.insert(%Review{product: foo, author: "Ethan", content: "Test", score: 3}, prefix: tenant)
+Repo.insert(%Review{product: seeds, author: "GreenThumb", content: "Warning: Do not plant these indoors. I lost a ceiling fan and my dignity in less than a minute.", score: 3}, prefix: tenant)
 ```
 
-### LiveComponents
+The syncing works by attaching a hook to your LiveView. When the FDB watch is resolved, the database client sends a message to the process that initiated the watch (your LiveView), and the `:handle_info` hook updates the assigns automatically, according to the label(s) provided to the `Sync` module.
 
-Next, we're going to add another route to our phoenix app, so let's restart the `:phoenix_playground` to get a clean slate.
+<!-- livebook:{"break_markdown":true} -->
+
+### An Admin page with Dependent Syncing
+
+Next, we'll create an admin page for the products. The admin will be able to update any product's details from a single page. We'll use a different syncing approach this time: Dependent Syncing.
+
+In the example above, we used `sync_all_by` for the list of Reviews. The functions `sync_all` and `sync_all_by` have an option called `:watch_action` that defaults to `:changes`. This means that a change to any review in the list will trigger the FDB watch for the entire list. This may be a reasonable choice for our reviews, but on our admin page, a single product might be changing frequently. We don't want to update the entire list every time!
+
+To solve this, 2 sync operations can be chained together. Our steps will roughly be
+
+1. Watch the list of product ids that we wish to display: `sync_all(..., watch_action: :collection)`
+2. Watch each product individually: `sync_many()`
+
+This ends up being 2 queries on the database on `mount/3`. However, with this small upfront cost, we have split our syncing notifications into logical groups:
+
+1. The list of ids will only be changed upon inserts and deletes. This behavior comes from `watch_action: collection`.
+2. When a `Product`'s internal data changes, the LiveView will be updated for that item specifically, and all others remain unchanged.
+
+Let's get started. We're going to add another route to our phoenix app to support the Admin page, so let's restart the `:phoenix_playground` to get a clean slate.
 
 ```elixir
 Application.stop(:phoenix_playground)
 Application.start(:phoenix_playground)
 ```
 
-Our app needs an admin page, where we can modify product details. We're going to use LiveComponents for this part of the demo.
+We choose to use a LiveComponent for the Product form. We'll define that LiveComponent now. It doesn't interact with `Sync` at all.
 
 ```elixir
 defmodule ProductAdminCard do
   use Phoenix.LiveComponent
-  require Logger
 
   def update(assigns, socket) do
-    Logger.info("LC #{inspect(assigns)}")
     {:ok,
       socket
       |> assign(assigns)
@@ -366,9 +403,9 @@ defmodule ProductAdminCard do
         phx-target={@myself}
       >
         <label for={@form[:name].id}>Product Name</label>
-        <input type="text" id={@form[:name].id} name={@form[:name].name} value={@form[:name].value} />
+        <input type="text" id={"#{@product.id}-#{@form[:name].id}"} name={@form[:name].name} value={@form[:name].value} />
         <label for={@form[:description].id}>Description</label>
-        <input type="text" id={@form[:description].id} name={@form[:description].name} value={@form[:description].value}} />
+        <input type="text" id={"#{@product.id}#{@form[:description].id}"} name={@form[:description].name} value={@form[:description].value}} />
         <button>Save</button>
       </.form>
     </div>
@@ -377,14 +414,21 @@ defmodule ProductAdminCard do
 end
 ```
 
+Now we're ready to define our LiveView. You'll see that in `mount/3`, we sync our list of product ids with `sync_all`, similar to the example above.
+
+But just before that, we attach a callback to `Sync` on the `:handle_assigns` event. This callback is invoked any time the `Sync` module changes the assigns on the socket.
+
+This is how the dependent syncing works.
+
+1. Whenever the list of product ids changes (insert or delete), the `handle_assigns/2` callback is invoked.
+2. In this callback, we use `sync_many` to always ensure we are watching the full list. The assign made by `sync_many` is compatible with LiveComponents by using the `:key` attribute in the HEEx list comprehension.
+
 ```elixir
 defmodule DemoAdminLive do
     use Phoenix.LiveView
 
   alias EctoFoundationDB.Sync
   import Ecto.Query
-
-  require Logger
 
   @query_catalog from(p in Product, select: p.id)
 
@@ -394,33 +438,22 @@ defmodule DemoAdminLive do
     {:ok, socket
       |> put_private(:tenant, tenant)
       |> Sync.attach_callback(Repo, :handle_assigns, &handle_assigns/2)
-      |> Sync.sync_all(Repo, :catalog, @query_catalog, watch_action: :collection)}
+      |> Sync.sync_all(Repo, :catalog_ids, @query_catalog, watch_action: :collection)}
   end
 
-  def handle_assigns(socket, catalog: old_catalog) do
-    id_deleted = for p <- (old_catalog || []),
-      do: [:products, p]
-    
-    id_assigns = for p <- socket.assigns.catalog,
-      do: {[:products, p], Product, p}
-
-    {:halt, socket
-      |> Sync.cancel_many(Repo, id_deleted)
-      |> Sync.sync_many(Repo, id_assigns, replace: false)}
+  defp handle_assigns(socket, %{catalog_ids: _}) do 
+    {:halt, Sync.sync_many(socket, Repo, :products, Product, socket.assigns.catalog_ids)}
   end
-  def handle_assigns(socket, _) do
-    {:cont, socket}
-  end
+  defp handle_assigns(socket, %{products: _}), do: {:cont, socket}
 
   def render(assigns) do
     ~H"""
     <h1 class="page-title">Admin</h1>
-    <div :for={id <- @catalog}>
+    <div :for={p <- @products} :key={p.id}>
       <.live_component
-          :if={@products[id]}
           module={ProductAdminCard}
-          id={id}
-          product={@products[id]} />
+          id={p.id}
+          product={p} />
     </div>
 
     {Phoenix.HTML.raw(Style.style())}
@@ -450,8 +483,54 @@ end
 PhoenixPlayground.start(plug: DemoRouter)
 ```
 
+With just this minimal amount of code, the LiveView will never have stale data, and the watches are fully managed for us, including deletions.
+
+You may now view both the home page of our app and the admin page by opening 2 separate tabs side-by-side:
+
+```
+http://localhost:4000
+http://localhost:4000/admin
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+Finally, let's make some database changes to show off the real-time syncing. The code below will concurrently and repeatedly update all the products in the database with an incremented version number.
+
+While it's running, you can navigate the page normally.
+
 ```elixir
-Repo.delete!(widget, prefix: tenant)
+import Ecto.Query
+ids = Repo.all(from(p in Product, select: p.id), prefix: tenant)
+regex = ~r/v(?<v>\d*)$/
+incr_vsn = fn _ ->
+    Repo.transactional(tenant, fn ->
+    p = %{name: name} = Repo.get!(Product, Enum.random(ids))
+    name = case Regex.named_captures(regex, name) do
+      %{"v" => v} ->
+        Regex.replace(regex, name, "v#{String.to_integer(v)+1}")
+      _ ->
+        name <> " v0"
+    end
+    Repo.update!(Product.changeset(p, %{name: name}))
+  end)
+end
+
+Task.async_stream(1..4000, incr_vsn, max_concurrency: 1000, timeout: :infinity)
+|> Stream.run()
+```
+
+We can also delete and insert. The code block below will delete all products and recreate them, including delays so that you can observe the changes on the page.
+
+```elixir
+Repo.delete!(cereal, prefix: tenant)
 :timer.sleep(500)
-Repo.insert!(widget, prefix: tenant)
+Repo.delete!(headphones, prefix: tenant)
+:timer.sleep(500)
+Repo.delete!(seeds, prefix: tenant)
+:timer.sleep(500)
+Repo.insert!(cereal, prefix: tenant)
+:timer.sleep(500)
+Repo.insert!(seeds, prefix: tenant)
+:timer.sleep(500)
+Repo.insert!(headphones, prefix: tenant)
 ```
