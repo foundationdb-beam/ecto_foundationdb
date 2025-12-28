@@ -112,6 +112,14 @@ defmodule EctoFoundationDB.Sync do
     email: "alice@example.com"
   }}
   ```
+
+  ## Limitations
+
+  The `sync*` functions themselves define FDB transactions. Therefore, if your desired query
+  is more complex, or if you need to sync multiple collections with internal consistency,
+  you'll need to write your own logic to create and listen for watches. In these more
+  sophisticated cases, we encourage you to avoid the Sync module entirely, and instead
+  handle the `{reference(), :ready}` messages yourself.
   """
 
   alias Ecto.Adapters.FoundationDB
