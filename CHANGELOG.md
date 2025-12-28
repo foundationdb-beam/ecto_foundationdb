@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.1 (2025-12-28)
+
+### Dependencies
+
+* `erlfdb ~> 0.3.3`
+
 ## v0.6.0 (2025-12-27)
 
 ### Enhancements
