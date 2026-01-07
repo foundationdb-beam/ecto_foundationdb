@@ -239,7 +239,6 @@ defmodule EctoIntegrationSyncIntegrationTest6 do
   use Ecto.Integration.Case, async: true
 
   alias Ecto.Integration.TestRepo
-  alias EctoFoundationDB.Schemas.Post
   alias EctoFoundationDB.Schemas.User
 
   test "sync individual entries from a collection", context do
@@ -286,7 +285,6 @@ defmodule EctoIntegrationSyncIntegrationTest7 do
   use Ecto.Integration.Case, async: true
 
   alias Ecto.Integration.TestRepo
-  alias EctoFoundationDB.Schemas.Post
   alias EctoFoundationDB.Schemas.User
 
   test "deleting a record", context do
