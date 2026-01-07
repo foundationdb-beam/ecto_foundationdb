@@ -41,9 +41,12 @@ defmodule EctoFoundationDB.Tenant.Backend do
   """
   @spec ensure_created(Database.t(), Tenant.id(), Options.t()) :: :ok
   def ensure_created(db, id, options) do
-    case exists?(db, id, options) do
+    with false <- exists?(db, id, options),
+         :ok <- create(db, id, options) do
+      :ok
+    else
       true -> :ok
-      false -> create(db, id, options)
+      {:error, :tenant_already_exists} -> :ok
     end
   end
 
@@ -90,7 +93,7 @@ defmodule EctoFoundationDB.Tenant.Backend do
     end
   end
 
-  @spec create(Database.t(), Tenant.id(), Options.t()) :: :ok
+  @spec create(Database.t(), Tenant.id(), Options.t()) :: :ok | {:error, :tenant_already_exists}
   def create(db, id, options) do
     module = get_module(options)
     tenant_name = module.get_name(id, options)
