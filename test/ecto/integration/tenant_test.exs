@@ -8,7 +8,9 @@ defmodule EctoIntegrationTenantTest do
     id = context[:tenant_id]
     Tenant.clear_delete!(TestRepo, id)
 
-    :ok =
-      Task.async_stream(0..10, fn _ -> Tenant.open!(TestRepo, id) end) |> Stream.run()
+    assert {:ok, _} =
+             ExUnit.CaptureLog.with_log(fn ->
+               Task.async_stream(0..10, fn _ -> Tenant.open!(TestRepo, id) end) |> Stream.run()
+             end)
   end
 end

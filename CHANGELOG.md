@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.2 (2025-01-10)
+
+### Bug Fixes
+
+* Prevent race when creating same tenant from multiple processes
+
 ## v0.6.1 (2025-12-28)
 
 ### Dependencies
