@@ -165,7 +165,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   # Extract limit from an `Ecto.Query`
   defp get_limit(nil), do: nil
-  defp get_limit(%Ecto.Query.QueryExpr{expr: limit}), do: limit
+  defp get_limit(%Ecto.Query.LimitExpr{expr: limit}), do: limit
 
   defp assert_tenancy!(
          query = %Ecto.Query{
