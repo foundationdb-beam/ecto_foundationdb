@@ -23,7 +23,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     } = query
 
     {ordering, ordering_fn} = Ordering.get_ordering_fn(schema, order_bys)
-    limit = get_limit(limit)
+    limit = get_query_limit(limit)
     limit_fn = if limit == nil, do: & &1, else: &Stream.take(&1, limit)
     {:nocache, {operation, query, {limit, limit_fn}, %{}, ordering, ordering_fn}}
   end
@@ -40,10 +40,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
               select: %Ecto.Query.SelectExpr{
                 fields: select_fields
               }
-            }, {_limit, limit_fn}, %{}, ordering, ordering_fn}},
+            }, {limit, limit_fn}, %{}, ordering, ordering_fn}},
         params,
         options
       ) do
+    options = adjust_limit_options(options, limit)
+
     case options[:noop] do
       query_result when not is_nil(query_result) ->
         # This is the trick to load structs after a pipelined 'get'. See async_get_by, await, etc
@@ -164,8 +166,23 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   end
 
   # Extract limit from an `Ecto.Query`
-  defp get_limit(nil), do: nil
-  defp get_limit(%Ecto.Query.LimitExpr{expr: limit}), do: limit
+  defp get_query_limit(nil), do: nil
+  defp get_query_limit(%Ecto.Query.LimitExpr{expr: limit}), do: limit
+
+  defp adjust_limit_options(options, nil), do: options
+
+  defp adjust_limit_options(options, query_limit) do
+    {_, options} =
+      Keyword.get_and_update(options, :limit, fn
+        nil ->
+          {nil, query_limit}
+
+        option_limit ->
+          {option_limit, option_limit}
+      end)
+
+    options
+  end
 
   defp assert_tenancy!(
          query = %Ecto.Query{
