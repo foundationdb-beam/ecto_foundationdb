@@ -78,6 +78,24 @@ defmodule Ecto.Integration.OrderingTest.PkLimit do
                limit: 2
              )
   end
+
+  test "pk forward query limit", context do
+    tenant = context[:tenant]
+    [event2, event1, _event3] = put_pk_data(tenant)
+
+    assert [^event2, ^event1] =
+             TestRepo.all(from(q in QueueItem, order_by: {:asc, :id}, limit: 2), prefix: tenant)
+  end
+
+  test "pk backward query limit", context do
+    tenant = context[:tenant]
+    [_event2, event1, event3] = put_pk_data(tenant)
+
+    assert [^event3, ^event1] =
+             TestRepo.all(from(q in QueueItem, order_by: {:desc, :id}, limit: 2),
+               prefix: tenant
+             )
+  end
 end
 
 defmodule Ecto.Integration.OrderingTest.OrderByDataField do
@@ -118,6 +136,29 @@ defmodule Ecto.Integration.OrderingTest.OrderByDataField do
       TestRepo.all(from(q in QueueItem, order_by: {:desc, :data}), prefix: tenant, limit: 2)
     end
   end
+
+  test "data field forward query limit", context do
+    tenant = context[:tenant]
+    [_event2, _event1, _event3] = put_pk_data(tenant)
+
+    # limited ordering not possible, raise error instead of allowing this
+    assert_raise Unsupported,
+                 ~r/the ordering must correspond to the primary key or an indexed field/,
+                 fn ->
+                   TestRepo.all(from(q in QueueItem, order_by: {:asc, :data}, limit: 2),
+                     prefix: tenant
+                   )
+                 end
+  end
+
+  test "data field backward query limit", context do
+    tenant = context[:tenant]
+    [_event2, _event1, _event3] = put_pk_data(tenant)
+    # limited ordering not possible, raise error instead of allowing this
+    assert_raise Unsupported, ~r//, fn ->
+      TestRepo.all(from(q in QueueItem, order_by: {:desc, :data}, limit: 2), prefix: tenant)
+    end
+  end
 end
 
 ## Index ordering
@@ -150,7 +191,22 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
              )
   end
 
-  test "order by first field in index, with backward scan", context do
+  test "order by first field in index, with query limit", context do
+    tenant = context[:tenant]
+    put_idx_data(tenant)
+
+    assert [%{date: ~D[2000-01-01], user_id: "Alice", time: ~T[00:00:00.000000]}] =
+             TestRepo.all(
+               from(e in Event,
+                 where: e.date > ^~D[0000-01-01],
+                 order_by: [asc: e.date],
+                 limit: 1
+               ),
+               prefix: tenant
+             )
+  end
+
+  test "order by first field in index, with backward scan and limit", context do
     tenant = context[:tenant]
     put_idx_data(tenant)
 
@@ -159,6 +215,21 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
                from(e in Event, where: e.date > ^~D[0000-01-01], order_by: [desc: e.date]),
                prefix: tenant,
                limit: 1
+             )
+  end
+
+  test "order by first field in index, with backward scan and query limit", context do
+    tenant = context[:tenant]
+    put_idx_data(tenant)
+
+    assert [%{date: ~D[2002-01-01], user_id: "Charlie", time: ~T[00:00:02.000000]}] =
+             TestRepo.all(
+               from(e in Event,
+                 where: e.date > ^~D[0000-01-01],
+                 order_by: [desc: e.date],
+                 limit: 1
+               ),
+               prefix: tenant
              )
   end
 
@@ -173,6 +244,20 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
                    TestRepo.all(from(e in Event, order_by: [asc: e.user_id]),
                      prefix: tenant,
                      limit: 1
+                   )
+                 end
+  end
+
+  test "order by middle field in index with limit and without Equal constraint on first field and query limit",
+       context do
+    tenant = context[:tenant]
+    put_idx_data(tenant)
+
+    assert_raise Unsupported,
+                 ~r/When querying with a limit, the ordering must correspond to the primary key or an indexed field/,
+                 fn ->
+                   TestRepo.all(from(e in Event, order_by: [asc: e.user_id], limit: 1),
+                     prefix: tenant
                    )
                  end
   end
@@ -205,6 +290,38 @@ defmodule Ecto.Integration.OrderingTest.IndexWithEqualConstraint do
                from(e in Event, where: e.date == ^~D[2000-01-01], order_by: [desc: e.user_id]),
                prefix: tenant,
                limit: 1
+             )
+  end
+
+  test "order by middle field in index with query limit and with Equal constraint on first field",
+       context do
+    tenant = context[:tenant]
+    put_idx_data(tenant)
+
+    assert [%{date: ~D[2000-01-01], user_id: "Alice", time: ~T[00:00:00.000000]}] =
+             TestRepo.all(
+               from(e in Event,
+                 where: e.date == ^~D[2000-01-01],
+                 order_by: [asc: e.user_id],
+                 limit: 1
+               ),
+               prefix: tenant
+             )
+  end
+
+  test "order by middle field in index with query limit and with Equal constraint on first field, backward scan",
+       context do
+    tenant = context[:tenant]
+    put_idx_data(tenant)
+
+    assert [%{date: ~D[2000-01-01], user_id: "Charlie", time: ~T[00:00:02.000000]}] =
+             TestRepo.all(
+               from(e in Event,
+                 where: e.date == ^~D[2000-01-01],
+                 order_by: [desc: e.user_id],
+                 limit: 1
+               ),
+               prefix: tenant
              )
   end
 end
@@ -246,6 +363,42 @@ defmodule Ecto.Integration.OrderingTest.IndexWithBetweenConstraint do
                ),
                prefix: tenant,
                limit: 1
+             )
+  end
+
+  test "order by index with Between clause, query limit", context do
+    tenant = context[:tenant]
+    put_idx_data(tenant)
+
+    assert [%{date: ~D[2000-01-01], user_id: "Alice", time: ~T[00:00:00.000000]}] =
+             TestRepo.all(
+               from(e in Event,
+                 where:
+                   e.date == ^~D[2000-01-01] and e.user_id == ^"Alice" and
+                     e.time >= ^~T[00:00:00.000000] and
+                     e.time <= ^~T[00:00:01.999999],
+                 order_by: [asc: e.time],
+                 limit: 1
+               ),
+               prefix: tenant
+             )
+  end
+
+  test "order by index with Between clause, backward scan, query limit", context do
+    tenant = context[:tenant]
+    put_idx_data(tenant)
+
+    assert [%{date: ~D[2000-01-01], user_id: "Alice", time: ~T[00:00:01.000000]}] =
+             TestRepo.all(
+               from(e in Event,
+                 where:
+                   e.date == ^~D[2000-01-01] and e.user_id == ^"Alice" and
+                     e.time >= ^~T[00:00:00.000000] and
+                     e.time <= ^~T[00:00:01.999999],
+                 order_by: [desc: e.time],
+                 limit: 1
+               ),
+               prefix: tenant
              )
   end
 end

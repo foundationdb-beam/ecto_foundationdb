@@ -323,6 +323,44 @@ defmodule Ecto.Adapters.FoundationDB do
   )
   ```
 
+  #### Query limit and option limit
+
+  EctoFDB supports two types of limits.
+
+  1. **Query limit**: A `limit: n` clause provided to an `Ecto.Query`
+  2. **Option limit**: A `limit: n` option procide to a `Repo.all` call
+
+  In almost all cases, the two are equivalent. However, if objects surpass the `:max_single_value_size`
+  and are split into multiple key-values, then the distinction becomes important. The Option Limit constrains
+  the total number of keys retrieved from FoundationDB. The Query Limit contrains the total number of items
+  in the returned list. Therefore, in some cases it's valid and reasonable to provide two separate limits
+  in a funcation call.
+
+  ```elixir
+  Repo.all(
+    from(p in Post, limit: 10), #=> a maximum of 10 %Post{} will be returned
+    prefix: tenant, limit: 100) #=> a maximum of 100 key-values will be retrieved
+  ```
+
+  To disable splitting objects across multiple keys, set `max_value_size` to match
+  `:max_single_value_size`, which is `100_000` by default.
+
+  Finally, if you wish to make use of object splitting and guarantee a correct and consistent limiting contraint,
+  you must instead use `Repo.stream`:
+
+  ```elixir
+  from(p in Post)
+  |> MyApp.Repo.stream(prefix: tenant)
+  |> Stream.take(10)
+  ```
+
+  The stream operation will continue to retrieve keys as long as necessary to satisfy the `10` contraint on the
+  Elixir Stream.
+
+  While confusing, the behavior is consistant with EctoFoundationDB's goals of preventing the over-extraction
+  of data behind the scenes. As always, the developer may choose to accept over-extraction risk by constraining
+  the data in Elixir code rather than the query itself.
+
   ### Custom indexes
 
   As data is inserted, updated, deleted, and queried, the Indexer callbacks (via behaviour `EctoFoundationDB.Indexer`)
@@ -880,6 +918,8 @@ defmodule Ecto.Adapters.FoundationDB do
       keys. Please remember that FDB's transaction size limit of 10MB still applies.
       The maximum number of key-value pairs for a given encoded struct, not counting
       indexes, is computed by `1 + ceil(:max_value_size / :max_single_value_size)`.
+      To disable splitting objects across multiple keys, set this value to match
+      `:max_single_value_size`, which is `100_000` by default.
 
   ## Optimizing for throughput and latency
 

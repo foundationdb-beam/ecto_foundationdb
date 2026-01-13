@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.3 (2025-01-12)
+
+### Bug fixes
+
+* Support limit clause from Ecto.Query in addition to limit option on Repo calls.
+
 ## v0.6.2 (2025-01-10)
 
 ### Bug Fixes
