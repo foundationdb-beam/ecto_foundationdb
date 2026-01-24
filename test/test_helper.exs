@@ -1,8 +1,8 @@
 Logger.configure(level: :info)
 
-alias Ecto.Integration.TestRepo
 alias Ecto.Integration.SingleTenantTestRepo
 alias Ecto.Integration.TestManagedTenantRepo
+alias Ecto.Integration.TestRepo
 
 Application.put_env(:ecto_foundationdb, TestRepo,
   open_db: &EctoFoundationDB.Sandbox.open_db/1,

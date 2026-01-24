@@ -380,7 +380,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
           fields: select_fields
         }
       }
-      when is_list(select_fields) and length(select_fields) > 0 ->
+      when is_list(select_fields) and select_fields !== [] ->
         return_handler = if schema, do: :all, else: :all_from_source
         {Fields.parse_select_fields(select_fields), return_handler}
 

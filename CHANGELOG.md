@@ -6,6 +6,12 @@
 
 * A Repo can be configured to be locked to a single tenant by specifying `:tenant_id` config.
 
+### Dependencies
+
+* Elixir 1.19 and Erlang 28
+* Updated CI FDB to 7.3.69
+* Updated all outdated deps
+
 ## v0.6.3 (2025-01-12)
 
 ### Bug fixes
