@@ -75,10 +75,10 @@ defmodule EctoFoundationDB.ModuleToModuleTracer do
   @impl true
   def handle_info(
         {:trace, _pid, :call, call = {_module, _fun, _arity}, {:cp, {caller, _, _}}},
-        state
+        state = %__MODULE__{}
       ) do
     if match?(caller, call, state) do
-      {:noreply, %__MODULE__{state | traced_calls: [{caller, call} | state.traced_calls]}}
+      {:noreply, %{state | traced_calls: [{caller, call} | state.traced_calls]}}
     else
       {:noreply, state}
     end

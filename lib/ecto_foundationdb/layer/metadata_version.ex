@@ -20,8 +20,8 @@ defmodule EctoFoundationDB.Layer.MetadataVersion do
   def match_local?(nil, _), do: false
   def match_local?(_, nil), do: false
 
-  def match_local?(mdv_a, mdv_b),
-    do: match?(%__MODULE__{mdv_a | global: <<>>}, %__MODULE__{mdv_b | global: <<>>})
+  def match_local?(mdv_a = %__MODULE__{}, mdv_b = %__MODULE__{}),
+    do: match?(%{mdv_a | global: <<>>}, %{mdv_b | global: <<>>})
 
   def match?(mdv, mdv), do: not is_nil(mdv)
   def match?(_, _), do: false
@@ -63,8 +63,8 @@ defmodule EctoFoundationDB.Layer.MetadataVersion do
     new(global, app)
   end
 
-  defp with_decoded_app(mdv, app_result) do
-    %__MODULE__{mdv | app: decode_app(app_result)}
+  defp with_decoded_app(mdv = %__MODULE__{}, app_result) do
+    %{mdv | app: decode_app(app_result)}
   end
 
   defp decode_app(:not_found), do: -1

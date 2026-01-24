@@ -27,7 +27,7 @@ defmodule EctoFoundationDB.Future do
   # Upon leaving a transactional that uses this Future module, `leaving_transactional` must
   # be called so that any Futures have a change to wait on their results if necessary.
   def leaving_transactional(fut = %__MODULE__{must_wait?: true}) do
-    %__MODULE__{
+    %{
       fut
       | tx: nil,
         erlfdb_future: nil,
@@ -82,16 +82,16 @@ defmodule EctoFoundationDB.Future do
     }
   end
 
-  def set(fut, tx, erlfdb_future, f \\ &Function.identity/1) do
+  def set(fut = %__MODULE__{}, tx, erlfdb_future, f \\ &Function.identity/1) do
     ref = get_ref(erlfdb_future)
-    %__MODULE__{handler: g} = fut
-    %__MODULE__{fut | ref: ref, tx: tx, erlfdb_future: erlfdb_future, handler: &f.(g.(&1))}
+    %{handler: g} = fut
+    %{fut | ref: ref, tx: tx, erlfdb_future: erlfdb_future, handler: &f.(g.(&1))}
   end
 
-  def set_result(fut, result) do
-    %__MODULE__{handler: f} = fut
+  def set_result(fut = %__MODULE__{}, result) do
+    %{handler: f} = fut
 
-    %__MODULE__{
+    %{
       fut
       | tx: nil,
         erlfdb_future: nil,
@@ -105,13 +105,13 @@ defmodule EctoFoundationDB.Future do
   end
 
   def result(fut = %__MODULE__{tx: :deferred}) do
-    %__MODULE__{erlfdb_future: erlfdb_future, handler: handler} = fut
+    %{erlfdb_future: erlfdb_future, handler: handler} = fut
     res = :erlfdb.wait(erlfdb_future)
     handler.(res)
   end
 
-  def result(fut) do
-    %__MODULE__{tx: tx, erlfdb_future: erlfdb_future, handler: handler} = fut
+  def result(fut = %__MODULE__{}) do
+    %{tx: tx, erlfdb_future: erlfdb_future, handler: handler} = fut
 
     # Since we only have a single future, we can use :erlfdb.wait/1 as long as it's
     # not a :fold_future. Doing so is good for bookkeeping (fdb_api_counting_test)
@@ -145,12 +145,12 @@ defmodule EctoFoundationDB.Future do
           do: {ref, erlfdb_future}
 
     results =
-      if length(reffed_futures) > 0 do
+      if Enum.empty?(reffed_futures) do
+        %{}
+      else
         [%__MODULE__{tx: tx} | _] = futs
         {refs, erlfdb_futures} = Enum.unzip(reffed_futures)
         Enum.zip(refs, :erlfdb.wait_for_all_interleaving(tx, erlfdb_futures)) |> Enum.into(%{})
-      else
-        %{}
       end
 
     Stream.map(
@@ -158,7 +158,7 @@ defmodule EctoFoundationDB.Future do
       fn fut = %__MODULE__{ref: ref, result: result, handler: f} ->
         case Map.get(results, ref, nil) do
           nil ->
-            %__MODULE__{
+            %{
               fut
               | tx: nil,
                 erlfdb_future: nil,
@@ -167,7 +167,7 @@ defmodule EctoFoundationDB.Future do
             }
 
           new_result ->
-            %__MODULE__{
+            %{
               fut
               | tx: nil,
                 erlfdb_future: nil,
@@ -180,13 +180,13 @@ defmodule EctoFoundationDB.Future do
   end
 
   def apply(fut = %__MODULE__{erlfdb_future: nil}, f) do
-    %__MODULE__{handler: g, result: result} = fut
-    %__MODULE__{result: f.(g.(result)), handler: &Function.identity/1}
+    %{handler: g, result: result} = fut
+    %{fut | result: f.(g.(result)), handler: &Function.identity/1}
   end
 
-  def apply(fut, f) do
-    %__MODULE__{handler: g} = fut
-    %__MODULE__{fut | handler: &f.(g.(&1))}
+  def apply(fut = %__MODULE__{}, f) do
+    %{handler: g} = fut
+    %{fut | handler: &f.(g.(&1))}
   end
 
   def find_ready(futs, ready_ref) when is_map(futs) do

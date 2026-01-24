@@ -47,7 +47,7 @@ defmodule EctoFoundationDB.Layer.Metadata.Cache do
         table,
         {key, _mdv, %Metadata{partial_indexes: partial_indexes}, _ts}
       )
-      when length(partial_indexes) > 0 do
+      when partial_indexes !== [] do
     delete(table, key)
     :ok
   end

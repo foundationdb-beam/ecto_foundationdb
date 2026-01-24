@@ -9,19 +9,19 @@ defmodule EctoIntegrationUpsertTest do
   test "on_conflict: :raise", context do
     tenant = context[:tenant]
 
-    user = TestRepo.insert!(%User{name: "John"}, prefix: tenant)
+    user = %User{} = TestRepo.insert!(%User{name: "John"}, prefix: tenant)
 
     assert_raise(Unsupported, ~r/Key exists/, fn ->
-      TestRepo.insert!(%User{user | name: "NotJohn"}, prefix: tenant, on_conflict: :raise)
+      TestRepo.insert!(%{user | name: "NotJohn"}, prefix: tenant, on_conflict: :raise)
     end)
   end
 
   test "on_conflict: :nothing", context do
     tenant = context[:tenant]
 
-    user = TestRepo.insert!(%User{name: "John"}, prefix: tenant)
+    user = %User{} = TestRepo.insert!(%User{name: "John"}, prefix: tenant)
 
-    TestRepo.insert!(%User{user | name: "NotJohn"}, prefix: tenant, on_conflict: :nothing)
+    TestRepo.insert!(%{user | name: "NotJohn"}, prefix: tenant, on_conflict: :nothing)
 
     assert %User{name: "John"} = TestRepo.get(User, user.id, prefix: tenant)
   end

@@ -308,7 +308,7 @@ defmodule EctoFoundationDB.MigrationsPJ do
           end
       end
 
-    claim_active? = length(partial_idxs) > 0
+    claim_active? = !Enum.empty?(partial_idxs)
 
     partial_idxs =
       Enum.filter(partial_idxs, fn {idx, _} ->

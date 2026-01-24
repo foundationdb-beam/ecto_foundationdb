@@ -130,7 +130,7 @@ defmodule EctoFoundationDB.ProgressiveJob do
     # of any writes being made to the database. In other words, logs are side effects.
     case module.init(tenant, init_args) do
       {:ok, claim_keys, cursor, state} ->
-        job = %__MODULE__{
+        job = %{
           job
           | claim_keys: claim_keys,
             cursor: cursor,
@@ -166,7 +166,7 @@ defmodule EctoFoundationDB.ProgressiveJob do
             do: :erlfdb.set(tx, claim_key, Pack.to_fdb_value({ref, cursor}))
       end
 
-      %__MODULE__{
+      %{
         job
         | done?: done?,
           cursor: cursor,
@@ -189,7 +189,7 @@ defmodule EctoFoundationDB.ProgressiveJob do
     {done?, state} = module.done?(state, tx)
 
     if done? do
-      {fn -> :ok end, :halt, %__MODULE__{job | done?: true, state: state}}
+      {fn -> :ok end, :halt, %{job | done?: true, state: state}}
     else
       in_tx_stream_next_exec(job, tx)
     end
@@ -204,7 +204,7 @@ defmodule EctoFoundationDB.ProgressiveJob do
 
     {done?, state} = module.done?(state, tx)
 
-    job = %__MODULE__{
+    job = %{
       job
       | done?: done?,
         cursor: cursor,
@@ -244,11 +244,19 @@ defmodule EctoFoundationDB.ProgressiveJob do
   end
 
   # not claimed? and not done? and claim_age > claim_stale_msec()
-  defp in_tx_stream_finish_iteration(_after_tx, {_emit, job}, tx, now, false, false, true) do
+  defp in_tx_stream_finish_iteration(
+         _after_tx,
+         {_emit, job = %__MODULE__{}},
+         tx,
+         now,
+         false,
+         false,
+         true
+       ) do
     for claim_key <- job.claim_keys,
         do: :erlfdb.set(tx, claim_key, Pack.to_fdb_value({job.ref, job.cursor}))
 
-    in_tx_stream_next(%__MODULE__{job | claim_updated_at: now}, tx)
+    in_tx_stream_next(%{job | claim_updated_at: now}, tx)
   end
 
   # not claimed? and not done? and claim_age <= claim_stale_msec()

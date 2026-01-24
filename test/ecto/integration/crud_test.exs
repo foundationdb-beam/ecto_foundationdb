@@ -64,7 +64,7 @@ defmodule Ecto.Integration.CrudTest do
       other_tenant_id = Ecto.UUID.autogenerate()
       other_tenant = Sandbox.checkout(TestRepo, other_tenant_id, log: false)
 
-      {:ok, user} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
+      {:ok, user = %User{}} = TestRepo.insert(%User{name: "John"}, prefix: tenant)
 
       # Crossing a struct into another tenant is allowed when using Repo functions.
       assert {:ok, _} = TestRepo.insert(user, prefix: other_tenant)
@@ -85,12 +85,12 @@ defmodule Ecto.Integration.CrudTest do
                  other_tenant,
                  fn ->
                    # Specify the equivalent tenant
-                   %User{user | id: nil}
+                   %{user | id: nil}
                    |> FoundationDB.usetenant(other_tenant)
                    |> TestRepo.insert()
 
                    # Remove the tenant from the struct, allow the tranction context to take over
-                   %User{user | id: nil}
+                   %{user | id: nil}
                    |> FoundationDB.usetenant(nil)
                    |> TestRepo.insert()
 

@@ -51,7 +51,7 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.StreamDecoder do
 
       {:ok, metadata} ->
         raise ArgumentError, """
-        EctoFoundationDB encountered metadata #{metadata}. We don't know how to process this.
+        EctoFoundationDB encountered metadata #{inspect(metadata)}. We don't know how to process this.
 
         Data: #{inspect(v)}
         """
