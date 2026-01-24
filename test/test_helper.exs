@@ -1,12 +1,19 @@
 Logger.configure(level: :info)
 
 alias Ecto.Integration.TestRepo
+alias Ecto.Integration.SingleTenantTestRepo
 alias Ecto.Integration.TestManagedTenantRepo
 
 Application.put_env(:ecto_foundationdb, TestRepo,
   open_db: &EctoFoundationDB.Sandbox.open_db/1,
   storage_id: EctoFoundationDB.Sandbox,
   migrator: EctoFoundationDB.Integration.TestMigrator
+)
+
+Application.put_env(:ecto_foundationdb, SingleTenantTestRepo,
+  open_db: &EctoFoundationDB.Sandbox.open_db/1,
+  storage_id: EctoFoundationDB.Sandbox,
+  tenant_id: "single-tenant"
 )
 
 Application.put_env(:ecto_foundationdb, TestManagedTenantRepo,
@@ -23,6 +30,7 @@ Application.put_env(:ecto_foundationdb, CliTest.Repo,
 )
 
 {:ok, _} = TestRepo.start_link()
+{:ok, _} = SingleTenantTestRepo.start_link()
 {:ok, _} = CliTest.Repo.start_link()
 
 ExUnit.start()

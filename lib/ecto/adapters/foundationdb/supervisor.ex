@@ -3,6 +3,7 @@ defmodule Ecto.Adapters.FoundationDB.Supervisor do
   use Supervisor
 
   alias EctoFoundationDB.Sandbox.Sandboxer
+  alias EctoFoundationDB.SingleTenantRepo
   alias EctoFoundationDB.WatchJanitor
 
   def start_link(init_arg) do
@@ -10,8 +11,15 @@ defmodule Ecto.Adapters.FoundationDB.Supervisor do
   end
 
   @impl true
-  def init(_init_arg) do
-    children = [Sandboxer, WatchJanitor]
+  def init([config]) do
+    children =
+      case Keyword.fetch(config, :tenant_id) do
+        {:ok, _} ->
+          [Sandboxer, {SingleTenantRepo, [config]}, WatchJanitor]
+
+        :error ->
+          [Sandboxer, WatchJanitor]
+      end
 
     Supervisor.init(children, strategy: :one_for_one)
   end
