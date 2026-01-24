@@ -78,6 +78,28 @@ defmodule Ecto.Adapters.FoundationDB do
   viewed as a logically partitioned database. See `EctoFoundationDB.Tenant` for a discussion
   on the mechanism used to achieve this in FDB.
 
+  #### Single-Tenant Repo
+
+  A particular Repo can be configured to be locked to a single tenant by specifying a `:tenant_id` on
+  the Repo config.
+
+  ```elixir
+  config :my_app, MyApp.SystemRepo,
+    cluster_file: "/etc/foundationdb/fdb.cluster",
+    tenant_id: "my-system-tenant"
+  ```
+
+  When `:tenant_id` is defined, EctoFoundationDB will automatically open the tenant for you,
+  removing the requirement to specify a `:prefix` on Repo operations. Things to consider before
+  using a single-tenant Repo:
+
+  1. EctoFDB opens the tenant for you and permanently stores it in memory.
+  2. You must restart your application to apply migrations.
+  3. To convert a Repo from single-tenant to multi-tenant, first remove the `:tenant_id` config.
+     Then, modify all operations on the Repo to include the `:prefix`.
+  4. To convert a Repo from multi-tenant to single-tenant, first define the `:tenant_id` in config.
+     Then, modify all operations on the Repo to remove the `:prefix`.
+
   ### Creating a schema
 
   This is a standard `Ecto.Schema` that will be used in the examples of this documentation.

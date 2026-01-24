@@ -3,16 +3,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   @behaviour Ecto.Adapter.Queryable
 
   alias Ecto.Adapters.FoundationDB
-  alias EctoFoundationDB.Exception.IncorrectTenancy
+  alias EctoFoundationDB.Assert.CorrectTenancy
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Ordering
   alias EctoFoundationDB.Layer.Query
-  alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
-  alias EctoFoundationDB.Tenant
 
   @impl Ecto.Adapter.Queryable
   def prepare(operation, query) do
@@ -30,7 +28,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   @impl Ecto.Adapter.Queryable
   def execute(
-        adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: repo_config},
         _query_meta,
         _query_cache =
           {:nocache,
@@ -52,7 +50,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         query_result
 
       _ ->
-        {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+        {%{context: context}, query = %Ecto.Query{prefix: tenant}} =
+          CorrectTenancy.assert_by_query!(repo_config, query)
 
         future = execute_all(tenant, adapter_meta, context, query, params, ordering, options)
 
@@ -69,7 +68,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   end
 
   def execute(
-        adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: repo_config},
         _query_meta,
         _query_cache =
           {:nocache,
@@ -81,7 +80,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         params,
         _options
       ) do
-    {context, %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    {%{context: context}, %Ecto.Query{prefix: tenant}} =
+      CorrectTenancy.assert_by_query!(repo_config, query)
 
     plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params, [])
     num = Query.delete(tenant, adapter_meta, plan)
@@ -90,14 +90,15 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   end
 
   def execute(
-        adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: repo_config},
         _query_meta,
         _query_cache =
           {:nocache, {:update_all, query, {nil, _limit_fn}, %{}, _ordering, _ordering_fn}},
         params,
         _options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    {%{context: context}, query = %Ecto.Query{prefix: tenant}} =
+      CorrectTenancy.assert_by_query!(repo_config, query)
 
     num =
       execute_update_all(tenant, adapter_meta, context, query, params)
@@ -107,14 +108,15 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   @impl Ecto.Adapter.Queryable
   def stream(
-        adapter_meta = %{opts: adapter_opts},
+        adapter_meta = %{opts: repo_config},
         _query_meta,
         _query_cache =
           {:nocache, {:all, query, {nil, _limit_fn}, %{}, [], _ordering_fn}},
         params,
         options
       ) do
-    {context, query = %Ecto.Query{prefix: tenant}} = assert_tenancy!(query, adapter_opts)
+    {%{context: context}, query = %Ecto.Query{prefix: tenant}} =
+      CorrectTenancy.assert_by_query!(repo_config, query)
 
     tenant
     |> stream_all(adapter_meta, context, query, params, options)
@@ -134,16 +136,20 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   end
 
   def execute_all_range(_module, _repo, queryable, id_s, id_e, {adapter_meta, options}) do
-    %{opts: adapter_opts} = adapter_meta
+    %{opts: repo_config} = adapter_meta
 
     {schema, source} = queryable_to_schema_source_tuplet(queryable)
 
     {select_fields, return_handler} =
       queryable_to_select_fields_return_handler_tuplet(queryable, schema)
 
-    tenant = queryable_to_tenant(queryable, options)
+    %{context: context, prefix: tenant} =
+      CorrectTenancy.assert_by_schema!(repo_config, %{
+        prefix: queryable_to_tenant(queryable, options),
+        source: source,
+        schema: schema
+      })
 
-    {context, tenant} = assert_tenancy!(tenant, source, schema, adapter_opts)
     plan = QueryPlan.all_range(tenant, source, schema, context, id_s, id_e, options)
     future = Query.all(tenant, adapter_meta, plan, options)
 
@@ -182,35 +188,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       end)
 
     options
-  end
-
-  defp assert_tenancy!(
-         query = %Ecto.Query{
-           prefix: tenant,
-           from: %Ecto.Query.FromExpr{source: {source, schema}}
-         },
-         adapter_opts
-       ) do
-    {context, tenant} = assert_tenancy!(tenant, source, schema, adapter_opts)
-    {context, %Ecto.Query{query | prefix: tenant}}
-  end
-
-  defp assert_tenancy!(tenant, source, schema, _adapter_opts) do
-    context = Schema.get_context!(source, schema)
-
-    case Tx.safe?(tenant) do
-      {false, :missing_tenant} ->
-        raise IncorrectTenancy, """
-        FoundationDB Adapter is expecting the query for schema \
-        #{inspect(schema)} to include a tenant in the prefix metadata, \
-        but a nil prefix was provided.
-
-        Use `prefix: tenant` in your query.
-        """
-
-      {true, tenant = %Tenant{}} ->
-        {context, tenant}
-    end
   end
 
   defp execute_all(

@@ -120,6 +120,7 @@ defmodule EctoIntegrationSyncIntegrationTest1 do
   use Ecto.Integration.Case, async: true
 
   alias Ecto.Integration.TestRepo
+  alias EctoFoundationDB.Exception.IncorrectTenancy
   alias EctoFoundationDB.Schemas.Post
   alias EctoFoundationDB.Schemas.User
 
@@ -134,6 +135,31 @@ defmodule EctoIntegrationSyncIntegrationTest1 do
 
     _ = View.flush_assigns_changed([])
     assert %{user: %User{name: "Alicia"}} = View.get_assigns(pid)
+  end
+
+  test "exception raised when tenant not provided", context do
+    sync_opts = [
+      watch_action: :collection,
+      assign: fn state, _std_assigns, _idlist_assigns, _opts -> state end,
+      attach_container_hook: fn state, _name, _repo, _opts -> state end,
+      detach_container_hook: fn state, _name, _repo, _opts -> state end
+    ]
+
+    state = %{private: %{}}
+    assert {:ok, user} = TestRepo.insert(%User{name: "Alice"}, prefix: context[:tenant])
+
+    assert_raise IncorrectTenancy,
+                 ~r/expecting the provided `:private` map to include a `:tenant`/,
+                 fn ->
+                   EctoFoundationDB.Sync.sync_one(
+                     state,
+                     TestRepo,
+                     :alice,
+                     TestUser,
+                     user.id,
+                     sync_opts
+                   )
+                 end
   end
 end
 

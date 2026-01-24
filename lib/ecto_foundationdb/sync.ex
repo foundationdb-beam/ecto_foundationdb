@@ -15,7 +15,7 @@ defmodule EctoFoundationDB.Sync do
 
   Socket requirements:
 
-  * The tenant must be stored in the `:private` field of the provided `socket`.
+  * For multi-tenant Repos, the tenant must be stored in the `:private` field of the provided `socket`.
   * The sync functions will store a key called `:ecto_fdb_sync_data` in the `:private` field.
 
   ## Examples
@@ -124,6 +124,7 @@ defmodule EctoFoundationDB.Sync do
 
   alias Ecto.Adapters.FoundationDB
 
+  alias EctoFoundationDB.Assert.CorrectTenancy
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer.SchemaMetadata
   alias EctoFoundationDB.Sync.All
@@ -202,7 +203,7 @@ defmodule EctoFoundationDB.Sync do
 
   ## Arguments
 
-  - `state`: A map with key `:assigns` and `:private`. `private` must be a map with key `:tenant`
+  - `state`: A map with key `:assigns` and `:private`. For multi-tenant Repos, `private` must be a map with key `:tenant`
   - `repo`: An Ecto repository
   - `queryable_assigns`: A list of `All`, `One`, or `Many` structs
   - `opts`: Options
@@ -229,7 +230,7 @@ defmodule EctoFoundationDB.Sync do
   """
   def sync(state, repo, queryable_assigns, opts \\ []) do
     %{private: private} = state
-    %{tenant: tenant} = private
+    %{tenant: tenant} = CorrectTenancy.assert_by_private_map!(repo, private)
 
     {std_assigns, std_watches, idlist_assigns, idlist_watches, cancellations} =
       repo.transactional(
@@ -570,7 +571,7 @@ defmodule EctoFoundationDB.Sync do
 
   defp assign_ready_(state, repo, key, {ready_ref, :ready}) do
     %{private: private} = state
-    %{tenant: tenant} = private
+    %{tenant: tenant} = CorrectTenancy.assert_by_private_map!(repo, private)
     futures = State.get_futures(state, repo)
     future_map = Map.get(futures, key, %{})
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.0 (TBD)
+
+### Enhancements
+
+* A Repo can be configured to be locked to a single tenant by specifying `:tenant_id` config.
+
 ## v0.6.3 (2025-01-12)
 
 ### Bug fixes

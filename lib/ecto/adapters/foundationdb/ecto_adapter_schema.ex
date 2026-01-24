@@ -2,14 +2,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   @moduledoc false
   @behaviour Ecto.Adapter.Schema
 
-  alias EctoFoundationDB.Exception.IncorrectTenancy
+  alias EctoFoundationDB.Assert.CorrectTenancy
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Metadata
   alias EctoFoundationDB.Layer.Tx
-  alias EctoFoundationDB.Schema
-  alias EctoFoundationDB.Tenant
 
   @impl Ecto.Adapter.Schema
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
@@ -29,7 +27,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         options
       ) do
     %{source: source, schema: schema, prefix: tenant, context: context} =
-      assert_tenancy!(schema_meta)
+      CorrectTenancy.assert_by_schema!(adapter_meta[:opts], schema_meta)
 
     entries =
       Enum.map(entries, fn data_object ->
@@ -88,7 +86,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         options
       ) do
     %{source: source, schema: schema, prefix: tenant, context: context} =
-      assert_tenancy!(schema_meta)
+      CorrectTenancy.assert_by_schema!(adapter_meta[:opts], schema_meta)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
@@ -126,7 +124,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
         _options
       ) do
     %{source: source, schema: schema, prefix: tenant, context: context} =
-      assert_tenancy!(schema_meta)
+      CorrectTenancy.assert_by_schema!(adapter_meta[:opts], schema_meta)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
@@ -165,7 +163,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     }
 
     %{schema: schema, source: source, context: context, prefix: tenant} =
-      assert_tenancy!(schema_meta)
+      CorrectTenancy.assert_by_schema!(adapter_meta[:opts], schema_meta)
 
     pk_field = Fields.get_pk_field!(schema)
     pk = Map.get(struct, pk_field)
@@ -179,25 +177,5 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
          &watch(module, repo, &1, {adapter_meta, Keyword.merge(options, &2)})}
       end)
     end)
-  end
-
-  defp assert_tenancy!(schema_meta = %{source: source, schema: schema, prefix: tenant}) do
-    schema_meta = Map.put(schema_meta, :context, Schema.get_context!(source, schema))
-
-    case Tx.safe?(tenant) do
-      {false, :missing_tenant} ->
-        raise IncorrectTenancy, """
-        FoundationDB Adapter is expecting the struct for schema \
-        #{inspect(schema)} to include a tenant in the prefix metadata, \
-        but a nil prefix was provided.
-
-        Call `Ecto.Adapters.FoundationDB.usetenant(struct, tenant)` before inserting.
-
-        Or use the option `prefix: tenant` on the call to your Repo.
-        """
-
-      {true, tenant = %Tenant{}} ->
-        Map.put(schema_meta, :prefix, tenant)
-    end
   end
 end
