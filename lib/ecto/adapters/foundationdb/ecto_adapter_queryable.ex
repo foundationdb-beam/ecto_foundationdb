@@ -2,13 +2,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   @moduledoc false
   @behaviour Ecto.Adapter.Queryable
 
-  alias Ecto.Adapters.FoundationDB
   alias EctoFoundationDB.Assert.CorrectTenancy
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Ordering
   alias EctoFoundationDB.Layer.Query
+  alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
 
@@ -151,24 +151,28 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       })
 
     plan = QueryPlan.all_range(tenant, source, schema, context, id_s, id_e, options)
-    future = Query.all(tenant, adapter_meta, plan, options)
+    future = Future.before_transactional()
 
-    future =
-      Future.apply(future, fn {objs, _continuation} ->
-        case return_handler do
-          :all_from_source ->
-            objs = Enum.to_list(objs)
-            select_fields = select_fields || get_field_names_union(objs)
-            {select_fields, select(objs, select_fields, nil)}
+    Tx.transactional(tenant, fn _tx ->
+      future = Query.all(tenant, adapter_meta, plan, future, options)
 
-          _ ->
-            select(objs, select_fields, nil)
-        end
-      end)
+      future =
+        Future.apply(future, fn {objs, _continuation} ->
+          case return_handler do
+            :all_from_source ->
+              objs = Enum.to_list(objs)
+              select_fields = select_fields || get_field_names_union(objs)
+              {select_fields, select(objs, select_fields, nil)}
 
-    options = options ++ [returning: {:future, return_handler}]
+            _ ->
+              select(objs, select_fields, nil)
+          end
+        end)
 
-    handle_returning(future, options)
+      options = options ++ [returning: {:future, return_handler}]
+
+      handle_returning(future, options)
+    end)
   end
 
   # Extract limit from an `Ecto.Query`
@@ -179,7 +183,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
   defp adjust_limit_options(options, query_limit) do
     {_, options} =
-      Keyword.get_and_update(options, :limit, fn
+      Keyword.get_and_update(options, :key_limit, fn
         nil ->
           {nil, query_limit}
 
@@ -214,21 +218,26 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     #   5. Arrange fields based on the select input
     plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params, ordering)
 
-    Query.all(tenant, adapter_meta, plan, options)
+    future = Future.before_transactional()
+
+    Tx.transactional(tenant, fn _tx ->
+      future = Query.all(tenant, adapter_meta, plan, future, options)
+      Future.leaving_transactional(future)
+    end)
   end
 
   defp handle_returning(future, options) do
     case options[:returning] do
       {:future, return_handler} ->
-        Process.put(
-          Future.token(),
-          Future.apply(future, fn res -> {return_handler, res} end)
-        )
+        future = Future.apply(future, fn res -> {return_handler, res} end)
+        future = Future.leaving_transactional(future)
+        Process.put(Future.token(), future)
 
         {0, []}
 
       _ ->
         # Future: If there is a wrapping transaction without an `async_*` qualifier, the wait happens here
+        future = Future.leaving_transactional(future)
         Future.result(future)
     end
   end
@@ -261,12 +270,12 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     # It is supported at least by Postgres and MySQL and defaults to 500.
     fdb_limit = options[:max_rows] || 500
 
-    query_options = fn
+    ef_query_options = fn
       nil ->
-        [limit: fdb_limit]
+        [key_limit: fdb_limit]
 
       %Query.Continuation{start_key: start_key} ->
-        [start_key: start_key, limit: fdb_limit]
+        [start_key: start_key, key_limit: fdb_limit]
 
       x ->
         raise "opt #{inspect(x)}"
@@ -275,10 +284,13 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     start_fun = fn ->
       plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params, [])
 
+      future = Future.before_transactional()
+
       %{
         adapter_meta: adapter_meta,
         tenant: tenant,
-        query_options: query_options,
+        ef_query_options: ef_query_options,
+        first_future: future,
         user_callback: options[:tx_callback],
         plan: plan,
         field_names: Fields.parse_select_fields(select_fields),
@@ -298,29 +310,29 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     %{
       tenant: tenant,
       adapter_meta: adapter_meta,
-      query_options: query_options,
+      ef_query_options: ef_query_options,
+      first_future: future,
       field_names: field_names,
       user_callback: user_callback,
       plan: plan,
       continuation: continuation
     } = acc
 
-    # Note for future: wrapping Query.all in a transaction is tricky because it creates the
-    # future internally, which doesn't allow us to use the before_transactional test.
-    # To work around this, we make sure we resolve the future inside the transactional.
-    # It doesn't matter because the 'stream' API doesn't support async_* APIs.
-    FoundationDB.transactional(tenant, fn tx ->
-      future = Query.all(tenant, adapter_meta, plan, query_options.(continuation))
+    future =
+      Tx.transactional(tenant, fn tx ->
+        future = Query.all(tenant, adapter_meta, plan, future, ef_query_options.(continuation))
 
-      tx_callback = if is_nil(user_callback), do: nil, else: &user_callback.(tx, &1)
+        tx_callback = if is_nil(user_callback), do: nil, else: &user_callback.(tx, &1)
 
-      future =
-        Future.apply(future, fn {objs, continuation} ->
-          {[select(objs, field_names, tx_callback)], %{acc | continuation: continuation}}
-        end)
+        future =
+          Future.apply(future, fn {objs, continuation} ->
+            {[select(objs, field_names, tx_callback)], %{acc | continuation: continuation}}
+          end)
 
-      Future.result(future)
-    end)
+        Future.leaving_transactional(future)
+      end)
+
+    Future.result(future)
   end
 
   defp stream_all_after(_acc), do: :ok

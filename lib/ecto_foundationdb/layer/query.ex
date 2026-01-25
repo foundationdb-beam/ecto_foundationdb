@@ -20,13 +20,11 @@ defmodule EctoFoundationDB.Layer.Query do
   @doc """
   Executes a query for retrieving data.
   """
-  def all(tenant, adapter_meta, plan, options) do
+  def all(tenant, adapter_meta, plan, future, options) do
     # All data retrieval comes through here. We use the Future module to
     # ensure that if the whole thing is executed inside a wrapping transaction,
     # the result is not awaited upon until requested. But if we're creating a new
     # transaction, the wait happens before the transaction ends.
-
-    future = Future.before_transactional()
 
     {plan, future} =
       Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
@@ -122,7 +120,8 @@ defmodule EctoFoundationDB.Layer.Query do
     backward? = backward?(plan, options)
 
     get_options =
-      Keyword.take(options, [:limit])
+      options
+      |> kw_take_as(:key_limit, :limit)
       |> Keyword.put(:wait, false)
       |> Keyword.put(:reverse, backward?)
 
@@ -146,7 +145,8 @@ defmodule EctoFoundationDB.Layer.Query do
     backward? = backward?(plan, options)
 
     get_options =
-      Keyword.take(options, [:limit])
+      options
+      |> kw_take_as(:key_limit, :limit)
       |> Keyword.put(:wait, false)
       |> Keyword.put(:reverse, backward?)
 
@@ -276,12 +276,12 @@ defmodule EctoFoundationDB.Layer.Query do
   end
 
   defp continuation(kvs, options) do
-    case options[:limit] do
+    case options[:key_limit] do
       nil ->
         %Continuation{more?: false}
 
-      limit ->
-        if length(kvs) >= limit do
+      key_limit ->
+        if length(kvs) >= key_limit do
           {fdb_key, _} = List.last(kvs)
           %Continuation{more?: true, start_key: :erlfdb_key.strinc(fdb_key)}
         else
@@ -293,7 +293,7 @@ defmodule EctoFoundationDB.Layer.Query do
   # Backward scan doesn't come for free since we need to manage the key ordering,
   # so only do it if there's a limit set.
   defp backward?(plan = %{layer_data: %{idx: idx}}, options) do
-    case options[:limit] do
+    case options[:key_limit] do
       int when is_integer(int) ->
         %{ordering: ordering} = plan
         idx_fields = idx[:fields]
@@ -305,13 +305,13 @@ defmodule EctoFoundationDB.Layer.Query do
   end
 
   defp backward?(plan, options) do
-    case {plan.schema, plan.ordering, options[:limit]} do
+    case {plan.schema, plan.ordering, options[:key_limit]} do
       {nil, [], int} when is_integer(int) ->
         false
 
       {nil, [_ | _], int} when is_integer(int) ->
         raise Unsupported, """
-        Cannot apply limit on query ordering when schema is unknown
+        Cannot apply key_limit on query ordering when schema is unknown
         """
 
       {schema, ordering, int} when is_integer(int) ->
@@ -332,7 +332,7 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp idx_backward?(_, [{_, _field} | _]) do
     raise(Unsupported, """
-    When querying with a limit, the ordering must correspond to the primary key or an indexed field.
+    When querying with a key_limit, the ordering must correspond to the primary key or an indexed field.
     """)
   end
 
@@ -347,5 +347,15 @@ defmodule EctoFoundationDB.Layer.Query do
       end)
 
     %{md | indexes: indexes}
+  end
+
+  defp kw_take_as(options, from_key, to_key) do
+    case Keyword.fetch(options, from_key) do
+      {:ok, val} ->
+        [{to_key, val}]
+
+      :error ->
+        []
+    end
   end
 end

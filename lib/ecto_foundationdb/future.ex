@@ -25,7 +25,7 @@ defmodule EctoFoundationDB.Future do
   end
 
   # Upon leaving a transactional that uses this Future module, `leaving_transactional` must
-  # be called so that any Futures have a change to wait on their results if necessary.
+  # be called so that any Futures have a chance to wait on their results if necessary.
   def leaving_transactional(fut = %__MODULE__{must_wait?: true}) do
     %{
       fut

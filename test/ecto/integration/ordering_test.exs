@@ -65,7 +65,10 @@ defmodule Ecto.Integration.OrderingTest.PkLimit do
     [event2, event1, _event3] = put_pk_data(tenant)
 
     assert [^event2, ^event1] =
-             TestRepo.all(from(q in QueueItem, order_by: {:asc, :id}), prefix: tenant, limit: 2)
+             TestRepo.all(from(q in QueueItem, order_by: {:asc, :id}),
+               prefix: tenant,
+               key_limit: 2
+             )
   end
 
   test "pk backward limit", context do
@@ -75,7 +78,7 @@ defmodule Ecto.Integration.OrderingTest.PkLimit do
     assert [^event3, ^event1] =
              TestRepo.all(from(q in QueueItem, order_by: {:desc, :id}),
                prefix: tenant,
-               limit: 2
+               key_limit: 2
              )
   end
 
@@ -123,7 +126,7 @@ defmodule Ecto.Integration.OrderingTest.OrderByDataField do
                  fn ->
                    TestRepo.all(from(q in QueueItem, order_by: {:asc, :data}),
                      prefix: tenant,
-                     limit: 2
+                     key_limit: 2
                    )
                  end
   end
@@ -133,7 +136,7 @@ defmodule Ecto.Integration.OrderingTest.OrderByDataField do
     [_event2, _event1, _event3] = put_pk_data(tenant)
     # limited ordering not possible, raise error instead of allowing this
     assert_raise Unsupported, ~r//, fn ->
-      TestRepo.all(from(q in QueueItem, order_by: {:desc, :data}), prefix: tenant, limit: 2)
+      TestRepo.all(from(q in QueueItem, order_by: {:desc, :data}), prefix: tenant, key_limit: 2)
     end
   end
 
@@ -187,7 +190,7 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
              TestRepo.all(
                from(e in Event, where: e.date > ^~D[0000-01-01], order_by: [asc: e.date]),
                prefix: tenant,
-               limit: 1
+               key_limit: 1
              )
   end
 
@@ -214,7 +217,7 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
              TestRepo.all(
                from(e in Event, where: e.date > ^~D[0000-01-01], order_by: [desc: e.date]),
                prefix: tenant,
-               limit: 1
+               key_limit: 1
              )
   end
 
@@ -239,11 +242,11 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
     put_idx_data(tenant)
 
     assert_raise Unsupported,
-                 ~r/When querying with a limit, the ordering must correspond to the primary key or an indexed field/,
+                 ~r/When querying with a key_limit, the ordering must correspond to the primary key or an indexed field/,
                  fn ->
                    TestRepo.all(from(e in Event, order_by: [asc: e.user_id]),
                      prefix: tenant,
-                     limit: 1
+                     key_limit: 1
                    )
                  end
   end
@@ -254,7 +257,7 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
     put_idx_data(tenant)
 
     assert_raise Unsupported,
-                 ~r/When querying with a limit, the ordering must correspond to the primary key or an indexed field/,
+                 ~r/When querying with a key_limit, the ordering must correspond to the primary key or an indexed field/,
                  fn ->
                    TestRepo.all(from(e in Event, order_by: [asc: e.user_id], limit: 1),
                      prefix: tenant
@@ -276,7 +279,7 @@ defmodule Ecto.Integration.OrderingTest.IndexWithEqualConstraint do
              TestRepo.all(
                from(e in Event, where: e.date == ^~D[2000-01-01], order_by: [asc: e.user_id]),
                prefix: tenant,
-               limit: 1
+               key_limit: 1
              )
   end
 
@@ -289,7 +292,7 @@ defmodule Ecto.Integration.OrderingTest.IndexWithEqualConstraint do
              TestRepo.all(
                from(e in Event, where: e.date == ^~D[2000-01-01], order_by: [desc: e.user_id]),
                prefix: tenant,
-               limit: 1
+               key_limit: 1
              )
   end
 
@@ -344,7 +347,7 @@ defmodule Ecto.Integration.OrderingTest.IndexWithBetweenConstraint do
                  order_by: [asc: e.time]
                ),
                prefix: tenant,
-               limit: 1
+               key_limit: 1
              )
   end
 
@@ -362,7 +365,7 @@ defmodule Ecto.Integration.OrderingTest.IndexWithBetweenConstraint do
                  order_by: [desc: e.time]
                ),
                prefix: tenant,
-               limit: 1
+               key_limit: 1
              )
   end
 
@@ -400,5 +403,49 @@ defmodule Ecto.Integration.OrderingTest.IndexWithBetweenConstraint do
                ),
                prefix: tenant
              )
+  end
+end
+
+defmodule Ecto.Integration.OrderingTest.QueryLimitWithSplitObjects do
+  use Ecto.Integration.Case, async: true
+
+  alias EctoFoundationDB.Schemas.User
+  alias EctoFoundationDB.Test.Util
+
+  import Ecto.Query
+
+  test "option limit", context do
+    tenant = context[:tenant]
+
+    assert {:ok, _alice} =
+             %User{id: "alice", name: "Alice", notes: Util.get_random_bytes(100)}
+             |> TestRepo.insert(max_single_value_size: 100_000, prefix: tenant)
+
+    assert {:ok, _bob} =
+             %User{id: "bob", name: "Bob", notes: Util.get_random_bytes(100_000)}
+             |> TestRepo.insert(max_single_value_size: 100_000, prefix: tenant)
+
+    assert [%{id: "alice"}] = TestRepo.all(User, prefix: tenant, key_limit: 1)
+    assert [%{id: "alice"}] = TestRepo.all(User, prefix: tenant, key_limit: 2)
+  end
+
+  test "query limit", context do
+    tenant = context[:tenant]
+
+    assert {:ok, _alice} =
+             %User{id: "alice", name: "Alice", notes: Util.get_random_bytes(100)}
+             |> TestRepo.insert(max_single_value_size: 100_000, prefix: tenant)
+
+    assert {:ok, _bob} =
+             %User{id: "bob", name: "Bob", notes: Util.get_random_bytes(100_000)}
+             |> TestRepo.insert(max_single_value_size: 100_000, prefix: tenant)
+
+    assert [%{id: "alice"}] = TestRepo.all(from(u in User, limit: 1), prefix: tenant)
+
+    # @todo
+    # assert [%{id: "alice"}, %{id: "bob"}] =
+    #         TestRepo.all(from(u in User, limit: 2), prefix: tenant)
+    # assert [%{id: "alice"}, %{id: "bob"}] =
+    #         TestRepo.all(from(u in User, limit: 2), prefix: tenant, key_limit: 3)
   end
 end

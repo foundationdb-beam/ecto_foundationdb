@@ -116,21 +116,21 @@ defmodule Ecto.Integration.VersionstampTest do
     [%QueueItem{id: id_a}, %QueueItem{id: id_b}] = TestRepo.await(future)
 
     # top
-    assert [%QueueItem{id: ^id_a}] = TestRepo.all(QueueItem, limit: 1, prefix: tenant)
+    assert [%QueueItem{id: ^id_a}] = TestRepo.all(QueueItem, key_limit: 1, prefix: tenant)
 
     assert %QueueItem{} = TestRepo.get!(QueueItem, id_a, prefix: tenant)
 
     # pop (and top comes for free)
     top =
       TestRepo.transactional(tenant, fn ->
-        [top] = TestRepo.all(QueueItem, limit: 1)
+        [top] = TestRepo.all(QueueItem, key_limit: 1)
         TestRepo.delete!(%QueueItem{id: top.id})
       end)
 
     assert %QueueItem{id: ^id_a} = top
 
     # next top
-    assert [%QueueItem{id: ^id_b}] = TestRepo.all(QueueItem, limit: 1, prefix: tenant)
+    assert [%QueueItem{id: ^id_b}] = TestRepo.all(QueueItem, key_limit: 1, prefix: tenant)
   end
 
   test "versionstamp schema with index", context do

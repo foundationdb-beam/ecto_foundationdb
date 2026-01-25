@@ -310,13 +310,13 @@ defmodule Ecto.Adapters.FoundationDB do
   compared to SQL databases. But you can develop with confidence that your queries will always be
   efficient.
 
-  #### Using `order_by` and `limit` in the same query
+  #### Using `order_by` and `key_limit` in the same query
 
-  EctoFDB will always attempt to return query result that has the ordering applied first and then the limit. If it's
-  unable to do so, then an exception is raised. Remember: a key design decision of our Layer is that a query is valid
+  EctoFDB will always attempt to return query result that has the ordering applied first and then the key_limit. If it's
+  unable to do so, then an exception is raised. Remember: a central design decision of our Layer is that a query is valid
   only if it can be achieved with a single Get or GetRange.
 
-  `order_by` and `limit` will work as expected as long as one of the following conditions is true:
+  `order_by` and `key_limit` will work as expected as long as one of the following conditions is true:
 
   1. An index is not being queried AND the `order_by` is defined on the primary key field.
   2. The fields of the selected index match with the fields in the `order_by` clause.
@@ -324,7 +324,7 @@ defmodule Ecto.Adapters.FoundationDB do
   Examples:
 
   ```elixir
-  opts = [prefix: tenant, limit: 10]
+  opts = [prefix: tenant, key_limit: 10]
 
   # order_by primary key field
   Repo.all(
@@ -345,43 +345,36 @@ defmodule Ecto.Adapters.FoundationDB do
   )
   ```
 
-  #### Query limit and option limit
+  #### Query limit and option key_limit
 
   EctoFDB supports two types of limits.
 
   1. **Query limit**: A `limit: n` clause provided to an `Ecto.Query`
-  2. **Option limit**: A `limit: n` option procide to a `Repo.all` call
+  2. **Option key_limit**: A `key_limit: n` option provided to a `Repo.all` call
 
-  In almost all cases, the two are equivalent. However, if objects surpass the `:max_single_value_size`
-  and are split into multiple key-values, then the distinction becomes important. The Option Limit constrains
-  the total number of keys retrieved from FoundationDB. The Query Limit contrains the total number of items
-  in the returned list. Therefore, in some cases it's valid and reasonable to provide two separate limits
+  In almost all cases, the two are equivalent. However, if any objects surpass the `:max_single_value_size`
+  and are split into multiple key-values, then the distinction becomes important. The Option key_imit constrains
+  the total number of keys retrieved from FoundationDB. The Query Limit constrains the total number of items
+  in the returned list. Therefore, in rare cases it's valid and reasonable to provide two separate limits
   in a funcation call.
+
+  When only the Query limit is provided, keys will be retrieved to satisfy the limit. EctoFDB may retrieve at-most
+  one extra page from the internal GetRange operation.
 
   ```elixir
   Repo.all(
     from(p in Post, limit: 10), #=> a maximum of 10 %Post{} will be returned
-    prefix: tenant, limit: 100) #=> a maximum of 100 key-values will be retrieved
+    prefix: tenant)
   ```
 
-  To disable splitting objects across multiple keys, set `max_value_size` to match
-  `:max_single_value_size`, which is `100_000` by default.
-
-  Finally, if you wish to make use of object splitting and guarantee a correct and consistent limiting contraint,
-  you must instead use `Repo.stream`:
+  When the Option key_limit is provided, EctoFDB guarantees that no more than that number of keys will be retrieved
+  by the internal GetRange operation. Any Query limit is executed after this fact.
 
   ```elixir
-  from(p in Post)
-  |> MyApp.Repo.stream(prefix: tenant)
-  |> Stream.take(10)
+  Repo.all(
+    from(p in Post, limit: 10), #=> a maximum of 10 %Post{} will be **returned**
+    prefix: tenant, key_limit: 100) #=> a maximum of 100 key-values will be **retrieved**
   ```
-
-  The stream operation will continue to retrieve keys as long as necessary to satisfy the `10` contraint on the
-  Elixir Stream.
-
-  While confusing, the behavior is consistant with EctoFoundationDB's goals of preventing the over-extraction
-  of data behind the scenes. As always, the developer may choose to accept over-extraction risk by constraining
-  the data in Elixir code rather than the query itself.
 
   ### Custom indexes
 
