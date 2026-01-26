@@ -28,10 +28,9 @@ defmodule EctoFoundationDB.MigrationsPJ do
     for source <- sources, do: claim_key(tenant, source)
   end
 
-  def tx_get_claim_status(tenant, tx, source, future) do
-    Future.set(
-      future,
-      tx,
+  def tx_get_claim_status(tenant, tx, source) do
+    Future.new(
+      :erlfdb_future,
       :erlfdb.get(tx, claim_key(tenant, source)),
       &decode_claim_status(&1, source)
     )

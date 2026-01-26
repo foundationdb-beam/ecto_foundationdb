@@ -1,7 +1,7 @@
 defmodule EctoFoundationDB.Layer.Query do
   @moduledoc false
+
   alias EctoFoundationDB.Exception.Unsupported
-  alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Fields
@@ -12,39 +12,25 @@ defmodule EctoFoundationDB.Layer.Query do
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
 
-  defmodule Continuation do
-    @moduledoc false
-    defstruct more?: false, start_key: nil
-  end
+  alias FDB.BarrierStream
 
   @doc """
   Executes a query for retrieving data.
-  """
-  def all(tenant, adapter_meta, plan, future, options) do
-    # All data retrieval comes through here. We use the Future module to
-    # ensure that if the whole thing is executed inside a wrapping transaction,
-    # the result is not awaited upon until requested. But if we're creating a new
-    # transaction, the wait happens before the transaction ends.
 
-    {plan, future} =
+  Must be called while inside a transaction.
+  """
+  def all(tenant, adapter_meta, plan, options) do
+    {plan, stream} =
       Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
         plan = make_range(metadata, plan, options)
-        future = tx_get_range(tx, plan, future, options)
-
-        # Future: If there is no wrapping transaction, the wait happens here
-        {plan, Future.leaving_transactional(future)}
+        stream = tx_stream_range(tx, plan, options)
+        {plan, stream}
       end)
 
-    Future.apply(future, fn kvs ->
-      continuation = continuation(kvs, options)
-
-      objs =
-        kvs
-        |> unpack_and_filter(plan)
-        |> Stream.map(fn %DecodedKV{data_object: v} -> v end)
-
-      {objs, continuation}
-    end)
+    stream
+    |> BarrierStream.new()
+    |> BarrierStream.then(&unpack_and_filter(&1, plan))
+    |> BarrierStream.then(&Stream.map(&1, fn %DecodedKV{data_object: v} -> v end))
   end
 
   @doc """
@@ -81,6 +67,7 @@ defmodule EctoFoundationDB.Layer.Query do
          plan = %QueryPlan{constraints: [%{is_pk?: true}]},
          options
        ) do
+    # @todo: getting the metadata for this request was wasteful
     make_datakey_range(plan, options)
   end
 
@@ -111,10 +98,9 @@ defmodule EctoFoundationDB.Layer.Query do
     end
   end
 
-  defp tx_get_range(
+  defp tx_stream_range(
          tx,
          plan = %QueryPlan{layer_data: %{range: {start_key, end_key}}},
-         future,
          options
        ) do
     backward? = backward?(plan, options)
@@ -122,24 +108,14 @@ defmodule EctoFoundationDB.Layer.Query do
     get_options =
       options
       |> kw_take_as(:key_limit, :limit)
-      |> Keyword.put(:wait, false)
       |> Keyword.put(:reverse, backward?)
 
-    future_ref = :erlfdb.get_range(tx, start_key, end_key, get_options)
-
-    Future.set(future, tx, future_ref, fn result ->
-      if backward? do
-        Enum.reverse(result)
-      else
-        result
-      end
-    end)
+    FDB.stream_range(tx, start_key, end_key, get_options)
   end
 
-  defp tx_get_range(
+  defp tx_stream_range(
          tx,
          plan = %QueryPlan{layer_data: %{range: {start_key, end_key, mapper}}},
-         future,
          options
        ) do
     backward? = backward?(plan, options)
@@ -147,18 +123,10 @@ defmodule EctoFoundationDB.Layer.Query do
     get_options =
       options
       |> kw_take_as(:key_limit, :limit)
-      |> Keyword.put(:wait, false)
       |> Keyword.put(:reverse, backward?)
+      |> Keyword.put(:mapper, :erlfdb_tuple.pack(mapper))
 
-    future_ref = :erlfdb.get_mapped_range(tx, start_key, end_key, mapper, get_options)
-
-    Future.set(future, tx, future_ref, fn result ->
-      if backward? do
-        Enum.reverse(result)
-      else
-        result
-      end
-    end)
+    FDB.stream_range(tx, start_key, end_key, get_options)
   end
 
   defp tx_update_range(
@@ -171,8 +139,7 @@ defmodule EctoFoundationDB.Layer.Query do
     write_primary = Schema.get_option(plan.context, :write_primary)
 
     tx
-    |> tx_get_range(plan, Future.new(), [])
-    |> Future.result()
+    |> tx_stream_range(plan, [])
     |> unpack_and_filter(plan)
     |> Stream.map(
       &Tx.update_data_object(
@@ -192,8 +159,7 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp tx_delete_range(tx, plan, metadata) do
     tx
-    |> tx_get_range(plan, Future.new(), [])
-    |> Future.result()
+    |> tx_stream_range(plan, [])
     |> unpack_and_filter(plan)
     |> Stream.map(&Tx.delete_data_object(plan.tenant, tx, plan.schema, &1, metadata))
     |> Enum.to_list()
@@ -273,21 +239,6 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp make_datakey_range(_plan, _options) do
     raise Unsupported, "Between query must have binary parameters"
-  end
-
-  defp continuation(kvs, options) do
-    case options[:key_limit] do
-      nil ->
-        %Continuation{more?: false}
-
-      key_limit ->
-        if length(kvs) >= key_limit do
-          {fdb_key, _} = List.last(kvs)
-          %Continuation{more?: true, start_key: :erlfdb_key.strinc(fdb_key)}
-        else
-          %Continuation{more?: false}
-        end
-    end
   end
 
   # Backward scan doesn't come for free since we need to manage the key ordering,

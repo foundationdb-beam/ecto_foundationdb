@@ -202,12 +202,13 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
     index_name = idx[:id]
     fields = idx[:fields]
     index_values = Indexer.Default.get_index_values(schema, idx[:fields], indexed_values)
-    future_ref = :erlfdb.watch(tx, key(tenant, source, index_name, fields, index_values, name))
+    erlfdb_future = :erlfdb.watch(tx, key(tenant, source, index_name, fields, index_values, name))
 
     opts = Keyword.merge(opts, query_opts)
 
-    Future.new_deferred(
-      future_ref,
+    Future.new(
+      :erlfdb_future,
+      erlfdb_future,
       fn _ ->
         {schema, {__MODULE__, indexed_values, name}, opts,
          fn _, new_opts ->
@@ -287,14 +288,13 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
 
   defp async_get(schema, indexed_values, name) do
     source = Schema.get_source(schema)
-    future = Future.new()
     {tenant, tx} = assert_tenant_tx!()
     idx = tx_lookup_idx!(tenant, source, indexed_values)
     index_name = idx[:id]
     fields = idx[:fields]
     index_values = Indexer.Default.get_index_values(schema, fields, indexed_values)
-    future_ref = :erlfdb.get(tx, key(tenant, source, index_name, fields, index_values, name))
-    Future.set(future, tx, future_ref, &decode_counter/1)
+    erlfdb_future = :erlfdb.get(tx, key(tenant, source, index_name, fields, index_values, name))
+    Future.new(:erlfdb_future, erlfdb_future, &decode_counter/1)
   end
 
   # This defines the full set of values that SchemaMetadata tracks.

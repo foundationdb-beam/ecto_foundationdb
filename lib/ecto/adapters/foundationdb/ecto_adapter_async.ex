@@ -58,7 +58,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAsync do
 
     vs_future = Versionstamp.get(tx)
 
-    Future.apply(vs_future, fn vs ->
+    Future.then(vs_future, fn vs ->
       Enum.map(result, &resolve_versionstamp(tenant, &1, vs, pk_field))
     end)
   end
@@ -74,7 +74,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAsync do
         raise "Pipelining failure"
 
       future ->
-        Future.apply(future, fn {return_handler, result} ->
+        Future.then(future, fn {return_handler, result} ->
           invoke_return_handler(repo, queryable, return_handler, result)
         end)
     end

@@ -40,8 +40,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
           """
         end
 
-        future = Future.before_transactional()
-        {{pk_field, pk}, future, data_object}
+        {{pk_field, pk}, data_object}
       end)
 
     num_ins =
@@ -90,7 +89,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
-    future = Future.before_transactional()
 
     res =
       Metadata.transactional(tenant, adapter_meta, source, fn tx, metadata ->
@@ -99,7 +97,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
           tx,
           {schema, source, context},
           pk_field,
-          [{pk, future}],
+          [pk],
           update_data,
           metadata,
           options
@@ -128,7 +126,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     pk_field = Fields.get_pk_field!(schema)
     pk = filters[pk_field]
-    future = Future.before_transactional()
 
     res =
       Metadata.transactional(tenant, adapter_meta, source, fn tx, metadata ->
@@ -136,7 +133,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
           tenant,
           tx,
           {schema, source, context},
-          [{pk, future}],
+          [pk],
           metadata
         )
       end)
@@ -169,10 +166,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     pk = Map.get(struct, pk_field)
 
     Tx.transactional(tenant, fn tx ->
-      future_ref = Tx.watch(tenant, tx, {schema, source, context}, {pk_field, pk}, options)
+      erlfdb_future = Tx.watch(tenant, tx, {schema, source, context}, {pk_field, pk}, options)
 
       # See EctoAdapterAssigns for the other half of this implementation.
-      Future.new_deferred(future_ref, fn _ ->
+      Future.new(:erlfdb_future, erlfdb_future, fn _ ->
         {schema, {:pk, pk}, options,
          &watch(module, repo, &1, {adapter_meta, Keyword.merge(options, &2)})}
       end)

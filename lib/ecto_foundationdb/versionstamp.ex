@@ -25,7 +25,7 @@ defmodule EctoFoundationDB.Versionstamp do
   def incomplete?(_), do: false
 
   def get(tx) do
-    Future.new_deferred(:erlfdb.get_versionstamp(tx), &from_binary/1)
+    Future.new(:erlfdb_future, :erlfdb.get_versionstamp(tx), &from_binary/1)
   end
 
   def to_integer({:versionstamp, @inc_id, @inc_batch, _}) do

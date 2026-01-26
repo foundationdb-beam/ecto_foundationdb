@@ -142,7 +142,7 @@ defmodule EctoFoundationDB.Layer.Tx do
         tx,
         {schema, source, context},
         pk_field,
-        pk_futures,
+        pks,
         set_data,
         metadata,
         options
@@ -150,11 +150,11 @@ defmodule EctoFoundationDB.Layer.Tx do
     write_primary = Schema.get_option(context, :write_primary)
 
     futures =
-      Enum.map(pk_futures, fn {pk, future} ->
+      Enum.map(pks, fn pk ->
         kv_codec = Pack.primary_codec(tenant, source, pk)
-        future = async_get(tenant, tx, kv_codec, future)
+        future = async_get(tenant, tx, kv_codec)
 
-        Future.apply(future, fn
+        Future.then(future, fn
           nil ->
             nil
 
@@ -219,13 +219,13 @@ defmodule EctoFoundationDB.Layer.Tx do
     Indexer.update(tenant, tx, metadata, schema, {kv_codec, orig_data_object}, updates)
   end
 
-  def delete_pks(tenant, tx, {schema, source, _context}, pk_futures, metadata) do
+  def delete_pks(tenant, tx, {schema, source, _context}, pks, metadata) do
     futures =
-      Enum.map(pk_futures, fn {pk, future} ->
+      Enum.map(pks, fn pk ->
         kv_codec = Pack.primary_codec(tenant, source, pk)
-        future = async_get(tenant, tx, kv_codec, future)
+        future = async_get(tenant, tx, kv_codec)
 
-        Future.apply(future, fn
+        Future.then(future, fn
           nil ->
             nil
 
@@ -299,9 +299,9 @@ defmodule EctoFoundationDB.Layer.Tx do
     :erlfdb.fold_range(tx, key_start, key_end, fn _kv, acc -> acc + 1 end, 0)
   end
 
-  def async_get(tenant, tx, kv_codec, future) do
+  def async_get(tenant, tx, kv_codec) do
     {start_key, end_key} = PrimaryKVCodec.range(kv_codec)
-    future_ref = :erlfdb.get_range(tx, start_key, end_key, wait: false)
+    fold_future = :erlfdb.get_range(tx, start_key, end_key, wait: false)
 
     f = fn
       [] ->
@@ -322,7 +322,7 @@ defmodule EctoFoundationDB.Layer.Tx do
         kv
     end
 
-    Future.set(future, tx, future_ref, f)
+    Future.new(:tx_fold_future, {tx, fold_future}, f)
   end
 
   defp assert_conflict_target!(options) do

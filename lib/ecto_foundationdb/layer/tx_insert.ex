@@ -24,7 +24,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
   def insert_one(
         acc,
         tx,
-        {{pk_field, pk}, future, data_object},
+        {{pk_field, pk}, data_object},
         read_before_write
       ) do
     %__MODULE__{
@@ -38,13 +38,13 @@ defmodule EctoFoundationDB.Layer.TxInsert do
     kv = %DecodedKV{codec: kv_codec, data_object: data_object}
 
     if read_before_write do
-      future = Tx.async_get(tenant, tx, kv_codec, future)
-      Future.apply(future, &do_set(acc, tx, kv, &1))
+      future = Tx.async_get(tenant, tx, kv_codec)
+      Future.then(future, &do_set(acc, tx, kv, &1))
     else
       # We assume that the data doesn't exist. This speeds up data loading
       # but can result in inconsistent indexes if objects do exist in
       # the database that are being blindly overwritten.
-      Future.set_result(future, do_set(acc, tx, kv, nil))
+      Future.new(:result, do_set(acc, tx, kv, nil))
     end
   end
 

@@ -1,5 +1,7 @@
 Logger.configure(level: :info)
 
+:ok = FDB.Case.init()
+
 alias Ecto.Integration.SingleTenantTestRepo
 alias Ecto.Integration.TestManagedTenantRepo
 alias Ecto.Integration.TestRepo

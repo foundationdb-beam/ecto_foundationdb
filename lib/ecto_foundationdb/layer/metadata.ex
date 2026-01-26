@@ -255,26 +255,24 @@ defmodule EctoFoundationDB.Layer.Metadata do
     cache? = :enabled == (tenant.options[:metadata_cache] || :enabled)
     cache = if cache?, do: cache, else: nil
 
-    future = Future.before_transactional()
-
     Tx.transactional(tenant, fn tx ->
-      transactional_(tenant, tx, cache, source, future, fun)
+      transactional_(tenant, tx, cache, source, fun)
     end)
   end
 
-  def transactional_(tenant, tx, nil, source, future, fun) do
-    {_vsn, metadata, validator} = get_metadata(tenant, tx, source, nil, future)
+  def transactional_(tenant, tx, nil, source, fun) do
+    {_vsn, metadata, validator} = get_metadata(tenant, tx, source, nil)
 
     apply_optimistically(tx, metadata, fun, validator, nil, nil)
   end
 
-  def transactional_(tenant, tx, cache, source, future, fun) do
+  def transactional_(tenant, tx, cache, source, fun) do
     now = System.monotonic_time(:millisecond)
 
     cache_key = Cache.key(tenant, source)
     cache_item = Cache.lookup(cache, cache_key)
 
-    {mdv, metadata, validator} = get_metadata(tenant, tx, source, cache_item, future)
+    {mdv, metadata, validator} = get_metadata(tenant, tx, source, cache_item)
 
     Cache.update(cache, Cache.CacheItem.new(cache_key, mdv, metadata, now))
 
@@ -290,12 +288,12 @@ defmodule EctoFoundationDB.Layer.Metadata do
     end
   end
 
-  defp get_metadata(tenant, tx, source, cache_item, future) do
+  defp get_metadata(tenant, tx, source, cache_item) do
     valid = fn -> true end
 
     case Map.get(@builtin_metadata, source, nil) do
       nil ->
-        global_only_mdv = MetadataVersion.tx_get_new(tx, future) |> Future.result()
+        global_only_mdv = MetadataVersion.tx_get_new(tx) |> Future.result()
 
         # We skip the global check if this is not our first time through the transaction.
         # Otherwise, another tenant's index creation can cause us to retry more than is required.
@@ -312,12 +310,11 @@ defmodule EctoFoundationDB.Layer.Metadata do
               global_only_mdv,
               tenant,
               tx,
-              @app_metadata_version_idx,
-              future
+              @app_metadata_version_idx
             )
 
-          claim_future = MigrationsPJ.tx_get_claim_status(tenant, tx, source, future)
-          _get_metadata(tenant, tx, source, cache_item, mdv_future, claim_future, future)
+          claim_future = MigrationsPJ.tx_get_claim_status(tenant, tx, source)
+          _get_metadata(tenant, tx, source, cache_item, mdv_future, claim_future)
         end
 
       metadata ->
@@ -325,11 +322,11 @@ defmodule EctoFoundationDB.Layer.Metadata do
     end
   end
 
-  defp _get_metadata(tenant, tx, source, nil, mdv_future, claim_future, future) do
-    read_metadata(tenant, tx, source, future, mdv_future, claim_future)
+  defp _get_metadata(tenant, tx, source, nil, mdv_future, claim_future) do
+    read_metadata(tenant, tx, source, mdv_future, claim_future)
   end
 
-  defp _get_metadata(_tenant, _tx, _source, cache_item, mdv_future, claim_future, _future) do
+  defp _get_metadata(_tenant, _tx, _source, cache_item, mdv_future, claim_future) do
     get_metadata_from_cache(cache_item, mdv_future, claim_future)
   end
 
@@ -350,8 +347,8 @@ defmodule EctoFoundationDB.Layer.Metadata do
     {mdv, Cache.CacheItem.get_metadata(cache_item), vsn_validator}
   end
 
-  defp read_metadata(tenant, tx, source, future, mdv_future, claim_future) do
-    metadata_future = tx_get_metadata(tenant, tx, source, future)
+  defp read_metadata(tenant, tx, source, mdv_future, claim_future) do
+    metadata_future = tx_get_metadata(tenant, tx, source)
 
     [mdv, claim_status, metadata] =
       [mdv_future, claim_future, metadata_future]
@@ -376,13 +373,12 @@ defmodule EctoFoundationDB.Layer.Metadata do
     Pack.namespaced_range(tenant, source(), source, [])
   end
 
-  def tx_get_metadata(tenant, tx, source, future) do
+  def tx_get_metadata(tenant, tx, source) do
     {start_key, end_key} = metadata_range(tenant, source)
 
-    Future.set(
-      future,
-      tx,
-      :erlfdb.get_range(tx, start_key, end_key, wait: false),
+    Future.new(
+      :tx_fold_future,
+      {tx, :erlfdb.get_range(tx, start_key, end_key, wait: false)},
       &decode_metadata/1
     )
   end

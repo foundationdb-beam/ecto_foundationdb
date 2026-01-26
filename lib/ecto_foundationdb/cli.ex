@@ -324,8 +324,7 @@ defmodule EctoFoundationDB.CLI do
     source = Schema.get_source(schema)
 
     metadata =
-      Future.new()
-      |> then(&Metadata.tx_get_metadata(tenant, tx, source, &1))
+      Metadata.tx_get_metadata(tenant, tx, source)
       |> Future.result()
 
     Stream.filter(
@@ -367,8 +366,7 @@ defmodule EctoFoundationDB.CLI do
 
       # We need to perform the 'get' again for the DecodedKV. With the FDB RYW transaction,
       # it should be retrieved from the transaction's in-memory state without performance penalty.
-      future = Future.new()
-      future = Tx.async_get(tenant, tx, kv_codec, future)
+      future = Tx.async_get(tenant, tx, kv_codec)
       decoded_kv = Future.result(future)
 
       Tx.update_data_object(

@@ -105,7 +105,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
     Tx.transactional(options[:prefix], fn _tx ->
       assign_future =
         repo.async_get(schema, id, options)
-        |> Future.apply(fn struct_or_nil ->
+        |> Future.then(fn struct_or_nil ->
           struct_or_nil = usetenant(struct_or_nil, tenant)
           new_future = maybe_new_watch(struct_or_nil, watch_options, options, new_watch_fn)
 
@@ -132,7 +132,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
         end
 
       assign_future =
-        Future.apply(assign_future, fn result ->
+        Future.then(assign_future, fn result ->
           result = usetenant(result, tenant)
           new_future = maybe_new_watch(result, watch_options, options, new_watch_fn)
 
