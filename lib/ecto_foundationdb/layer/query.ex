@@ -12,25 +12,22 @@ defmodule EctoFoundationDB.Layer.Query do
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
 
-  alias FDB.BarrierStream
-
   @doc """
   Executes a query for retrieving data.
 
   Must be called while inside a transaction.
   """
   def all(tenant, adapter_meta, plan, options) do
-    {plan, stream} =
+    {plan, iterator} =
       Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
         plan = make_range(metadata, plan, options)
-        stream = tx_stream_range(tx, plan, options)
-        {plan, stream}
+        iterator = tx_range_iterator(tx, plan, options)
+        {plan, iterator}
       end)
 
-    stream
-    |> BarrierStream.new()
-    |> BarrierStream.then(&unpack_and_filter(&1, plan))
-    |> BarrierStream.then(&Stream.map(&1, fn %DecodedKV{data_object: v} -> v end))
+    iterator
+    |> FDB.LazyRangeIterator.then(&unpack_and_filter(&1, plan))
+    |> FDB.LazyRangeIterator.then(&Stream.map(&1, fn %DecodedKV{data_object: v} -> v end))
   end
 
   @doc """
@@ -98,7 +95,7 @@ defmodule EctoFoundationDB.Layer.Query do
     end
   end
 
-  defp tx_stream_range(
+  defp tx_range_iterator(
          tx,
          plan = %QueryPlan{layer_data: %{range: {start_key, end_key}}},
          options
@@ -110,10 +107,10 @@ defmodule EctoFoundationDB.Layer.Query do
       |> kw_take_as(:key_limit, :limit)
       |> Keyword.put(:reverse, backward?)
 
-    FDB.stream_range(tx, start_key, end_key, get_options)
+    FDB.LazyRangeIterator.start(tx, start_key, end_key, get_options)
   end
 
-  defp tx_stream_range(
+  defp tx_range_iterator(
          tx,
          plan = %QueryPlan{layer_data: %{range: {start_key, end_key, mapper}}},
          options
@@ -126,7 +123,7 @@ defmodule EctoFoundationDB.Layer.Query do
       |> Keyword.put(:reverse, backward?)
       |> Keyword.put(:mapper, :erlfdb_tuple.pack(mapper))
 
-    FDB.stream_range(tx, start_key, end_key, get_options)
+    FDB.LazyRangeIterator.start(tx, start_key, end_key, get_options)
   end
 
   defp tx_update_range(
@@ -139,7 +136,8 @@ defmodule EctoFoundationDB.Layer.Query do
     write_primary = Schema.get_option(plan.context, :write_primary)
 
     tx
-    |> tx_stream_range(plan, [])
+    |> tx_range_iterator(plan, [])
+    |> FDB.Stream.from_iterator()
     |> unpack_and_filter(plan)
     |> Stream.map(
       &Tx.update_data_object(
@@ -159,7 +157,8 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp tx_delete_range(tx, plan, metadata) do
     tx
-    |> tx_stream_range(plan, [])
+    |> tx_range_iterator(plan, [])
+    |> FDB.Stream.from_iterator()
     |> unpack_and_filter(plan)
     |> Stream.map(&Tx.delete_data_object(plan.tenant, tx, plan.schema, &1, metadata))
     |> Enum.to_list()

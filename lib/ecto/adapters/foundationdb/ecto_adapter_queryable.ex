@@ -2,6 +2,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   @moduledoc false
   @behaviour Ecto.Adapter.Queryable
 
+  alias FDB.LazyRangeIterator
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable.Continuation
 
   alias EctoFoundationDB.Assert.CorrectTenancy
@@ -13,8 +14,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
-
-  alias FDB.BarrierStream
 
   defmodule Continuation do
     @moduledoc false
@@ -68,19 +67,18 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         must_wait? = not Tx.in_tx?()
 
         Tx.transactional(tenant, fn _tx ->
-          barrier_stream = Query.all(tenant, adapter_meta, plan, options)
+          ri = Query.all(tenant, adapter_meta, plan, options)
 
           if must_wait? do
-            {_, barrier_stream} = BarrierStream.advance(barrier_stream)
-            barrier_stream
+            {_, ri} = LazyRangeIterator.advance(ri)
+            ri
           else
-            barrier_stream
+            ri
           end
         end)
-        |> BarrierStream.to_stream()
-        |> limit_fn.()
-        |> select(Fields.parse_select_fields(select_fields))
-        |> then(&Future.new(:stream, &1))
+        |> LazyRangeIterator.then(limit_fn)
+        |> then(&Future.new(:range_iterator, &1))
+        |> Future.then(&select(&1, Fields.parse_select_fields(select_fields)))
         |> handle_returning(options)
     end
   end
@@ -136,8 +134,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     {%{context: context}, query = %Ecto.Query{prefix: tenant}} =
       CorrectTenancy.assert_by_query!(repo_config, query)
 
-    tenant
-    |> stream_all(adapter_meta, context, query, params, options)
+    stream_all(tenant, adapter_meta, context, query, params, options)
   end
 
   def stream(
@@ -172,15 +169,21 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
     must_wait? = not Tx.in_tx?()
 
-    {_, barrier_stream} =
+    {_, ri} =
       Tx.transactional(tenant, fn _tx ->
-        barrier_stream = Query.all(tenant, adapter_meta, plan, options)
-        if must_wait?, do: BarrierStream.advance(barrier_stream), else: barrier_stream
+        ri = Query.all(tenant, adapter_meta, plan, options)
+
+        if must_wait? do
+          {_, ri} = LazyRangeIterator.advance(ri)
+          ri
+        else
+          ri
+        end
       end)
 
-    barrier_stream
-    |> BarrierStream.to_stream()
-    |> then(&Future.new(:stream, &1))
+    # @todo: Query limit
+    ri
+    |> then(&Future.new(:range_iterator, &1))
     |> Future.then(fn objs ->
       case return_handler do
         :all_from_source ->
@@ -301,30 +304,33 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
     options = ef_query_options.(continuation)
 
-    {cont, barrier_stream} =
+    compute_cont = fn pages ->
+      last_page = List.last(pages)
+      {Enum.sum(Stream.map(pages, &length/1)), List.last(last_page)}
+    end
+
+    {cont, stream} =
       Tx.transactional(tenant, fn tx ->
         # Advance the stream so that we can retrieve the last key for building
         # the continuation
-        {cont, barrier_stream} =
+        {cont, ri} =
           Query.all(tenant, adapter_meta, plan, options)
-          |> BarrierStream.advance(fn kvs -> {length(kvs), List.last(kvs)} end)
+          |> LazyRangeIterator.advance(compute_cont)
 
-        barrier_stream =
+        stream = FDB.Stream.from_iterator(ri)
+
+        stream =
           if is_nil(user_callback) do
-            barrier_stream
+            stream
           else
-            barrier_stream
-            |> BarrierStream.then(&user_callback.(tx, &1))
-            |> BarrierStream.set_barrier()
+            Enum.to_list(user_callback.(tx, stream))
           end
 
-        {_, barrier_stream} = BarrierStream.advance(barrier_stream)
-        {cont, barrier_stream}
+        {cont, stream}
       end)
 
     objs =
-      barrier_stream
-      |> BarrierStream.to_stream()
+      stream
       |> select(field_names)
       |> Enum.to_list()
 

@@ -57,7 +57,7 @@ defmodule EctoFoundationDB.Future do
 
   def cancel(future = %__MODULE__{type: :range_iterator}) do
     %{promise: iterator} = future
-    :erlfdb_range_iterator.stop(iterator)
+    :erlfdb_iterator.stop(iterator)
     set_result(%{future | handler: &Function.identity/1}, nil)
   end
 
@@ -135,7 +135,9 @@ defmodule EctoFoundationDB.Future do
       else
         refs = Map.keys(reffed_iterators)
         iterators = Map.values(reffed_iterators)
-        Enum.zip(refs, :erlfdb_range_iterator.pipeline(iterators)) |> Enum.into(%{})
+        iterator_results = :erlfdb_iterator.pipeline(iterators)
+        results = for l <- iterator_results, do: Enum.concat(l)
+        Enum.zip(refs, results) |> Enum.into(%{})
       end
 
     results = Map.merge(results_folds, results_iterators)
