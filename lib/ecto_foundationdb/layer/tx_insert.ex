@@ -35,7 +35,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
     kv_codec = Pack.primary_codec(tenant, source, pk)
     read_before_write = if kv_codec.vs?, do: false, else: read_before_write
     data_object = [{pk_field, pk} | Keyword.delete(data_object, pk_field)]
-    kv = %DecodedKV{codec: kv_codec, data_object: data_object}
+    kv = %DecodedKV{codec: kv_codec, data_object: data_object, multikey?: false, range: nil}
 
     if read_before_write do
       future = Tx.async_get(tenant, tx, kv_codec)

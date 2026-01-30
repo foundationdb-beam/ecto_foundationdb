@@ -4,8 +4,8 @@ defmodule EctoFoundationDB.CLI do
   part of application code.
   """
   alias EctoFoundationDB.Future
+  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Metadata
-  alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.Schema
 
@@ -269,14 +269,16 @@ defmodule EctoFoundationDB.CLI do
     |> Enum.count()
   end
 
-  defp tx_apply_copies_with_update!(tenant, tx, repo, schema, data_object_stream, copies) do
+  defp tx_apply_copies_with_update!(tenant, tx, repo, schema, dkv_stream, copies) do
     Stream.filter(
-      data_object_stream,
+      dkv_stream,
       &tx_obj_apply_copies_with_update!(tenant, tx, repo, schema, &1, copies)
     )
   end
 
-  defp tx_obj_apply_copies_with_update!(tenant, _tx, repo, schema, data_object, copies) do
+  defp tx_obj_apply_copies_with_update!(tenant, _tx, repo, schema, dkv = %DecodedKV{}, copies) do
+    %{data_object: data_object} = dkv
+
     changeset =
       Enum.reduce(copies, nil, fn {from, to}, acc ->
         case {data_object[from], data_object[to]} do
@@ -317,7 +319,7 @@ defmodule EctoFoundationDB.CLI do
          tx,
          repo,
          schema,
-         data_object_stream,
+         dkv_stream,
          deletes,
          adapter_opts
        ) do
@@ -328,7 +330,7 @@ defmodule EctoFoundationDB.CLI do
       |> Future.result()
 
     Stream.filter(
-      data_object_stream,
+      dkv_stream,
       &tx_obj_apply_deletes_with_update!(
         tenant,
         tx,
@@ -347,34 +349,29 @@ defmodule EctoFoundationDB.CLI do
          tx,
          _repo,
          schema,
-         data_object,
+         dkv = %DecodedKV{},
          metadata,
          deletes,
          adapter_opts
        ) do
+    %{data_object: data_object} = dkv
     obj_keys = Keyword.keys(data_object)
 
     needs_update? =
       0 < MapSet.size(MapSet.intersection(MapSet.new(obj_keys), MapSet.new(deletes)))
 
     if needs_update? do
-      [{pk_field, pk} | _] = data_object
+      [{pk_field, _pk} | _] = data_object
       source = Schema.get_source(schema)
       context = Schema.get_context!(source, schema)
       write_primary = Schema.get_option(context, :write_primary)
-      kv_codec = Pack.primary_codec(tenant, source, pk)
-
-      # We need to perform the 'get' again for the DecodedKV. With the FDB RYW transaction,
-      # it should be retrieved from the transaction's in-memory state without performance penalty.
-      future = Tx.async_get(tenant, tx, kv_codec)
-      decoded_kv = Future.result(future)
 
       Tx.update_data_object(
         tenant,
         tx,
         schema,
         pk_field,
-        {decoded_kv, [clear: deletes]},
+        {dkv, [clear: deletes]},
         metadata,
         write_primary,
         adapter_opts

@@ -157,20 +157,19 @@ defmodule EctoFoundationDB.Indexer.Default do
 
   @impl true
   def create(tenant, tx, idx, schema, {start_key, end_key}, limit) do
-    {count, last_fdb_key} =
+    {count, end_proc_fdb_key} =
       tx
       |> :erlfdb.get_range(start_key, end_key, limit: limit, wait: true)
-      |> PrimaryKVCodec.stream_decode(tenant, emit_db_key?: true)
-      |> Enum.reduce({0, nil}, fn {fdb_key, decoded_kv}, {count, _acc} ->
-        %DecodedKV{codec: kv_codec, data_object: data_object} = decoded_kv
+      |> PrimaryKVCodec.decode_as_stream(tenant)
+      |> Enum.reduce({0, nil}, fn decoded_kv = %DecodedKV{}, {count, _acc} ->
+        %{codec: kv_codec, data_object: data_object, range: {_, end_fdb_key}} = decoded_kv
         entry = get_index_entry(tenant, idx, schema, {kv_codec, data_object})
         set_index_entry(tx, entry)
-        {count + 1, fdb_key}
+        {count + 1, end_fdb_key}
       end)
 
     if count > 0 do
-      next_key = :erlfdb_key.strinc(last_fdb_key)
-      {count, {next_key, end_key}}
+      {count, {end_proc_fdb_key, end_key}}
     else
       {0, {end_key, end_key}}
     end

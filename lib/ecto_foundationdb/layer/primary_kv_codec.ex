@@ -2,7 +2,7 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec do
   @moduledoc false
   alias EctoFoundationDB.Layer.InternalMetadata
   alias EctoFoundationDB.Layer.Pack
-  alias EctoFoundationDB.Layer.PrimaryKVCodec.StreamDecoder
+  alias EctoFoundationDB.Layer.PrimaryKVCodec.Iterator
   alias EctoFoundationDB.Options
   alias EctoFoundationDB.Tenant
 
@@ -22,8 +22,17 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec do
 
   def vs?(%__MODULE__{vs?: vs?}), do: vs?
 
-  def stream_decode(kvs, tenant, opts \\ []) do
-    StreamDecoder.stream_decode(kvs, tenant, opts)
+  def decode_as_iterator(cont_state, kvs, tenant, opts \\ []) do
+    Iterator.start(cont_state, kvs, tenant, opts)
+  end
+
+  def get_iterator_state(iterator) do
+    Iterator.get_state(iterator)
+  end
+
+  def decode_as_stream(kvs, tenant, opts \\ []) do
+    decode_as_iterator(nil, kvs, tenant, opts)
+    |> FDB.Stream.from_iterator()
   end
 
   def encode(kv_codec, fdb_value, options) do

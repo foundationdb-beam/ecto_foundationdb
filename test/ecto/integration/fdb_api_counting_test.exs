@@ -9,6 +9,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
   alias Ecto.Adapters.FoundationDB
   alias Ecto.Integration.TestRepo
+  alias Ecto.Integration.TinyRepo
 
   alias EctoFoundationDB.ModuleToModuleTracer
   alias EctoFoundationDB.Schemas.QueueItem
@@ -36,13 +37,23 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     {:erlfdb, :get_mapped_range, 5},
     {:erlfdb, :wait_for_all, 1},
     {:erlfdb, :watch, 2},
-    {:erlfdb, :wait_for_all_interleaving, 2}
+    {:erlfdb, :wait_for_all_interleaving, 2},
+    {:erlfdb_range_iterator, :start, 3},
+    {:erlfdb_range_iterator, :start, 4},
+    {:erlfdb_iterator, :next, 1},
+    {:erlfdb_iterator, :pipeline, 1},
+    {FDB.LazyRangeIterator, :start, 3},
+    {FDB.LazyRangeIterator, :start, 4},
+    {FDB.LazyRangeIterator, :advance, 1}
   ]
 
   def with_erlfdb_calls(name, fun) do
     caller_spec = fn caller_module ->
       try do
         case Module.split(caller_module) do
+          ["Ecto", "Adapters", "FoundationDB" | _] ->
+            true
+
           ["EctoFoundationDB" | _] ->
             true
 
@@ -59,12 +70,66 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       ModuleToModuleTracer.with_traced_calls(name, [caller_spec], @traced_calls, fun)
 
     # clean up the traces for more concise assertions
+    # @todo: support more modules
     traced_calls =
-      for {caller, {:erlfdb, call_fun, _arity}} <- traced_calls do
-        {caller, call_fun}
+      for {caller, {module, call_fun, _arity}} <- traced_calls do
+        {caller, {module, call_fun}}
       end
 
     {traced_calls, res}
+  end
+
+  test "open new tenant", context do
+    id = Ecto.UUID.autogenerate()
+
+    {calls, _tenant} =
+      with_erlfdb_calls(context.test, fn ->
+        Tenant.open!(TinyRepo, id)
+      end)
+
+    Tenant.clear_delete!(TinyRepo, id)
+
+    # @todo: Do we really need all these calls? seems excessive for a single migration on zero data
+    assert [
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {Ecto.Adapters.FoundationDB.EctoAdapterQueryable, {FDB.LazyRangeIterator, :advance}},
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.MigrationsPJ, {:erlfdb, :set_versionstamped_value}},
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :get_range}},
+             {EctoFoundationDB.MigrationsPJ, {:erlfdb, :set}},
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :set}},
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :set}},
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.MigrationsPJ, {:erlfdb, :set_versionstamped_value}},
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :get_range}},
+             {EctoFoundationDB.MigrationsPJ, {:erlfdb, :set}},
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :set}},
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :set}},
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
+             {EctoFoundationDB.Layer.PrimaryKVCodec, {:erlfdb, :set}},
+             {EctoFoundationDB.Indexer.MDVAppVersion, {:erlfdb, :max}},
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :clear}},
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :clear}}
+           ] = calls
+  end
+
+  test "open existing tenant", context = %{tenant_id: tenant_id} do
+    {calls, _tenant} =
+      with_erlfdb_calls(context.test, fn ->
+        Tenant.open!(TestRepo, tenant_id)
+      end)
+
+    assert [
+             # read app version
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {Ecto.Adapters.FoundationDB.EctoAdapterQueryable, {FDB.LazyRangeIterator, :advance}}
+           ] = calls
   end
 
   test "insert with no metadata cache", context do
@@ -82,24 +147,28 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # there is no cache, so get app version, source claim key, and indexes
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.MigrationsPJ, :get},
-             {EctoFoundationDB.Layer.Metadata, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.MigrationsPJ, {:erlfdb, :get}},
+             {EctoFoundationDB.Layer.Metadata, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
+
+             # wait on metadata results
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # check for existence of primary write
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
              # primary write
-             {EctoFoundationDB.Layer.PrimaryKVCodec, :set},
+             {EctoFoundationDB.Layer.PrimaryKVCodec, {:erlfdb, :set}},
 
              # index write
-             {EctoFoundationDB.Indexer.Default, :set}
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :set}}
            ] == calls
   end
 
@@ -121,18 +190,18 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # cache is a match, so there's no work here! :)
 
              # check for existence of primary write
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
              # primary write, index write
-             {EctoFoundationDB.Layer.PrimaryKVCodec, :set},
-             {EctoFoundationDB.Indexer.Default, :set}
+             {EctoFoundationDB.Layer.PrimaryKVCodec, {:erlfdb, :set}},
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :set}}
            ] == calls
   end
 
@@ -157,24 +226,25 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # global metadataVersion does not match, so we need to check
              # local (app version) and claim key
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.MigrationsPJ, :get},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.MigrationsPJ, {:erlfdb, :get}},
 
              # check for existence of primary write
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
              # primary write, index write
-             {EctoFoundationDB.Layer.PrimaryKVCodec, :set},
-             {EctoFoundationDB.Indexer.Default, :set},
+             {EctoFoundationDB.Layer.PrimaryKVCodec, {:erlfdb, :set}},
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :set}},
 
              # wait for app metadata version and claim_key
-             {EctoFoundationDB.Future, :wait_for_all_interleaving}
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}}
            ] == calls
   end
 
@@ -197,16 +267,16 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # check for existence of primary write
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
              # primary write, index write
-             {EctoFoundationDB.Layer.PrimaryKVCodec, :set},
-             {EctoFoundationDB.Indexer.Default, :set}
+             {EctoFoundationDB.Layer.PrimaryKVCodec, {:erlfdb, :set}},
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :set}}
            ] == calls
   end
 
@@ -221,12 +291,57 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # get and wait primary write key
-             {EctoFoundationDB.Layer.Query, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving}
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {Ecto.Adapters.FoundationDB.EctoAdapterQueryable, {FDB.LazyRangeIterator, :advance}}
+           ] = calls
+  end
+
+  test "all", context do
+    tenant = context[:tenant]
+    TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+    TestRepo.insert!(%User{name: "Bob"}, prefix: tenant)
+
+    {calls, _} =
+      with_erlfdb_calls(context.test, fn ->
+        TestRepo.all(User, prefix: tenant)
+      end)
+
+    assert [
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
+
+             # get and wait primary write key
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {Ecto.Adapters.FoundationDB.EctoAdapterQueryable, {FDB.LazyRangeIterator, :advance}}
+           ] = calls
+  end
+
+  test "async_all", context do
+    tenant = context[:tenant]
+    TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
+    TestRepo.insert!(%User{name: "Bob"}, prefix: tenant)
+
+    {calls, _} =
+      with_erlfdb_calls(context.test, fn ->
+        TestRepo.transactional(tenant, fn ->
+          f = TestRepo.async_all(User, prefix: tenant)
+          TestRepo.await([f])
+        end)
+      end)
+
+    assert [
+             # we always get global metadataVersion
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
+
+             # wait for results
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
            ] = calls
   end
 
@@ -242,19 +357,19 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
              # set data in primary write
-             {EctoFoundationDB.Layer.Tx, :set},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :set}},
 
              # clear and set default index. :name has changed
-             {EctoFoundationDB.Indexer.Default, :clear},
-             {EctoFoundationDB.Indexer.Default, :set}
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :clear}},
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :set}}
            ] == calls
   end
 
@@ -270,15 +385,15 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
              # set data in primary write
-             {EctoFoundationDB.Layer.Tx, :set}
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :set}}
            ] == calls
   end
 
@@ -293,16 +408,14 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
-             # get_mapped_range for :name index. The call to :get_range shown here
-             # is a tail call from get_mapped_range, so it's expected and harmless
-             {EctoFoundationDB.Layer.Query, :get_mapped_range},
-             {EctoFoundationDB.Layer.Query, :get_range},
+             # get_mapped_range for :name index
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
 
              # wait for get_mapped_range result
-             {EctoFoundationDB.Future, :wait_for_all_interleaving}
+             {Ecto.Adapters.FoundationDB.EctoAdapterQueryable, {FDB.LazyRangeIterator, :advance}}
            ] == calls
   end
 
@@ -325,23 +438,21 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # get_mapped_range for :name index
-             {EctoFoundationDB.Layer.Query, :get_mapped_range},
-             {EctoFoundationDB.Layer.Query, :get_range},
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
 
              # get global again (2nd async_get_by). Not strictly necessary, but there's no cost
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # get_mapped_range for :name index
-             {EctoFoundationDB.Layer.Query, :get_mapped_range},
-             {EctoFoundationDB.Layer.Query, :get_range},
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
 
              # wait for results of both get_mapped_range calls
-             {EctoFoundationDB.Future, :wait_for_all_interleaving}
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
            ] == calls
   end
 
@@ -356,18 +467,18 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # check for existence
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
              # clear primary
-             {EctoFoundationDB.Layer.Tx, :clear},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :clear}},
 
              # clear :name index
-             {EctoFoundationDB.Indexer.Default, :clear}
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :clear}}
            ] == calls
   end
 
@@ -389,24 +500,24 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # check for existence of primary write
-             {EctoFoundationDB.Layer.Tx, :get_range},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
 
              # wait for existence check
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
              # primary write
-             {EctoFoundationDB.Layer.PrimaryKVCodec, :set},
+             {EctoFoundationDB.Layer.PrimaryKVCodec, {:erlfdb, :set}},
 
              # multikey writes
-             {EctoFoundationDB.Layer.PrimaryKVCodec, :set},
-             {EctoFoundationDB.Layer.PrimaryKVCodec, :set},
+             {EctoFoundationDB.Layer.PrimaryKVCodec, {:erlfdb, :set}},
+             {EctoFoundationDB.Layer.PrimaryKVCodec, {:erlfdb, :set}},
 
              # index write
-             {EctoFoundationDB.Indexer.Default, :set}
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :set}}
            ] == calls
   end
 
@@ -425,18 +536,18 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
              # clear all existing multikey keys
-             {EctoFoundationDB.Layer.Tx, :clear_range},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :clear_range}},
 
              # set data in primary write
-             {EctoFoundationDB.Layer.Tx, :set}
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :set}}
            ] == calls
   end
 
@@ -455,19 +566,19 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # get and wait for existing data from primary write
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
              # set data in primary write
-             {EctoFoundationDB.Layer.Tx, :set},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :set}},
 
              # multikey writes
-             {EctoFoundationDB.Layer.Tx, :set},
-             {EctoFoundationDB.Layer.Tx, :set}
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :set}},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :set}}
            ] == calls
   end
 
@@ -484,18 +595,18 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # check for existence
-             {EctoFoundationDB.Layer.Tx, :get_range},
-             {EctoFoundationDB.Future, :wait_for_all_interleaving},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
              # clear multikey range
-             {EctoFoundationDB.Layer.Tx, :clear_range},
+             {EctoFoundationDB.Layer.Tx, {:erlfdb, :clear_range}},
 
              # clear :name index
-             {EctoFoundationDB.Indexer.Default, :clear}
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :clear}}
            ] == calls
   end
 
@@ -519,15 +630,15 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     assert [
              # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, :get},
-             {EctoFoundationDB.Future, :wait},
+             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
+             {EctoFoundationDB.Future, {:erlfdb, :wait}},
 
              # set the primary write and the index
-             {EctoFoundationDB.Layer.PrimaryKVCodec, :set_versionstamped_key},
-             {EctoFoundationDB.Indexer.Default, :set_versionstamped_key},
+             {EctoFoundationDB.Layer.PrimaryKVCodec, {:erlfdb, :set_versionstamped_key}},
+             {EctoFoundationDB.Indexer.Default, {:erlfdb, :set_versionstamped_key}},
 
              # wait for versionstamp future
-             {EctoFoundationDB.Future, :wait_for_all_interleaving}
+             {EctoFoundationDB.Future, {:erlfdb, :wait}}
            ] == calls
   end
 end

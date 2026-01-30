@@ -19,8 +19,19 @@ defmodule EctoFoundationDB.Future do
     set_result(%__MODULE__{handler: f}, result)
   end
 
+  def new(type = :erlfdb_iterator, promise, f) do
+    true = is_tuple(promise)
+
+    %__MODULE__{
+      ref: get_ref(type, promise),
+      type: type,
+      promise: promise,
+      handler: f
+    }
+  end
+
   def new(type, promise, f)
-      when type in [:erlfdb_future, :tx_fold_future, :stream, :range_iterator] do
+      when type in [:erlfdb_future, :tx_fold_future, :stream, :erlfdb_iterator] do
     %__MODULE__{
       ref: get_ref(type, promise),
       type: type,
@@ -55,7 +66,7 @@ defmodule EctoFoundationDB.Future do
     set_result(%{future | handler: &Function.identity/1}, nil)
   end
 
-  def cancel(future = %__MODULE__{type: :range_iterator}) do
+  def cancel(future = %__MODULE__{type: :erlfdb_iterator}) do
     %{promise: iterator} = future
     :erlfdb_iterator.stop(iterator)
     set_result(%{future | handler: &Function.identity/1}, nil)
@@ -99,7 +110,7 @@ defmodule EctoFoundationDB.Future do
     |> handler.()
   end
 
-  def result(future = %__MODULE__{type: :range_iterator}) do
+  def result(future = %__MODULE__{type: :erlfdb_iterator}) do
     %{promise: iterator, handler: handler} = future
 
     iterator
@@ -136,7 +147,8 @@ defmodule EctoFoundationDB.Future do
         refs = Map.keys(reffed_iterators)
         iterators = Map.values(reffed_iterators)
         iterator_results = :erlfdb_iterator.pipeline(iterators)
-        results = for l <- iterator_results, do: Enum.concat(l)
+        {results, iterators} = Enum.unzip(iterator_results)
+        Enum.map(iterators, &:erlfdb_iterator.stop/1)
         Enum.zip(refs, results) |> Enum.into(%{})
       end
 
@@ -158,7 +170,7 @@ defmodule EctoFoundationDB.Future do
             set_result(future, Enum.to_list(promise))
 
           {pipelined_type, new_result}
-          when pipelined_type in [:tx_fold_future, :range_iterator] ->
+          when pipelined_type in [:tx_fold_future, :erlfdb_iterator] ->
             set_result(future, new_result)
         end
       end
@@ -216,7 +228,7 @@ defmodule EctoFoundationDB.Future do
   defp get_ref(:erlfdb_future, {:erlfdb_future, ref, _}), do: ref
   defp get_ref(:tx_fold_future, {_tx, {:fold_future, _, {:erlfdb_future, ref, _}}}), do: ref
   defp get_ref(:stream, _), do: make_ref()
-  defp get_ref(:range_iterator, _), do: make_ref()
+  defp get_ref(:erlfdb_iterator, _), do: make_ref()
   defp get_ref(_, _), do: :erlang.error(:badarg)
 
   defp get_pipelineable([], tx, acc_folds, acc_iterators), do: {tx, acc_folds, acc_iterators}
@@ -231,7 +243,7 @@ defmodule EctoFoundationDB.Future do
   end
 
   defp get_pipelineable(
-         [%__MODULE__{type: :range_iterator, ref: ref, promise: iterator} | futures],
+         [%__MODULE__{type: :erlfdb_iterator, ref: ref, promise: iterator} | futures],
          tx,
          acc_folds,
          acc_iterators

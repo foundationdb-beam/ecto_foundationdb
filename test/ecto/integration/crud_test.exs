@@ -172,9 +172,18 @@ defmodule Ecto.Integration.CrudTest do
 
       {2, nil} = TestRepo.insert_all(Account, [account2, account1], prefix: tenant)
 
-      [%{name: "Jane" <> _}, %{name: "John" <> _}] =
-        from(Account, order_by: :name)
-        |> TestRepo.all(prefix: tenant)
+      assert [%{name: "Jane" <> _}, %{name: "John" <> _}] =
+               TestRepo.all(Account, prefix: tenant)
+               |> Enum.sort(fn %Account{name: a}, %Account{name: b} -> a <= b end)
+
+      assert_raise(
+        Unsupported,
+        ~r/the ordering must correspond to the primary key or an indexed field/,
+        fn ->
+          from(Account, order_by: :name)
+          |> TestRepo.all(prefix: tenant)
+        end
+      )
     end
 
     test "tx_insert", context do

@@ -6,7 +6,18 @@ defmodule EctoFoundationDB.QueryPlan do
   alias EctoFoundationDB.QueryPlan.Equal
   alias EctoFoundationDB.QueryPlan.None
 
-  defstruct [:tenant, :source, :schema, :context, :constraints, :updates, :layer_data, :ordering]
+  @enforce_keys [
+    :tenant,
+    :source,
+    :schema,
+    :context,
+    :constraints,
+    :updates,
+    :layer_data,
+    :ordering,
+    :limit
+  ]
+  defstruct @enforce_keys
 
   @type t() :: %__MODULE__{}
 
@@ -50,11 +61,15 @@ defmodule EctoFoundationDB.QueryPlan do
       ],
       updates: [],
       layer_data: %{},
-      ordering: []
+      ordering: [],
+      limit: Keyword.get(options, :limit)
     }
   end
 
-  def get(tenant, source, schema, context, wheres, updates, params, ordering) do
+  def get(tenant, source, schema, context, wheres, updates, params, ordering, limit) do
+    # @todo: if None is found, then check ordering for a constraint that requires an index
+    #   e.g.
+    #   %None{is_pk?: false, field: :name}
     constraints =
       case walk_ast(wheres, schema, params, []) do
         [] ->
@@ -76,7 +91,8 @@ defmodule EctoFoundationDB.QueryPlan do
         end),
       updates: resolve_updates(updates, params),
       layer_data: %{},
-      ordering: ordering
+      ordering: ordering,
+      limit: limit
     }
   end
 

@@ -3,7 +3,6 @@ defmodule EctoFoundationDB.Layer.Query do
 
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
-  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Metadata
   alias EctoFoundationDB.Layer.Pack
@@ -25,9 +24,7 @@ defmodule EctoFoundationDB.Layer.Query do
         {plan, iterator}
       end)
 
-    iterator
-    |> FDB.LazyRangeIterator.then(&unpack_and_filter(&1, plan))
-    |> FDB.LazyRangeIterator.then(&Stream.map(&1, fn %DecodedKV{data_object: v} -> v end))
+    FDB.LazyRangeIterator.then(iterator, &unpack_and_filter/2, %{cont_state: nil, plan: plan})
   end
 
   @doc """
@@ -137,8 +134,8 @@ defmodule EctoFoundationDB.Layer.Query do
 
     tx
     |> tx_range_iterator(plan, [])
+    |> FDB.LazyRangeIterator.then(&unpack_and_filter/2, %{cont_state: nil, plan: plan})
     |> FDB.Stream.from_iterator()
-    |> unpack_and_filter(plan)
     |> Stream.map(
       &Tx.update_data_object(
         plan.tenant,
@@ -158,25 +155,54 @@ defmodule EctoFoundationDB.Layer.Query do
   defp tx_delete_range(tx, plan, metadata) do
     tx
     |> tx_range_iterator(plan, [])
+    |> FDB.LazyRangeIterator.then(&unpack_and_filter/2, %{cont_state: nil, plan: plan})
     |> FDB.Stream.from_iterator()
-    |> unpack_and_filter(plan)
     |> Stream.map(&Tx.delete_data_object(plan.tenant, tx, plan.schema, &1, metadata))
     |> Enum.to_list()
     |> length()
   end
 
-  defp unpack_and_filter(kvs, plan = %{layer_data: %{idx: idx}}) do
-    kvs
-    |> Stream.map(&Indexer.unpack(idx, plan, &1))
-    |> Stream.filter(fn
-      nil -> false
-      _ -> true
-    end)
+  defp unpack_and_filter(_, state = %{plan: %QueryPlan{limit: 0}}) do
+    {:halt, state}
   end
 
-  defp unpack_and_filter(kvs, plan) do
-    PrimaryKVCodec.stream_decode(kvs, plan.tenant)
+  defp unpack_and_filter([kvs], state = %{plan: plan = %QueryPlan{layer_data: %{idx: idx}}}) do
+    %{limit: limit} = plan
+
+    stream =
+      kvs
+      |> Stream.map(&Indexer.unpack(idx, plan, &1))
+      |> Stream.filter(fn
+        nil -> false
+        _ -> true
+      end)
+
+    stream =
+      if is_nil(limit) do
+        stream
+      else
+        Stream.take(stream, limit)
+      end
+
+    objs = Enum.to_list(stream)
+
+    {:cont, objs, %{state | plan: decr_limit(plan, length(objs))}}
   end
+
+  defp unpack_and_filter([kvs], state = %{plan: plan = %QueryPlan{}}) do
+    %{cont_state: cont_state} = state
+    %{tenant: tenant, limit: limit} = plan
+    # @todo reverse
+    iterator = PrimaryKVCodec.decode_as_iterator(cont_state, kvs, tenant, limit: limit)
+    {objs, iterator} = :erlfdb_iterator.run(iterator)
+    cont_state = PrimaryKVCodec.get_iterator_state(iterator)
+    {:cont, objs, %{state | cont_state: cont_state, plan: decr_limit(plan, length(objs))}}
+  end
+
+  defp decr_limit(plan = %QueryPlan{limit: nil}, _by), do: plan
+  defp decr_limit(_plan = %QueryPlan{limit: 0}, _by), do: raise("limit bug")
+  defp decr_limit(_plan = %QueryPlan{limit: limit}, by) when by > limit, do: raise("limit bug")
+  defp decr_limit(plan = %QueryPlan{limit: limit}, by), do: %{plan | limit: limit - by}
 
   # Selects all data from source
   defp make_datakey_range(
@@ -240,36 +266,25 @@ defmodule EctoFoundationDB.Layer.Query do
     raise Unsupported, "Between query must have binary parameters"
   end
 
-  # Backward scan doesn't come for free since we need to manage the key ordering,
-  # so only do it if there's a limit set.
-  defp backward?(plan = %{layer_data: %{idx: idx}}, options) do
-    case options[:key_limit] do
-      int when is_integer(int) ->
-        %{ordering: ordering} = plan
-        idx_fields = idx[:fields]
-        idx_backward?(idx_fields, ordering)
-
-      _ ->
-        false
-    end
+  defp backward?(plan = %{layer_data: %{idx: idx}}, _options) do
+    %{ordering: ordering} = plan
+    idx_fields = idx[:fields]
+    idx_backward?(idx_fields, ordering)
   end
 
-  defp backward?(plan, options) do
-    case {plan.schema, plan.ordering, options[:key_limit]} do
-      {nil, [], int} when is_integer(int) ->
+  defp backward?(plan, _options) do
+    case {plan.schema, plan.ordering} do
+      {nil, []} ->
         false
 
-      {nil, [_ | _], int} when is_integer(int) ->
+      {nil, [_ | _]} ->
         raise Unsupported, """
         Cannot apply key_limit on query ordering when schema is unknown
         """
 
-      {schema, ordering, int} when is_integer(int) ->
+      {schema, ordering} ->
         pk_field = Fields.get_pk_field!(schema)
         idx_backward?([pk_field], ordering)
-
-      _ ->
-        false
     end
   end
 
@@ -282,7 +297,7 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp idx_backward?(_, [{_, _field} | _]) do
     raise(Unsupported, """
-    When querying with a key_limit, the ordering must correspond to the primary key or an indexed field.
+    When querying with an order_by, the ordering must correspond to the primary key or an indexed field.
     """)
   end
 

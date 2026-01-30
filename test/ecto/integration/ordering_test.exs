@@ -107,13 +107,16 @@ defmodule Ecto.Integration.OrderingTest.OrderByDataField do
 
   test "order by data field", context do
     tenant = context[:tenant]
-    [event2, event1, event3] = put_pk_data(tenant)
-    # order by non-pk, non-index field
-    assert [^event1, ^event2, ^event3] =
-             TestRepo.all(from(q in QueueItem, order_by: {:asc, :data}), prefix: tenant)
+    put_pk_data(tenant)
 
-    assert [^event3, ^event2, ^event1] =
-             TestRepo.all(from(q in QueueItem, order_by: {:desc, :data}), prefix: tenant)
+    # order by non-pk, non-index field is not supported
+    assert_raise Unsupported, ~r/order_by/, fn ->
+      TestRepo.all(from(q in QueueItem, order_by: {:asc, :data}), prefix: tenant)
+    end
+
+    assert_raise Unsupported, ~r/order_by/, fn ->
+      TestRepo.all(from(q in QueueItem, order_by: {:desc, :data}), prefix: tenant)
+    end
   end
 
   test "data field forward limit", context do
@@ -178,8 +181,13 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
     assert [] = TestRepo.all(Event, prefix: tenant)
 
     # index selection is not activated by order_by, where clause is required
-    assert [] = TestRepo.all(from(e in Event, order_by: [asc: e.date]), prefix: tenant)
-    assert [] = TestRepo.all(from(e in Event, order_by: [desc: e.date]), prefix: tenant)
+    assert_raise Unsupported, ~r//, fn ->
+      TestRepo.all(from(e in Event, order_by: [asc: e.date]), prefix: tenant)
+    end
+
+    assert_raise Unsupported, ~r/order_by/, fn ->
+      TestRepo.all(from(e in Event, order_by: [desc: e.date]), prefix: tenant)
+    end
   end
 
   test "order by first field in index, with limit", context do
@@ -242,7 +250,7 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
     put_idx_data(tenant)
 
     assert_raise Unsupported,
-                 ~r/When querying with a key_limit, the ordering must correspond to the primary key or an indexed field/,
+                 ~r/When querying with an order_by, the ordering must correspond to the primary key or an indexed field/,
                  fn ->
                    TestRepo.all(from(e in Event, order_by: [asc: e.user_id]),
                      prefix: tenant,
@@ -257,7 +265,7 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
     put_idx_data(tenant)
 
     assert_raise Unsupported,
-                 ~r/When querying with a key_limit, the ordering must correspond to the primary key or an indexed field/,
+                 ~r/When querying with an order_by, the ordering must correspond to the primary key or an indexed field/,
                  fn ->
                    TestRepo.all(from(e in Event, order_by: [asc: e.user_id], limit: 1),
                      prefix: tenant
@@ -442,10 +450,10 @@ defmodule Ecto.Integration.OrderingTest.QueryLimitWithSplitObjects do
 
     assert [%{id: "alice"}] = TestRepo.all(from(u in User, limit: 1), prefix: tenant)
 
-    # @todo
-    # assert [%{id: "alice"}, %{id: "bob"}] =
-    #         TestRepo.all(from(u in User, limit: 2), prefix: tenant)
-    # assert [%{id: "alice"}, %{id: "bob"}] =
-    #         TestRepo.all(from(u in User, limit: 2), prefix: tenant, key_limit: 3)
+    assert [%{id: "alice"}, %{id: "bob"}] =
+             TestRepo.all(from(u in User, limit: 2), prefix: tenant)
+
+    assert [%{id: "alice"}, %{id: "bob"}] =
+             TestRepo.all(from(u in User, limit: 2), prefix: tenant, key_limit: 3)
   end
 end

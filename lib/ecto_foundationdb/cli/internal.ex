@@ -17,7 +17,7 @@ defmodule EctoFoundationDB.CLI.Internal do
 
         tx
         |> :erlfdb.get_range(start_key, end_key, wait: true)
-        |> PrimaryKVCodec.stream_decode(tenant)
+        |> PrimaryKVCodec.decode_as_stream(tenant)
         |> Enum.map(fn %DecodedKV{data_object: obj} -> obj end)
       end)
 

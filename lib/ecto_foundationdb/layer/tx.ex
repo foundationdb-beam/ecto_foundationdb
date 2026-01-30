@@ -310,13 +310,15 @@ defmodule EctoFoundationDB.Layer.Tx do
       [{k, v}] ->
         %DecodedKV{
           codec: Pack.primary_write_key_to_codec(tenant, k),
-          data_object: Pack.from_fdb_value(v)
+          data_object: Pack.from_fdb_value(v),
+          multikey?: false,
+          range: {k, :erlfdb_key.strinc(k)}
         }
 
       kvs when is_list(kvs) ->
         [kv] =
           kvs
-          |> PrimaryKVCodec.stream_decode(tenant)
+          |> PrimaryKVCodec.decode_as_stream(tenant)
           |> Enum.to_list()
 
         kv

@@ -66,12 +66,12 @@ defmodule Ecto.Integration.MaxValueSizeTest do
     end
 
     test "reverse", %{tenant: tenant} do
-      assert {:ok, alice} =
+      assert {:ok, _alice} =
                %User{id: "alice", name: "Alice", notes: Util.get_random_bytes(100_000)}
                |> FoundationDB.usetenant(tenant)
                |> TestRepo.insert(max_single_value_size: 100_000)
 
-      assert {:ok, bob} =
+      assert {:ok, _bob} =
                %User{id: "bob", name: "Bob", notes: Util.get_random_bytes(100_000)}
                |> FoundationDB.usetenant(tenant)
                |> TestRepo.insert(max_single_value_size: 100_000)
