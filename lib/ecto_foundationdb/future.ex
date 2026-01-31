@@ -119,6 +119,11 @@ defmodule EctoFoundationDB.Future do
     |> handler.()
   end
 
+  def await(future) do
+    [future] = await_all([future])
+    future
+  end
+
   def await_all(futures) do
     futures
     |> await_stream()

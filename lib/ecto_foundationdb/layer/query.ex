@@ -16,6 +16,14 @@ defmodule EctoFoundationDB.Layer.Query do
 
   Must be called while inside a transaction.
   """
+  def all(_tenant, _adapter_meta, plan = %QueryPlan{constraints: [%{is_pk?: true}]}, options) do
+    # Single constraint on the primary key, skip the metadata retrieval
+    tx = Tx.get()
+    plan = make_datakey_range(plan, options)
+    iterator = tx_range_iterator(tx, plan, options)
+    FDB.LazyRangeIterator.then(iterator, &unpack_and_filter/2, %{cont_state: nil, plan: plan})
+  end
+
   def all(tenant, adapter_meta, plan, options) do
     {plan, iterator} =
       Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
@@ -61,7 +69,6 @@ defmodule EctoFoundationDB.Layer.Query do
          plan = %QueryPlan{constraints: [%{is_pk?: true}]},
          options
        ) do
-    # @todo: getting the metadata for this request was wasteful
     make_datakey_range(plan, options)
   end
 

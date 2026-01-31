@@ -453,7 +453,10 @@ defmodule Ecto.Integration.OrderingTest.QueryLimitWithSplitObjects do
     assert [%{id: "alice"}, %{id: "bob"}] =
              TestRepo.all(from(u in User, limit: 2), prefix: tenant)
 
-    assert [%{id: "alice"}, %{id: "bob"}] =
+    assert [%{id: "alice"}] =
              TestRepo.all(from(u in User, limit: 2), prefix: tenant, key_limit: 3)
+
+    assert [%{id: "alice"}, %{id: "bob"}] =
+             TestRepo.all(from(u in User, limit: 2), prefix: tenant, key_limit: 4)
   end
 end

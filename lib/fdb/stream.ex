@@ -11,7 +11,7 @@ defmodule FDB.Stream do
       {:cont, iterator}
     end
 
-    Stream.resource(start_fun, &next_/1, &after_/1)
+    Stream.resource(start_fun, &flat_next_/1, &after_/1)
   end
 
   @spec from_iterator(:erlfdb_iterator.iterator()) :: Enumerable.t()
@@ -31,6 +31,21 @@ defmodule FDB.Stream do
 
       {:cont, result, iterator} ->
         {result, {:cont, iterator}}
+    end
+  end
+
+  defp flat_next_({:halt, iterator}), do: {:halt, {:halt, iterator}}
+
+  defp flat_next_({:cont, iterator}) do
+    case :erlfdb_iterator.next(iterator) do
+      {:halt, iterator} ->
+        {:halt, {:halt, iterator}}
+
+      {halt_or_cont, [result], iterator} ->
+        {result, {halt_or_cont, iterator}}
+
+      {halt_or_cont, [], iterator} ->
+        {[], {halt_or_cont, iterator}}
     end
   end
 

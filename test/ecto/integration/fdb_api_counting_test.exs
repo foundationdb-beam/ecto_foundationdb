@@ -92,7 +92,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     # @todo: Do we really need all these calls? seems excessive for a single migration on zero data
     assert [
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {Ecto.Adapters.FoundationDB.EctoAdapterQueryable, {FDB.LazyRangeIterator, :advance}},
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}},
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
              {EctoFoundationDB.MigrationsPJ, {:erlfdb, :set_versionstamped_value}},
@@ -128,7 +128,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     assert [
              # read app version
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {Ecto.Adapters.FoundationDB.EctoAdapterQueryable, {FDB.LazyRangeIterator, :advance}}
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
            ] = calls
   end
 
@@ -290,13 +290,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
-             {EctoFoundationDB.Future, {:erlfdb, :wait}},
-
+             # (metadata is skipped when querying primary key)
              # get and wait primary write key
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {Ecto.Adapters.FoundationDB.EctoAdapterQueryable, {FDB.LazyRangeIterator, :advance}}
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
            ] = calls
   end
 
@@ -311,13 +308,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
-             {EctoFoundationDB.Future, {:erlfdb, :wait}},
-
+             # (metadata is skipped when querying primary key)
              # get and wait primary write key
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {Ecto.Adapters.FoundationDB.EctoAdapterQueryable, {FDB.LazyRangeIterator, :advance}}
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
            ] = calls
   end
 
@@ -335,10 +329,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # we always get global metadataVersion
-             {EctoFoundationDB.Layer.MetadataVersion, {:erlfdb, :get}},
-             {EctoFoundationDB.Future, {:erlfdb, :wait}},
-
+             # (metadata is skipped when querying primary key)
              # wait for results
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
              {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
@@ -415,7 +406,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
 
              # wait for get_mapped_range result
-             {Ecto.Adapters.FoundationDB.EctoAdapterQueryable, {FDB.LazyRangeIterator, :advance}}
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
            ] == calls
   end
 

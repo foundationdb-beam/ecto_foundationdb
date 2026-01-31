@@ -5,6 +5,28 @@
 ### Enhancements
 
 * A Repo can be configured to be locked to a single tenant by specifying `:tenant_id` config.
+* `:key_limit` is a valid Repo option. When specified, the underlying FDB GetRange will be limited to the
+  specified number of keys. Note that there is not always a 1-to-1 mapping of keys to objects, due to
+  large objects being split across multiple keys.
+* Metadata retrieval is now skipped when querying a schema by it's primary key only. e.g. `Repo.all(User, ...)`
+* Added `FDB.stream_range/4`, currently undocumented, that wraps the `:erlfdb_range_iterator` in a `Stream` for
+  easier use in Elixir apps.
+
+### Bug fixes
+
+* A `:limit` in `Ecto.Query` will now work as expected when encountering objects split across multiple keys.
+* When reading SchemaMigration versions, only the maximum version number is retrieved, which will result in
+  a small performance benefit when opening a Tenant.
+
+### Relevant internal changes
+
+Internally, much of the Query and Future interfaces have been refactored to support the Query limit big fix.
+In particular, we are now using `:erlfdb_range_iterator`, which provides more control over the paged retrieval
+of key-values from the database server. We hope these paths are now simpler and easier to maintain over time.
+
+### Dependencies
+
+* `erlfdb ~> 0.3.4`
 
 ### Dependencies
 
