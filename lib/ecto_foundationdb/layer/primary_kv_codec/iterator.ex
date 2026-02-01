@@ -85,26 +85,17 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
   @impl true
   def handle_next(state = %__MODULE__{kvs: []}), do: {:halt, state}
 
+  # No multikey object in progress - looking for either a single-key object or start of multikey
   def handle_next(state = %__MODULE__{kvs: [kv | kvs], meta: nil}) do
     {k, v} = kv
-    %{tenant: tenant, limit: limit, backward?: _backward?} = state
+    %{tenant: tenant, limit: limit, backward?: backward?} = state
 
-    # v is either a standard ecto object or metadata for a multikey object
-    # To discover which one, we must convert it from the binary.
+    key_tuple = Tenant.unpack(tenant, k)
 
-    metadata_key = PrimaryKVCodec.metadata_key()
-
-    v = Pack.from_fdb_value(v)
-
-    case InternalMetadata.fetch(v) do
-      {:ok, {^metadata_key, meta}} ->
-        # Found a multikey object, so we start processing it
-        key_tuple = Tenant.unpack(tenant, k)
-        {:cont, [], %{state | kvs: kvs, buffer: [kv], key_tuple: key_tuple, meta: meta}}
-
-      :error ->
-        key_tuple = Tenant.unpack(tenant, k)
-        data_object = extract_complete_vs(key_tuple, v)
+    case detect_multikey_start(key_tuple, v, backward?) do
+      {:single, data_object} ->
+        # Single-key object
+        data_object = extract_complete_vs(key_tuple, data_object)
 
         item = %DecodedKV{
           codec: Pack.primary_write_key_to_codec(tenant, k),
@@ -122,15 +113,13 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
             limit: decr_limit(limit, 1)
         })
 
-      {:ok, metadata} ->
-        raise ArgumentError, """
-        EctoFoundationDB encountered metadata #{inspect(metadata)}. We don't know how to process this.
-
-        Data: #{inspect(v)}
-        """
+      {:multikey_start, base_key_tuple, meta} ->
+        # Start of a multikey object
+        {:cont, [], %{state | kvs: kvs, buffer: [kv], key_tuple: base_key_tuple, meta: meta}}
     end
   end
 
+  # Multikey object in progress - processing chunks
   def handle_next(state = %__MODULE__{kvs: [kv | kvs]}) do
     {k, _v} = kv
 
@@ -139,19 +128,21 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
       key_tuple: key_tuple,
       meta: {n, i, crc},
       tenant: tenant,
-      limit: limit
+      limit: limit,
+      backward?: backward?
     } = state
 
     split_key_tuple = Tenant.unpack(tenant, k)
 
-    # Note: ignore the metadata value
-    {all_keys, [_ | values]} =
-      [kv | buffer]
-      |> Enum.reverse()
-      |> Enum.unzip()
+    case check_multikey_progress(split_key_tuple, key_tuple, {n, i, crc}, backward?) do
+      {:continue, new_meta} ->
+        # Continue buffering chunks
+        {:cont, [], %{state | kvs: kvs, buffer: [kv | buffer], meta: new_meta}}
 
-    case parse_codec_metadata_tuple(split_key_tuple) do
-      {true, {^n, i2, ^crc}} when i2 == i + 1 and n == i2 + 1 ->
+      :complete ->
+        # All chunks collected, emit the object
+        {metadata_key, all_keys, values} = extract_multikey_parts(kv, buffer, backward?)
+
         fdb_value = :erlang.iolist_to_binary(values)
 
         case :erlang.crc32(fdb_value) do
@@ -159,7 +150,7 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
             data_object = Pack.from_fdb_value(fdb_value)
             data_object = extract_complete_vs(key_tuple, data_object)
 
-            first_key = hd(all_keys)
+            first_key = metadata_key
             last_key = List.last(all_keys)
 
             item =
@@ -185,12 +176,11 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
             """
         end
 
-      {true, meta = {^n, i2, ^crc}} when i2 == i + 1 and i2 < n ->
-        {:cont, [], %{state | kvs: kvs, buffer: [kv | buffer], meta: meta}}
+      {:error, other} ->
+        direction = if backward?, do: "(backward)", else: ""
 
-      other ->
         raise """
-        Metadata error. Previous: #{inspect({n, i, crc})}, Encountered: #{inspect(other)}
+        Metadata error #{direction}. Previous: #{inspect({n, i, crc})}, Encountered: #{inspect(other)}
         """
     end
   end
@@ -198,6 +188,93 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
   @impl true
   def handle_stop(_state = %__MODULE__{}) do
     :ok
+  end
+
+  # Detect if this KV starts a multikey object or is a single-key object
+  # Forward: metadata header has InternalMetadata in value
+  # Backward: last chunk has codec metadata tuple in key
+  defp detect_multikey_start(key_tuple, v, _backward? = false) do
+    metadata_key = PrimaryKVCodec.metadata_key()
+    v = Pack.from_fdb_value(v)
+
+    case InternalMetadata.fetch(v) do
+      {:ok, {^metadata_key, meta}} ->
+        {:multikey_start, key_tuple, meta}
+
+      :error ->
+        {:single, v}
+
+      {:ok, metadata} ->
+        raise ArgumentError, """
+        EctoFoundationDB encountered metadata #{inspect(metadata)}. We don't know how to process this.
+
+        Data: #{inspect(v)}
+        """
+    end
+  end
+
+  defp detect_multikey_start(key_tuple, v, _backward? = true) do
+    case parse_codec_metadata_tuple(key_tuple) do
+      {true, meta} ->
+        # Found the last chunk of a multikey object
+        # Extract the base key_tuple (without the codec metadata suffix)
+        base_key_tuple = Tuple.delete_at(key_tuple, tuple_size(key_tuple) - 1)
+        {:multikey_start, base_key_tuple, meta}
+
+      false ->
+        # Single-key object
+        {:single, Pack.from_fdb_value(v)}
+    end
+  end
+
+  # Check if we should continue buffering or if multikey object is complete
+  # Forward: indices increment from 0 to n-1
+  # Backward: indices decrement from n-1 to 0, then metadata header
+  defp check_multikey_progress(split_key_tuple, _key_tuple, {n, i, crc}, _backward? = false) do
+    case parse_codec_metadata_tuple(split_key_tuple) do
+      {true, {^n, i2, ^crc}} when i2 == i + 1 and n == i2 + 1 ->
+        :complete
+
+      {true, {^n, i2, ^crc}} when i2 == i + 1 and i2 < n ->
+        {:continue, {n, i2, crc}}
+
+      other ->
+        {:error, other}
+    end
+  end
+
+  defp check_multikey_progress(split_key_tuple, key_tuple, {n, i, crc}, _backward? = true) do
+    case parse_codec_metadata_tuple(split_key_tuple) do
+      {true, {^n, i2, ^crc}} when i2 == i - 1 and i2 >= 0 ->
+        {:continue, {n, i2, crc}}
+
+      false when i == 0 and split_key_tuple == key_tuple ->
+        :complete
+
+      other ->
+        {:error, other}
+    end
+  end
+
+  # Extract metadata key, all chunk keys, and values from buffer
+  # Forward: current_kv is the last chunk, buffer has [metadata_kv | earlier_chunks] in reverse order
+  # Backward: current_kv is metadata header, buffer has chunks in forward order
+  defp extract_multikey_parts(current_kv, buffer, _backward? = false) do
+    # Prepend current kv (last chunk) to buffer, then reverse to get forward order
+    # Skip metadata value (first after reversing)
+    {all_keys, [_ | values]} =
+      [current_kv | buffer]
+      |> Enum.reverse()
+      |> Enum.unzip()
+
+    metadata_key = hd(all_keys)
+    {metadata_key, all_keys, values}
+  end
+
+  defp extract_multikey_parts({metadata_key, _metadata_value}, buffer, _backward? = true) do
+    # Buffer is prepended during backward iteration, so chunks are already in forward order
+    {all_keys, values} = Enum.unzip(buffer)
+    {metadata_key, all_keys, values}
   end
 
   defp extract_complete_vs(key_tuple, data_object) do
