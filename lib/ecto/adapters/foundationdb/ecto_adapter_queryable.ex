@@ -134,7 +134,16 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         schema: schema
       })
 
-    plan = QueryPlan.all_range(tenant, source, schema, context, id_s, id_e, options)
+    limit =
+      case queryable do
+        %Ecto.Query{limit: limit} ->
+          parse_query_limit(limit)
+
+        _ ->
+          nil
+      end
+
+    plan = QueryPlan.all_range(tenant, source, schema, context, id_s, id_e, limit, options)
 
     create_query_all_future(tenant, adapter_meta, plan, return_handler, select_fields, options)
     |> handle_returning(options ++ [returning: {:future, return_handler}])

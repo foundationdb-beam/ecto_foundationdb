@@ -70,7 +70,6 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       ModuleToModuleTracer.with_traced_calls(name, [caller_spec], @traced_calls, fun)
 
     # clean up the traces for more concise assertions
-    # @todo: support more modules
     traced_calls =
       for {caller, {module, call_fun, _arity}} <- traced_calls do
         {caller, {module, call_fun}}

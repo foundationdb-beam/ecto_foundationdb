@@ -53,7 +53,7 @@ defmodule EctoFoundationDB.QueryPlan do
     ]
   end
 
-  def all_range(tenant, source, schema, context, id_s, id_e, options) do
+  def all_range(tenant, source, schema, context, id_s, id_e, limit, options) do
     %__MODULE__{
       tenant: tenant,
       source: source,
@@ -70,9 +70,9 @@ defmodule EctoFoundationDB.QueryPlan do
         }
       ],
       updates: [],
-      layer_data: %{},
+      layer_data: %EctoFoundationDB.Layer.Query{},
       ordering: [],
-      limit: Keyword.get(options, :limit)
+      limit: limit
     }
   end
 
@@ -102,7 +102,7 @@ defmodule EctoFoundationDB.QueryPlan do
           end)
         ),
       updates: resolve_updates(updates, params),
-      layer_data: %{},
+      layer_data: %EctoFoundationDB.Layer.Query{},
       ordering: ordering,
       limit: limit
     }

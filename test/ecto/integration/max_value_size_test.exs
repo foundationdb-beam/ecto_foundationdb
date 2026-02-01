@@ -30,8 +30,10 @@ defmodule Ecto.Integration.MaxValueSizeTest do
     end
 
     test "split 1", %{tenant: tenant} do
+      notes = Util.get_random_bytes(100_000)
+
       assert {:ok, user} =
-               %User{name: "John", notes: Util.get_random_bytes(100_000)}
+               %User{name: "John", notes: notes}
                |> FoundationDB.usetenant(tenant)
                |> TestRepo.insert(max_single_value_size: 100_000)
 
@@ -55,10 +57,9 @@ defmodule Ecto.Integration.MaxValueSizeTest do
           raise "Watch failure"
       end
 
-      assert %User{} = TestRepo.get(User, user.id, prefix: tenant)
+      assert %User{notes: ^notes} = TestRepo.get(User, user.id, prefix: tenant)
 
-      # @todo: verify user has the expected `:notes` data
-      assert %User{} = TestRepo.get_by(User, [name: "Bob"], prefix: tenant)
+      assert %User{notes: ^notes} = TestRepo.get_by(User, [name: "Bob"], prefix: tenant)
 
       assert {:ok, _} = TestRepo.delete(user)
 

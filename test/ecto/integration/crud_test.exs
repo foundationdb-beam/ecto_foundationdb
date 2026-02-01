@@ -285,13 +285,12 @@ defmodule Ecto.Integration.CrudTest do
                )
                |> Enum.map(&Map.to_list/1)
 
-      # @todo
-      # assert [[id: "0001", name: "Alice"]] =
-      #         TestRepo.all_range(from("users", select: [:id, :name], limit: 1), "0001", "0002",
-      #           inclusive_right?: true,
-      #           prefix: tenant
-      #         )
-      #         |> Enum.map(&Map.to_list/1)
+      assert [[id: "0001", name: "Alice"]] =
+               TestRepo.all_range(from("users", select: [:id, :name], limit: 1), "0001", "0002",
+                 inclusive_right?: true,
+                 prefix: tenant
+               )
+               |> Enum.map(&Map.to_list/1)
     end
 
     test "single inequality pks with Ecto.Query", context do

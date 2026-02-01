@@ -12,6 +12,8 @@ defmodule EctoFoundationDB.Layer.Query do
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
 
+  defstruct [:idx, :range, :backward?]
+
   @doc """
   Executes a query for retrieving data.
 
@@ -38,8 +40,8 @@ defmodule EctoFoundationDB.Layer.Query do
   end
 
   defp tx_all(tx, metadata, plan, options) do
-    {plan, query_ordering, post_query_ordering_fn} = make_range(metadata, plan, options)
-    iterator = tx_range_iterator(tx, plan, query_ordering, options)
+    {plan, post_query_ordering_fn} = make_range(metadata, plan, options)
+    iterator = tx_range_iterator(tx, plan, options)
     {plan, iterator, post_query_ordering_fn}
   end
 
@@ -48,7 +50,7 @@ defmodule EctoFoundationDB.Layer.Query do
   """
   def update(tenant, adapter_meta, plan, options) do
     Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
-      {plan, [], nil} = make_range(metadata, plan, [])
+      {plan, nil} = make_range(metadata, plan, [])
       tx_update_range(tx, plan, metadata, options)
     end)
   end
@@ -67,7 +69,7 @@ defmodule EctoFoundationDB.Layer.Query do
 
   def delete(tenant, adapter_meta, plan) do
     Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
-      {plan, [], nil} = make_range(metadata, plan, [])
+      {plan, nil} = make_range(metadata, plan, [])
       tx_delete_range(tx, plan, metadata)
     end)
   end
@@ -83,12 +85,14 @@ defmodule EctoFoundationDB.Layer.Query do
       get_query_ordering(schema, nil, [], limit, ordering, options)
 
     plan = make_datakey_range(plan, options)
-    {plan, query_ordering, post_query_ordering_fn}
+    plan = backward?(plan, query_ordering, options)
+
+    {plan, post_query_ordering_fn}
   end
 
   defp make_range(
          metadata,
-         plan = %QueryPlan{constraints: constraints, layer_data: layer_data},
+         plan = %QueryPlan{constraints: constraints, layer_data: layer_data = %__MODULE__{}},
          options
        )
        when not is_nil(metadata) do
@@ -102,7 +106,8 @@ defmodule EctoFoundationDB.Layer.Query do
               get_query_ordering(schema, nil, [], limit, ordering, options)
 
             plan = make_datakey_range(plan, options)
-            {plan, query_ordering, post_query_ordering_fn}
+            plan = backward?(plan, query_ordering, options)
+            {plan, post_query_ordering_fn}
 
           _ ->
             raise Unsupported,
@@ -120,24 +125,19 @@ defmodule EctoFoundationDB.Layer.Query do
         plan = %QueryPlan{plan | constraints: constraints}
         range = Indexer.range(idx, plan, options)
 
-        layer_data =
-          layer_data
-          |> Map.put(:idx, idx)
-          |> Map.put(:range, range)
+        layer_data = %{layer_data | idx: idx, range: range}
 
         plan = %{plan | layer_data: layer_data}
-        {plan, query_ordering, post_query_ordering_fn}
+        plan = backward?(plan, query_ordering, options)
+        {plan, post_query_ordering_fn}
     end
   end
 
   defp tx_range_iterator(
          tx,
-         plan = %QueryPlan{layer_data: %{range: {start_key, end_key}}},
-         query_ordering,
+         %QueryPlan{layer_data: %__MODULE__{range: {start_key, end_key}, backward?: backward?}},
          options
        ) do
-    backward? = backward?(plan, query_ordering, options)
-
     get_options =
       options
       |> kw_take_as(:key_limit, :limit)
@@ -148,12 +148,11 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp tx_range_iterator(
          tx,
-         plan = %QueryPlan{layer_data: %{range: {start_key, end_key, mapper}}},
-         query_ordering,
+         %QueryPlan{
+           layer_data: %__MODULE__{range: {start_key, end_key, mapper}, backward?: backward?}
+         },
          options
        ) do
-    backward? = backward?(plan, query_ordering, options)
-
     get_options =
       options
       |> kw_take_as(:key_limit, :limit)
@@ -173,7 +172,7 @@ defmodule EctoFoundationDB.Layer.Query do
     write_primary = Schema.get_option(plan.context, :write_primary)
 
     tx
-    |> tx_range_iterator(plan, [], [])
+    |> tx_range_iterator(plan, [])
     |> FDB.LazyRangeIterator.then(&unpack_and_filter/2, %{cont_state: nil, plan: plan})
     |> FDB.Stream.from_iterator()
     |> Stream.map(
@@ -194,7 +193,7 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp tx_delete_range(tx, plan, metadata) do
     tx
-    |> tx_range_iterator(plan, [], [])
+    |> tx_range_iterator(plan, [])
     |> FDB.LazyRangeIterator.then(&unpack_and_filter/2, %{cont_state: nil, plan: plan})
     |> FDB.Stream.from_iterator()
     |> Stream.map(&Tx.delete_data_object(plan.tenant, tx, plan.schema, &1, metadata))
@@ -206,7 +205,11 @@ defmodule EctoFoundationDB.Layer.Query do
     {:halt, state}
   end
 
-  defp unpack_and_filter([kvs], state = %{plan: plan = %QueryPlan{layer_data: %{idx: idx}}}) do
+  defp unpack_and_filter(
+         [kvs],
+         state = %{plan: plan = %QueryPlan{layer_data: %__MODULE__{idx: idx}}}
+       )
+       when not is_nil(idx) do
     %{limit: limit} = plan
 
     stream =
@@ -231,9 +234,15 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp unpack_and_filter([kvs], state = %{plan: plan = %QueryPlan{}}) do
     %{cont_state: cont_state} = state
-    %{tenant: tenant, limit: limit} = plan
+    %{tenant: tenant, limit: limit, layer_data: layer_data = %__MODULE__{}} = plan
+    %{backward?: backward?} = layer_data
     # @todo reverse
-    iterator = PrimaryKVCodec.decode_as_iterator(cont_state, kvs, tenant, limit: limit)
+    iterator =
+      PrimaryKVCodec.decode_as_iterator(cont_state, kvs, tenant,
+        backward?: backward?,
+        limit: limit
+      )
+
     {objs, iterator} = :erlfdb_iterator.run(iterator)
     cont_state = PrimaryKVCodec.get_iterator_state(iterator)
     {:cont, objs, %{state | cont_state: cont_state, plan: decr_limit(plan, length(objs))}}
@@ -246,31 +255,36 @@ defmodule EctoFoundationDB.Layer.Query do
 
   # Selects all data from source
   defp make_datakey_range(
-         plan = %QueryPlan{constraints: [%QueryPlan.None{}], layer_data: layer_data},
+         plan = %QueryPlan{
+           constraints: [%QueryPlan.None{}],
+           layer_data: layer_data = %__MODULE__{}
+         },
          options
        ) do
     {start_key, end_key} = Pack.primary_range(plan.tenant, plan.source)
     start_key = options[:start_key] || start_key
-    %{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
+    layer_data = %{layer_data | range: {start_key, end_key}}
+    %{plan | layer_data: layer_data}
   end
 
   defp make_datakey_range(
          plan = %QueryPlan{
            tenant: tenant,
            constraints: [%QueryPlan.Equal{param: param}],
-           layer_data: layer_data
+           layer_data: layer_data = %__MODULE__{}
          },
          _options
        ) do
     kv_codec = Pack.primary_codec(tenant, plan.source, param)
-    %{plan | layer_data: Map.put(layer_data, :range, PrimaryKVCodec.range(kv_codec))}
+    layer_data = %{layer_data | range: PrimaryKVCodec.range(kv_codec)}
+    %{plan | layer_data: layer_data}
   end
 
   defp make_datakey_range(
          plan = %QueryPlan{constraints: [between = %QueryPlan.Between{}]},
          options
        ) do
-    %{tenant: tenant, layer_data: layer_data} = plan
+    %{tenant: tenant, layer_data: layer_data = %__MODULE__{}} = plan
 
     %{
       param_left: param_left,
@@ -299,32 +313,42 @@ defmodule EctoFoundationDB.Layer.Query do
     end_key = if inclusive_right?, do: right_range_end, else: right_range_start
 
     start_key = options[:start_key] || start_key
-    %{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
+    layer_data = %{layer_data | range: {start_key, end_key}}
+    %{plan | layer_data: layer_data}
   end
 
   defp make_datakey_range(_plan, _options) do
     raise Unsupported, "Between query must have binary parameters"
   end
 
-  defp backward?(%{layer_data: %{idx: idx}}, ordering, _options) do
+  defp backward?(plan = %{layer_data: layer_data = %__MODULE__{idx: idx}}, ordering, _options)
+       when not is_nil(idx) do
     idx_fields = idx[:fields]
-    idx_backward?(idx_fields, ordering)
+    backward? = idx_backward?(idx_fields, ordering)
+    layer_data = %{layer_data | backward?: backward?}
+    %{plan | layer_data: layer_data}
   end
 
   defp backward?(plan, ordering, _options) do
-    case {plan.schema, ordering} do
-      {nil, []} ->
-        false
+    %{layer_data: layer_data = %__MODULE__{}} = plan
 
-      {nil, [_ | _]} ->
-        raise Unsupported, """
-        Cannot apply key_limit on query ordering when schema is unknown
-        """
+    backward? =
+      case {plan.schema, ordering} do
+        {nil, []} ->
+          false
 
-      {schema, ordering} ->
-        pk_field = Fields.get_pk_field!(schema)
-        idx_backward?([pk_field], ordering)
-    end
+        {nil, [_ | _]} ->
+          raise Unsupported, """
+          Cannot apply key_limit on query ordering when schema is unknown
+          """
+
+        {schema, ordering} ->
+          pk_field = Fields.get_pk_field!(schema)
+          idx_backward?([pk_field], ordering)
+      end
+
+    layer_data = %{layer_data | backward?: backward?}
+    %{plan | layer_data: layer_data}
   end
 
   defp idx_backward?([field | _], [%QueryPlan.Order{monotonicity: :desc, field: field}]), do: true

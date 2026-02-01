@@ -29,7 +29,10 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
     :meta,
 
     # The maximum number of item to emit
-    :limit
+    :limit,
+
+    # True if key-values are provided in reverse order
+    :backward?
   ]
   defstruct @enforce_keys
 
@@ -40,7 +43,8 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
       buffer: [],
       key_tuple: nil,
       meta: nil,
-      limit: Keyword.get(opts, :limit, nil)
+      limit: Keyword.get(opts, :limit, nil),
+      backward?: Keyword.get(opts, :backward?, false)
     }
 
     :erlfdb_iterator.new(__MODULE__, state)
@@ -51,7 +55,8 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
       kvs: kvs,
       buffer: buffer,
       meta: meta,
-      key_tuple: key_tuple
+      key_tuple: key_tuple,
+      backward?: backward?
     } = cont_state
 
     state = %__MODULE__{
@@ -60,7 +65,8 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
       buffer: buffer,
       key_tuple: key_tuple,
       meta: meta,
-      limit: Keyword.get(opts, :limit, nil)
+      limit: Keyword.get(opts, :limit, nil),
+      backward?: backward?
     }
 
     :erlfdb_iterator.new(__MODULE__, state)
@@ -81,29 +87,20 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
 
   def handle_next(state = %__MODULE__{kvs: [kv | kvs], meta: nil}) do
     {k, v} = kv
-    %{tenant: tenant, limit: limit} = state
+    %{tenant: tenant, limit: limit, backward?: _backward?} = state
 
     # v is either a standard ecto object or metadata for a multikey object
     # To discover which one, we must convert it from the binary.
-    #
-    # If this step crashes, it means that we've unexpectedly encountered an individual
-    # multikey key-value without having previously found the metadata to guide us to decode it
-    v = Pack.from_fdb_value(v)
 
     metadata_key = PrimaryKVCodec.metadata_key()
+
+    v = Pack.from_fdb_value(v)
 
     case InternalMetadata.fetch(v) do
       {:ok, {^metadata_key, meta}} ->
         # Found a multikey object, so we start processing it
         key_tuple = Tenant.unpack(tenant, k)
         {:cont, [], %{state | kvs: kvs, buffer: [kv], key_tuple: key_tuple, meta: meta}}
-
-      {:ok, metadata} ->
-        raise ArgumentError, """
-        EctoFoundationDB encountered metadata #{inspect(metadata)}. We don't know how to process this.
-
-        Data: #{inspect(v)}
-        """
 
       :error ->
         key_tuple = Tenant.unpack(tenant, k)
@@ -124,6 +121,13 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
             meta: nil,
             limit: decr_limit(limit, 1)
         })
+
+      {:ok, metadata} ->
+        raise ArgumentError, """
+        EctoFoundationDB encountered metadata #{inspect(metadata)}. We don't know how to process this.
+
+        Data: #{inspect(v)}
+        """
     end
   end
 
