@@ -2,19 +2,18 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   @moduledoc false
   @behaviour Ecto.Adapter.Queryable
 
-  alias FDB.LazyRangeIterator
   alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable.Continuation
 
   alias EctoFoundationDB.Assert.CorrectTenancy
-  alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Fields
-  alias EctoFoundationDB.Layer.Ordering
   alias EctoFoundationDB.Layer.Query
   alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
+
+  alias FDB.LazyRangeIterator
 
   defmodule Continuation do
     @moduledoc false
@@ -47,9 +46,6 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       limit: limit
     } = query
 
-    {limit, query_ordering, post_query_ordering_fn} =
-      get_query_ordering(schema, limit, order_bys, options)
-
     case options[:noop] do
       query_result when not is_nil(query_result) ->
         # This is the trick to load structs after a pipelined 'get'. See async_get_by, await, etc
@@ -59,23 +55,14 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         {%{context: context}, %Ecto.Query{prefix: tenant}} =
           CorrectTenancy.assert_by_query!(repo_config, query)
 
-        plan =
-          QueryPlan.get(
-            tenant,
-            source,
-            schema,
-            context,
-            wheres,
-            [],
-            params,
-            query_ordering,
-            limit
-          )
+        limit = parse_query_limit(limit)
 
-        create_query_all_future(tenant, adapter_meta, plan, options)
-        |> Future.then(
-          &select(&1, post_query_ordering_fn, Fields.parse_select_fields(select_fields))
-        )
+        plan =
+          QueryPlan.get(tenant, source, schema, context, wheres, [], params, order_bys, limit)
+
+        select_fields = Fields.parse_select_fields(select_fields)
+
+        create_query_all_future(tenant, adapter_meta, plan, :all, select_fields, options)
         |> handle_returning(options)
     end
   end
@@ -149,39 +136,9 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
     plan = QueryPlan.all_range(tenant, source, schema, context, id_s, id_e, options)
 
-    post_query_ordering_fn = &Function.identity/1
-
-    create_query_all_future(tenant, adapter_meta, plan, options)
-    |> Future.then(fn dkvs ->
-      case return_handler do
-        :all_from_source ->
-          dkvs = Enum.to_list(dkvs)
-          select_fields = select_fields || get_field_names_union(dkvs)
-          objs = select(dkvs, post_query_ordering_fn, select_fields)
-          {select_fields, objs}
-
-        _ ->
-          select(dkvs, post_query_ordering_fn, select_fields)
-      end
-    end)
+    create_query_all_future(tenant, adapter_meta, plan, return_handler, select_fields, options)
     |> handle_returning(options ++ [returning: {:future, return_handler}])
   end
-
-  defp get_query_ordering(schema, limit, order_bys, options) do
-    if Keyword.has_key?(options, :limit) do
-      raise Unsupported,
-            "`:limit` in Repo options is not supported. Use an `Ecto.Query` limit instead."
-    end
-
-    # @todo: we need knowledge of the metadata (indexes) in order to split the ordering into query-time and post-query
-    limit = get_query_limit(limit)
-    {query_ordering, post_query_ordering_fn} = Ordering.get_query_ordering(schema, order_bys)
-    {limit, query_ordering, post_query_ordering_fn}
-  end
-
-  # Extract limit from an `Ecto.Query`
-  defp get_query_limit(nil), do: nil
-  defp get_query_limit(%Ecto.Query.LimitExpr{expr: limit}), do: limit
 
   defp handle_returning(future, options) do
     case options[:returning] do
@@ -303,9 +260,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
       Tx.transactional(tenant, fn tx ->
         # Advance the stream so that we can retrieve the last key for building
         # the continuation
-        {cont, ri} =
-          Query.all(tenant, adapter_meta, plan, options)
-          |> LazyRangeIterator.advance(compute_cont)
+        {ri, nil} = Query.all(tenant, adapter_meta, plan, options)
+        {cont, ri} = LazyRangeIterator.advance(ri, compute_cont)
 
         stream = FDB.Stream.from_iterator(ri)
 
@@ -321,7 +277,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
 
     objs =
       stream
-      |> select(&Function.identity/1, field_names)
+      |> select(nil, field_names)
       |> Enum.to_list()
 
     {[{length(objs), objs}], %{acc | continuation: continuation(cont, options)}}
@@ -349,11 +305,16 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     all_fields
   end
 
-  defp select(stream, _post_query_ordering_fn, select_field_names) do
-    stream
-    |> Stream.map(fn %DecodedKV{data_object: data_object} ->
-      Fields.arrange(data_object, select_field_names)
-    end)
+  defp select(stream, post_query_ordering_fn, select_field_names) do
+    stream =
+      stream
+      |> Stream.map(fn %DecodedKV{data_object: data_object} ->
+        Fields.arrange(data_object, select_field_names)
+      end)
+
+    enum = if is_nil(post_query_ordering_fn), do: stream, else: post_query_ordering_fn.(stream)
+
+    enum
     |> Fields.strip_field_names_for_ecto()
     |> Enum.to_list()
   end
@@ -427,19 +388,39 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     end
   end
 
-  defp create_query_all_future(tenant, adapter_meta, plan, options) do
+  defp create_query_all_future(tenant, adapter_meta, plan, return_handler, select_fields, options) do
     must_wait? = not Tx.in_tx?()
 
-    Tx.transactional(tenant, fn _tx ->
-      future =
-        Query.all(tenant, adapter_meta, plan, options)
-        |> then(&Future.new(:erlfdb_iterator, &1))
+    {future, post_query_ordering_fn} =
+      Tx.transactional(tenant, fn _tx ->
+        {ri, post_query_ordering_fn} = Query.all(tenant, adapter_meta, plan, options)
+        future = Future.new(:erlfdb_iterator, ri)
 
-      if must_wait? do
-        Future.await(future)
-      else
-        future
+        future =
+          if must_wait? do
+            Future.await(future)
+          else
+            future
+          end
+
+        {future, post_query_ordering_fn}
+      end)
+
+    Future.then(future, fn dkvs ->
+      case return_handler do
+        :all_from_source ->
+          dkvs = Enum.to_list(dkvs)
+          select_fields = select_fields || get_field_names_union(dkvs)
+          objs = select(dkvs, post_query_ordering_fn, select_fields)
+          {select_fields, objs}
+
+        _ ->
+          select(dkvs, post_query_ordering_fn, select_fields)
       end
     end)
   end
+
+  # Extract limit from an `Ecto.Query`
+  defp parse_query_limit(nil), do: nil
+  defp parse_query_limit(%Ecto.Query.LimitExpr{expr: limit}), do: limit
 end

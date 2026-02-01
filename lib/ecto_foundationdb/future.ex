@@ -153,7 +153,7 @@ defmodule EctoFoundationDB.Future do
         iterators = Map.values(reffed_iterators)
         iterator_results = :erlfdb_iterator.pipeline(iterators)
         {results, iterators} = Enum.unzip(iterator_results)
-        Enum.map(iterators, &:erlfdb_iterator.stop/1)
+        Enum.each(iterators, &:erlfdb_iterator.stop/1)
         Enum.zip(refs, results) |> Enum.into(%{})
       end
 

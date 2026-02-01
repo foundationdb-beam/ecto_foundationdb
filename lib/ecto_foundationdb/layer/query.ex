@@ -5,6 +5,7 @@ defmodule EctoFoundationDB.Layer.Query do
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Metadata
+  alias EctoFoundationDB.Layer.Ordering
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.Tx
@@ -16,23 +17,30 @@ defmodule EctoFoundationDB.Layer.Query do
 
   Must be called while inside a transaction.
   """
-  def all(_tenant, _adapter_meta, plan = %QueryPlan{constraints: [%{is_pk?: true}]}, options) do
+  def all(_tenant, _adapter_meta, plan = %QueryPlan{constraints: [%{pk?: true}]}, options) do
     # Single constraint on the primary key, skip the metadata retrieval
-    tx = Tx.get()
-    plan = make_datakey_range(plan, options)
-    iterator = tx_range_iterator(tx, plan, options)
-    FDB.LazyRangeIterator.then(iterator, &unpack_and_filter/2, %{cont_state: nil, plan: plan})
+    {plan, iterator, post_query_ordering_fn} = tx_all(Tx.get(), nil, plan, options)
+
+    {FDB.LazyRangeIterator.then(iterator, &unpack_and_filter/2, %{cont_state: nil, plan: plan}),
+     post_query_ordering_fn}
   end
 
-  def all(tenant, adapter_meta, plan, options) do
-    {plan, iterator} =
+  def all(tenant, adapter_meta, plan = %QueryPlan{}, options) do
+    assert_repo_limit_omitted(options)
+
+    {plan, iterator, post_query_ordering_fn} =
       Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
-        plan = make_range(metadata, plan, options)
-        iterator = tx_range_iterator(tx, plan, options)
-        {plan, iterator}
+        tx_all(tx, metadata, plan, options)
       end)
 
-    FDB.LazyRangeIterator.then(iterator, &unpack_and_filter/2, %{cont_state: nil, plan: plan})
+    {FDB.LazyRangeIterator.then(iterator, &unpack_and_filter/2, %{cont_state: nil, plan: plan}),
+     post_query_ordering_fn}
+  end
+
+  defp tx_all(tx, metadata, plan, options) do
+    {plan, query_ordering, post_query_ordering_fn} = make_range(metadata, plan, options)
+    iterator = tx_range_iterator(tx, plan, query_ordering, options)
+    {plan, iterator, post_query_ordering_fn}
   end
 
   @doc """
@@ -40,7 +48,7 @@ defmodule EctoFoundationDB.Layer.Query do
   """
   def update(tenant, adapter_meta, plan, options) do
     Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
-      plan = make_range(metadata, plan, [])
+      {plan, [], nil} = make_range(metadata, plan, [])
       tx_update_range(tx, plan, metadata, options)
     end)
   end
@@ -59,33 +67,55 @@ defmodule EctoFoundationDB.Layer.Query do
 
   def delete(tenant, adapter_meta, plan) do
     Metadata.transactional(tenant, adapter_meta, plan.source, fn tx, metadata ->
-      plan = make_range(metadata, plan, [])
+      {plan, [], nil} = make_range(metadata, plan, [])
       tx_delete_range(tx, plan, metadata)
     end)
   end
 
   defp make_range(
          _metadata,
-         plan = %QueryPlan{constraints: [%{is_pk?: true}]},
+         plan = %QueryPlan{constraints: [%{pk?: true}]},
          options
        ) do
-    make_datakey_range(plan, options)
+    %{schema: schema, ordering: ordering, limit: limit} = plan
+
+    {query_ordering, post_query_ordering_fn} =
+      get_query_ordering(schema, nil, [], limit, ordering, options)
+
+    plan = make_datakey_range(plan, options)
+    {plan, query_ordering, post_query_ordering_fn}
   end
 
   defp make_range(
          metadata,
          plan = %QueryPlan{constraints: constraints, layer_data: layer_data},
          options
-       ) do
-    case Metadata.select_index(with_queryable_indexes(metadata), constraints) do
+       )
+       when not is_nil(metadata) do
+    %{schema: schema, ordering: ordering, limit: limit} = plan
+
+    case Metadata.select_index(with_queryable_indexes(metadata), constraints, ordering) do
       nil ->
-        raise Unsupported,
-              """
-              FoundationDB Adapter supports either a where clause that constrains on the primary key
-              or a where clause that constrains on a set of fields that is associated with an index.
-              """
+        case constraints do
+          [%QueryPlan.None{}] ->
+            {query_ordering, post_query_ordering_fn} =
+              get_query_ordering(schema, nil, [], limit, ordering, options)
+
+            plan = make_datakey_range(plan, options)
+            {plan, query_ordering, post_query_ordering_fn}
+
+          _ ->
+            raise Unsupported,
+                  """
+                  FoundationDB Adapter supports either a where clause that constrains on the primary key
+                  or a where clause that constrains on a set of fields that is associated with an index.
+                  """
+        end
 
       idx ->
+        {query_ordering, post_query_ordering_fn} =
+          get_query_ordering(schema, idx, constraints, limit, ordering, options)
+
         constraints = Metadata.arrange_constraints(constraints, idx)
         plan = %QueryPlan{plan | constraints: constraints}
         range = Indexer.range(idx, plan, options)
@@ -95,16 +125,18 @@ defmodule EctoFoundationDB.Layer.Query do
           |> Map.put(:idx, idx)
           |> Map.put(:range, range)
 
-        %QueryPlan{plan | layer_data: layer_data}
+        plan = %{plan | layer_data: layer_data}
+        {plan, query_ordering, post_query_ordering_fn}
     end
   end
 
   defp tx_range_iterator(
          tx,
          plan = %QueryPlan{layer_data: %{range: {start_key, end_key}}},
+         query_ordering,
          options
        ) do
-    backward? = backward?(plan, options)
+    backward? = backward?(plan, query_ordering, options)
 
     get_options =
       options
@@ -117,9 +149,10 @@ defmodule EctoFoundationDB.Layer.Query do
   defp tx_range_iterator(
          tx,
          plan = %QueryPlan{layer_data: %{range: {start_key, end_key, mapper}}},
+         query_ordering,
          options
        ) do
-    backward? = backward?(plan, options)
+    backward? = backward?(plan, query_ordering, options)
 
     get_options =
       options
@@ -140,7 +173,7 @@ defmodule EctoFoundationDB.Layer.Query do
     write_primary = Schema.get_option(plan.context, :write_primary)
 
     tx
-    |> tx_range_iterator(plan, [])
+    |> tx_range_iterator(plan, [], [])
     |> FDB.LazyRangeIterator.then(&unpack_and_filter/2, %{cont_state: nil, plan: plan})
     |> FDB.Stream.from_iterator()
     |> Stream.map(
@@ -161,7 +194,7 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp tx_delete_range(tx, plan, metadata) do
     tx
-    |> tx_range_iterator(plan, [])
+    |> tx_range_iterator(plan, [], [])
     |> FDB.LazyRangeIterator.then(&unpack_and_filter/2, %{cont_state: nil, plan: plan})
     |> FDB.Stream.from_iterator()
     |> Stream.map(&Tx.delete_data_object(plan.tenant, tx, plan.schema, &1, metadata))
@@ -218,7 +251,7 @@ defmodule EctoFoundationDB.Layer.Query do
        ) do
     {start_key, end_key} = Pack.primary_range(plan.tenant, plan.source)
     start_key = options[:start_key] || start_key
-    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
+    %{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
   defp make_datakey_range(
@@ -230,16 +263,16 @@ defmodule EctoFoundationDB.Layer.Query do
          _options
        ) do
     kv_codec = Pack.primary_codec(tenant, plan.source, param)
-    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, PrimaryKVCodec.range(kv_codec))}
+    %{plan | layer_data: Map.put(layer_data, :range, PrimaryKVCodec.range(kv_codec))}
   end
 
   defp make_datakey_range(
          plan = %QueryPlan{constraints: [between = %QueryPlan.Between{}]},
          options
        ) do
-    %QueryPlan{tenant: tenant, layer_data: layer_data} = plan
+    %{tenant: tenant, layer_data: layer_data} = plan
 
-    %QueryPlan.Between{
+    %{
       param_left: param_left,
       inclusive_left?: inclusive_left?,
       param_right: param_right,
@@ -266,21 +299,20 @@ defmodule EctoFoundationDB.Layer.Query do
     end_key = if inclusive_right?, do: right_range_end, else: right_range_start
 
     start_key = options[:start_key] || start_key
-    %QueryPlan{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
+    %{plan | layer_data: Map.put(layer_data, :range, {start_key, end_key})}
   end
 
   defp make_datakey_range(_plan, _options) do
     raise Unsupported, "Between query must have binary parameters"
   end
 
-  defp backward?(plan = %{layer_data: %{idx: idx}}, _options) do
-    %{ordering: ordering} = plan
+  defp backward?(%{layer_data: %{idx: idx}}, ordering, _options) do
     idx_fields = idx[:fields]
     idx_backward?(idx_fields, ordering)
   end
 
-  defp backward?(plan, _options) do
-    case {plan.schema, plan.ordering} do
+  defp backward?(plan, ordering, _options) do
+    case {plan.schema, ordering} do
       {nil, []} ->
         false
 
@@ -295,14 +327,16 @@ defmodule EctoFoundationDB.Layer.Query do
     end
   end
 
-  defp idx_backward?([field | _], [{:desc, field}]), do: true
+  defp idx_backward?([field | _], [%QueryPlan.Order{monotonicity: :desc, field: field}]), do: true
 
-  defp idx_backward?([field | fields], [{:asc, field} | ordering]),
-    do: idx_backward?(fields, ordering)
+  defp idx_backward?([field | fields], [
+         %QueryPlan.Order{monotonicity: :asc, field: field} | ordering
+       ]),
+       do: idx_backward?(fields, ordering)
 
   defp idx_backward?([_field | fields], ordering), do: idx_backward?(fields, ordering)
 
-  defp idx_backward?(_, [{_, _field} | _]) do
+  defp idx_backward?(_, [_ | _]) do
     raise(Unsupported, """
     When querying with an order_by, the ordering must correspond to the primary key or an indexed field.
     """)
@@ -328,6 +362,107 @@ defmodule EctoFoundationDB.Layer.Query do
 
       :error ->
         []
+    end
+  end
+
+  defp get_query_ordering(_schema, _idx, _constraints, _limit, [], _options) do
+    # When querying without any ordering, limiting will work just fine.
+    # The keys are naturally ordered in the database.
+    {[], nil}
+  end
+
+  defp get_query_ordering(
+         schema,
+         nil,
+         [],
+         limit,
+         ordering = [qo = %QueryPlan.Order{} | tail_ordering],
+         options
+       ) do
+    # When querying without an index, we must check the limiting characertics of the query.
+    #
+    # If the query includes a limit, then any ordering must be only on the primary key
+    #
+    # If there's no limit, then we can support post query ordering
+
+    %{pk?: pk?} = qo
+
+    limited? = !is_nil(limit) or Keyword.has_key?(options, :key_limit)
+    pk_only_ordering? = pk? and Enum.empty?(tail_ordering)
+
+    cond do
+      limited? and pk_only_ordering? ->
+        {[qo], nil}
+
+      limited? and not pk_only_ordering? ->
+        raise Unsupported,
+              "When querying with a limit, you are only allowed to order_by a single field, and that field must be part of the where constraint."
+
+      not limited? and pk_only_ordering? ->
+        fun = Ordering.get_post_query_ordering_fn(schema, ordering)
+        {[qo], fun}
+
+      not limited? and not pk_only_ordering? ->
+        fun = Ordering.get_post_query_ordering_fn(schema, ordering)
+        {[], fun}
+    end
+  end
+
+  defp get_query_ordering(
+         schema,
+         idx,
+         constraints,
+         limit,
+         ordering = [qo = %QueryPlan.Order{} | tail_ordering],
+         options
+       )
+       when not is_nil(idx) do
+    # When querying with an index, we must check the limiting characteristics of the query.
+    #
+    # If the query includes a limit, then the ordering must be only the first field to appear
+    # in the idx after all Equal constraints.
+    #
+    # If there's no limit, then we can support post query ordering
+    %{field: first_ordering_field} = qo
+
+    limited? = !is_nil(limit) or Keyword.has_key?(options, :key_limit)
+    ffaec = get_first_field_after_equal_constraints(idx[:fields], constraints)
+    ffaec_only_ordering? = ffaec == first_ordering_field and Enum.empty?(tail_ordering)
+
+    cond do
+      limited? and ffaec_only_ordering? ->
+        {[qo], nil}
+
+      limited? and not ffaec_only_ordering? ->
+        raise Unsupported,
+              "When querying with a limit, you are only allowed to order_by a single field, and that field must be part of the where constraint."
+
+      not limited? and ffaec_only_ordering? ->
+        fun = Ordering.get_post_query_ordering_fn(schema, ordering)
+        {[qo], fun}
+
+      not limited? and not ffaec_only_ordering? ->
+        fun = Ordering.get_post_query_ordering_fn(schema, ordering)
+        {[], fun}
+    end
+  end
+
+  defp get_first_field_after_equal_constraints(idx_fields, constraints) do
+    equal_fields = for %QueryPlan.Equal{field: field} <- constraints, do: field
+
+    case idx_fields -- equal_fields do
+      [ffaec | _] ->
+        ffaec
+
+      _ ->
+        nil
+    end
+  end
+
+  defp assert_repo_limit_omitted(options) do
+    if Keyword.has_key?(options, :limit) do
+      raise Unsupported,
+            "`:limit` in Repo options is not supported. Use an `Ecto.Query` limit instead."
     end
   end
 end

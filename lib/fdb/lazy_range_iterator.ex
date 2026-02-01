@@ -1,9 +1,11 @@
 defmodule FDB.LazyRangeIterator do
+  @moduledoc false
   @behaviour :erlfdb_iterator
 
   defstruct [:base, :funs]
 
   defmodule ListIterator do
+    @moduledoc false
     @behaviour :erlfdb_iterator
 
     def start(list), do: :erlfdb_iterator.new(__MODULE__, list)

@@ -11,6 +11,7 @@
 * Metadata retrieval is now skipped when querying a schema by it's primary key only. e.g. `Repo.all(User, ...)`
 * Added `FDB.stream_range/4`, currently undocumented, that wraps the `:erlfdb_range_iterator` in a `Stream` for
   easier use in Elixir apps.
+* When querying with no where clause and an order_by, an index will now be selected if one exists.
 
 ### Bug fixes
 

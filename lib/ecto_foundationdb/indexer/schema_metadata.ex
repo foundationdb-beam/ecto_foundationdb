@@ -227,7 +227,7 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
   end
 
   defp select_index(metadata, constraints) do
-    Metadata.select_index(with_schema_metadata_indexes(metadata), constraints)
+    Metadata.select_index(with_schema_metadata_indexes(metadata), constraints, [])
   end
 
   @doc """
@@ -450,7 +450,7 @@ defmodule EctoFoundationDB.Indexer.SchemaMetadata do
     adapter_meta = get_adapter_meta(Tenant.repo(tenant))
 
     constraints =
-      for {f, v} <- indexed_values, do: %QueryPlan.Equal{field: f, is_pk?: false, param: v}
+      for {f, v} <- indexed_values, do: %QueryPlan.Equal{field: f, pk?: false, param: v}
 
     idx =
       Metadata.transactional(tenant, adapter_meta, source, fn _tx, metadata ->

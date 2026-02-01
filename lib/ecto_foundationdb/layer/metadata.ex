@@ -104,15 +104,19 @@ defmodule EctoFoundationDB.Layer.Metadata do
     end
   end
 
-  def select_index(metadata, constraints) do
+  def select_index(metadata, constraints, ordering) do
     %__MODULE__{indexes: indexes} = metadata
 
-    case Enum.min(indexes, &choose_a_over_b_or_throw(&1, &2, constraints), fn -> nil end) do
+    case Enum.min(indexes, &choose_a_over_b_or_throw(&1, &2, constraints, ordering), fn -> nil end) do
       nil -> nil
       idx -> if(sufficient?(idx, constraints), do: idx, else: nil)
     end
   catch
     {:best, idx} -> idx
+  end
+
+  def arrange_constraints(constraints = [%QueryPlan.None{}], _idx) do
+    constraints
   end
 
   def arrange_constraints(constraints, idx) do
@@ -127,7 +131,7 @@ defmodule EctoFoundationDB.Layer.Metadata do
 
   defp sufficient?(idx, constraints) when is_list(idx) and is_list(constraints) do
     fields = idx[:fields] |> Enum.into(MapSet.new())
-    where_fields_list = for(op <- constraints, do: op.field)
+    where_fields_list = get_fields_list(constraints, [])
     where_fields = Enum.into(where_fields_list, MapSet.new())
     sufficient?(fields, where_fields)
   end
@@ -136,10 +140,10 @@ defmodule EctoFoundationDB.Layer.Metadata do
     0 == MapSet.difference(where_fields, fields) |> MapSet.size()
   end
 
-  defp choose_a_over_b_or_throw(idx_a, idx_b, constraints) do
+  defp choose_a_over_b_or_throw(idx_a, idx_b, constraints, ordering) do
     fields_a = idx_a[:fields] |> Enum.into(MapSet.new())
     fields_b = idx_b[:fields] |> Enum.into(MapSet.new())
-    where_fields_list = for(op <- constraints, do: op.field)
+    where_fields_list = get_fields_list(constraints, [])
     where_fields = Enum.into(where_fields_list, MapSet.new())
 
     overlap_a = MapSet.intersection(where_fields, fields_a) |> MapSet.size()
@@ -154,15 +158,30 @@ defmodule EctoFoundationDB.Layer.Metadata do
     # Between ops, and it always must be the last field in the index.
     between_fields = for %QueryPlan.Between{field: field} <- constraints, do: field
 
+    # The ordering of a query has the same index selection characteristics as a Between, as long
+    # as there's not a Between already defined.
+    {between_fields, montonicity_fields_list} =
+      if between_fields == [] do
+        ordering_fields =
+          case ordering do
+            [%QueryPlan.Order{field: field}] -> [field]
+            _ -> []
+          end
+
+        {ordering_fields, where_fields_list ++ ordering_fields}
+      else
+        {between_fields, where_fields_list}
+      end
+
     final_between_a? =
       length(between_fields) <= 1 and
-        Enum.slice(idx_a[:fields], 0, length(where_fields_list)) ==
-          where_fields_list
+        Enum.slice(idx_a[:fields], 0, length(montonicity_fields_list)) ==
+          montonicity_fields_list
 
     final_between_b? =
       length(between_fields) <= 1 and
-        Enum.slice(idx_b[:fields], 0, length(where_fields_list)) ==
-          where_fields_list
+        Enum.slice(idx_b[:fields], 0, length(montonicity_fields_list)) ==
+          montonicity_fields_list
 
     default_index_short_circuit(
       match_a?,
@@ -390,4 +409,8 @@ defmodule EctoFoundationDB.Layer.Metadata do
     |> Enum.sort(&(Keyword.get(&1, :priority, 0) > Keyword.get(&2, :priority, 0)))
     |> new()
   end
+
+  defp get_fields_list([], acc), do: List.flatten(Enum.reverse(acc))
+  defp get_fields_list([%{field: field} | tail], acc), do: get_fields_list(tail, [field | acc])
+  defp get_fields_list([%{fields: fields} | tail], acc), do: get_fields_list(tail, [fields | acc])
 end

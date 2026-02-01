@@ -218,10 +218,28 @@ defmodule EctoFoundationDB.Indexer.Default do
   end
 
   @impl true
-  def range(_idx, %QueryPlan{constraints: [%QueryPlan.None{}]}, _options) do
-    raise Unsupported, """
-    FoundationDB Adapter does not support empty where clause on an index. In fact, this code path should not be reachable.
-    """
+  def range(
+        idx,
+        plan = %QueryPlan{constraints: constraints = [%QueryPlan.None{}]},
+        options
+      ) do
+    fields = idx[:fields]
+    :ok = assert_constraints(fields, constraints)
+
+    {start_key, end_key} =
+      Pack.default_index_range(
+        plan.tenant,
+        plan.source,
+        idx[:id]
+      )
+
+    start_key = options[:start_key] || start_key
+
+    if Keyword.get(idx[:options], :mapped?, true) do
+      {start_key, end_key, mapper(plan.tenant, length(fields))}
+    else
+      {start_key, end_key}
+    end
   end
 
   def range(idx, plan = %QueryPlan{constraints: constraints}, options) do
@@ -329,6 +347,18 @@ defmodule EctoFoundationDB.Indexer.Default do
 
   defp assert_constraints(_fields, []) do
     :ok
+  end
+
+  defp assert_constraints(fields, [%QueryPlan.None{fields: c_fields}]) do
+    valid? = Enum.slice(fields, 0, length(c_fields)) == c_fields
+
+    if valid? do
+      :ok
+    else
+      raise Unsupported, """
+      Provided order_by is not compatible with any index.
+      """
+    end
   end
 
   defp assert_constraints([field | fields], [%QueryPlan.Equal{field: eq_field} | constraints]) do

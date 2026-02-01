@@ -5,6 +5,7 @@ defmodule EctoFoundationDB.QueryPlan do
   alias EctoFoundationDB.QueryPlan.Between
   alias EctoFoundationDB.QueryPlan.Equal
   alias EctoFoundationDB.QueryPlan.None
+  alias EctoFoundationDB.QueryPlan.Order
 
   @enforce_keys [
     :tenant,
@@ -23,23 +24,32 @@ defmodule EctoFoundationDB.QueryPlan do
 
   defmodule None do
     @moduledoc false
-    defstruct [:is_pk?]
+    defstruct [:pk?, :fields]
   end
 
   defmodule Equal do
     @moduledoc false
-    defstruct [:field, :is_pk?, :param]
+    defstruct [:field, :pk?, :param]
   end
 
   defmodule Between do
     @moduledoc false
     defstruct [
       :field,
-      :is_pk?,
+      :pk?,
       :param_left,
       :param_right,
       :inclusive_left?,
       :inclusive_right?
+    ]
+  end
+
+  defmodule Order do
+    @moduledoc false
+    defstruct [
+      :field,
+      :pk?,
+      :monotonicity
     ]
   end
 
@@ -52,7 +62,7 @@ defmodule EctoFoundationDB.QueryPlan do
       constraints: [
         %Between{
           field: :_,
-          is_pk?: true,
+          pk?: true,
           param_left: id_s,
           param_right: id_e,
           inclusive_left?: is_nil(id_s) || Keyword.get(options, :inclusive_left?, true),
@@ -66,14 +76,14 @@ defmodule EctoFoundationDB.QueryPlan do
     }
   end
 
-  def get(tenant, source, schema, context, wheres, updates, params, ordering, limit) do
-    # @todo: if None is found, then check ordering for a constraint that requires an index
-    #   e.g.
-    #   %None{is_pk?: false, field: :name}
+  def get(tenant, source, schema, context, wheres, updates, params, order_bys, limit) do
+    ordering = parse_order_bys(schema, order_bys)
+
     constraints =
       case walk_ast(wheres, schema, params, []) do
         [] ->
-          [%None{is_pk?: true}]
+          none_c = make_none_constraint(ordering)
+          [none_c]
 
         list ->
           list
@@ -85,10 +95,12 @@ defmodule EctoFoundationDB.QueryPlan do
       schema: schema,
       context: context,
       constraints:
-        Enum.sort(constraints, fn
-          %Equal{}, %Between{} -> true
-          _, _ -> false
-        end),
+        merge_betweens(
+          Enum.sort(constraints, fn
+            %Equal{}, %Between{} -> true
+            _, _ -> false
+          end)
+        ),
       updates: resolve_updates(updates, params),
       layer_data: %{},
       ordering: ordering,
@@ -156,7 +168,7 @@ defmodule EctoFoundationDB.QueryPlan do
       ) do
     %Equal{
       field: where_field,
-      is_pk?: pk?(schema, where_field),
+      pk?: pk?(schema, where_field),
       param: get_pinned_param(params, where_param)
     }
   end
@@ -182,7 +194,7 @@ defmodule EctoFoundationDB.QueryPlan do
              (op_right == :< or op_right == :<=) do
     %Between{
       field: where_field_gt,
-      is_pk?: pk?(schema, where_field_gt),
+      pk?: pk?(schema, where_field_gt),
       param_left: get_pinned_param(params, where_param_left),
       param_right: get_pinned_param(params, where_param_right),
       inclusive_left?: op_left == :>=,
@@ -198,7 +210,7 @@ defmodule EctoFoundationDB.QueryPlan do
       when op in ~w[> >=]a do
     %Between{
       field: where_field,
-      is_pk?: pk?(schema, where_field),
+      pk?: pk?(schema, where_field),
       param_left: get_pinned_param(params, where_param),
       param_right: nil,
       inclusive_left?: op == :>=,
@@ -214,7 +226,7 @@ defmodule EctoFoundationDB.QueryPlan do
       when op in ~w[< <=]a do
     %Between{
       field: where_field,
-      is_pk?: pk?(schema, where_field),
+      pk?: pk?(schema, where_field),
       param_left: nil,
       param_right: get_pinned_param(params, where_param),
       inclusive_left?: true,
@@ -257,5 +269,67 @@ defmodule EctoFoundationDB.QueryPlan do
 
   defp pk?(schema, param) do
     Fields.get_pk_field!(schema) == param
+  end
+
+  def parse_order_bys(_schema, []), do: []
+
+  def parse_order_bys(schema, order_bys) do
+    order_bys
+    |> join_exprs()
+    |> Enum.map(fn {dir, {{:., [], [{:&, [], [0]}, field]}, _, _}} ->
+      %Order{field: field, pk?: pk?(schema, field), monotonicity: dir}
+    end)
+  end
+
+  defp join_exprs([%{expr: exprs1}, %{expr: exprs2} | t]) do
+    join_exprs([%{expr: Keyword.merge(exprs1, exprs2)} | t])
+  end
+
+  defp join_exprs([%{expr: exprs1}]), do: exprs1
+
+  defp make_none_constraint([]), do: %None{pk?: true}
+
+  defp make_none_constraint([%Order{pk?: true, field: field} | _tail_ordering]),
+    do: %None{pk?: true, fields: [field]}
+
+  defp make_none_constraint(ordering) do
+    fields = for %Order{field: field} <- ordering, do: field
+    %None{pk?: false, fields: fields}
+  end
+
+  defp merge_betweens(constraints) do
+    betweens = for(b = %Between{} <- constraints, do: b)
+
+    to_merge =
+      case betweens do
+        [a = %{field: field, param_right: nil}, b = %{field: field, param_left: nil}] ->
+          {a, b}
+
+        [a = %{field: field, param_left: nil}, b = %{field: field, param_right: nil}] ->
+          {b, a}
+
+        _ ->
+          nil
+      end
+
+    case to_merge do
+      nil ->
+        constraints
+
+      {l, r} ->
+        non_betweens = constraints -- betweens
+
+        non_betweens ++
+          [
+            %Between{
+              field: l.field,
+              pk?: l.pk?,
+              param_left: l.param_left,
+              param_right: r.param_right,
+              inclusive_left?: l.inclusive_left?,
+              inclusive_right?: r.inclusive_right?
+            }
+          ]
+    end
   end
 end

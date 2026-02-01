@@ -73,8 +73,7 @@ defmodule EctoFoundationdb.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      # {:erlfdb, "~> 0.3.3"},
-      {:erlfdb, git: "git@github.com:jessestimpson/erlfdb.git", branch: "range-iterator"},
+      {:erlfdb, "~> 0.3.4"},
       {:ecto, "~> 3.13"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.6", only: [:dev, :test, :docs]},
