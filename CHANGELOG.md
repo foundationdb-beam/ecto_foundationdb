@@ -28,9 +28,6 @@ of key-values from the database server. We hope these paths are now simpler and 
 ### Dependencies
 
 * `erlfdb ~> 0.3.4`
-
-### Dependencies
-
 * Elixir 1.19 and Erlang 28
 * Updated CI FDB to 7.3.69
 * Updated all outdated deps
