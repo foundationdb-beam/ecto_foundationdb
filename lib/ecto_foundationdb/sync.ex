@@ -72,9 +72,9 @@ defmodule EctoFoundationDB.Sync do
   end
   ```
 
-  ### Quick example 3: Syncing a group of records indivudually
+  ### Quick example 3: Syncing a group of records individually
 
-  Suppose your page displays serveral records simulataneously, but you wish to subscribe to change individually.
+  Suppose your page displays several records simultaneously, but you wish to subscribe to change individually.
   You can use `sync_many/6`. This integrates nicely with LiveComponents.
 
   ```elixir
@@ -148,7 +148,7 @@ defmodule EctoFoundationDB.Sync do
   end
 
   @doc """
-  Sets up syncing for a list of records in the database, with indivudual watches.
+  Sets up syncing for a list of records in the database, with individual watches.
 
   See `sync/4` for more.
   """
@@ -213,7 +213,7 @@ defmodule EctoFoundationDB.Sync do
   - `assign`: A function that takes the current socket and new assigns and returns the updated state.
     When not provided: if `Phoenix.Component` is available, we use `Phoenix.Component.assign/3`, otherwise we use `Map.put/3`.
   - `attach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to attach a hook.
-    When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.attach_hook/4`, otherwise we do nothing.
+    When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiveView.attach_hook/4`, otherwise we do nothing.
 
   ## Return
 
@@ -436,7 +436,7 @@ defmodule EctoFoundationDB.Sync do
   ## Options
 
   - `detach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to detach a container hook.
-    When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.detach_hook/3`, otherwise we do nothing.
+    When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiveView.detach_hook/3`, otherwise we do nothing.
 
   ## Return
 
@@ -479,7 +479,7 @@ defmodule EctoFoundationDB.Sync do
 
   - `assign`: A boolean indicating whether or not to assign the label to `nil` or `[]`. Defaults to `true`.
   - `detach_container_hook`: A function that takes `state, name, repo, opts` and modifies state as needed to detach a container hook.
-    When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiewView.detach_hook/3`, otherwise we do nothing.
+    When not provided: if `Phoenix.LiveView` is available, we use `Phoenix.LiveView.detach_hook/3`, otherwise we do nothing.
 
   ## Return
 
@@ -718,7 +718,7 @@ defmodule EctoFoundationDB.Sync do
     def hook_impl(), do: Phoenix.LiveView
 
     defp attach_container_hook(state, name, event, cb) do
-      # Detach, then attach. A future LiveView release may havr `replace: true` option. In the meantime, this is the
+      # Detach, then attach. A future LiveView release may have `replace: true` option. In the meantime, this is the
       # correct way to replace a hook.
       # https://elixirforum.com/t/complex-components-lead-to-us-always-calling-detach-hook-3-before-attach-hook-4/71233/16?u=jstimps
       state

@@ -8,7 +8,7 @@
 * `:key_limit` is a valid Repo option. When specified, the underlying FDB GetRange will be limited to the
   specified number of keys. Note that there is not always a 1-to-1 mapping of keys to objects, due to
   large objects being split across multiple keys.
-* Metadata retrieval is now skipped when querying a schema by it's primary key only. e.g. `Repo.all(User, ...)`
+* Metadata retrieval is now skipped when querying a schema by its primary key only. e.g. `Repo.all(User, ...)`
 * Added `FDB.stream_range/4`, currently undocumented, that wraps the `:erlfdb_range_iterator` in a `Stream` for
   easier use in Elixir apps.
 * When querying with no where clause and an order_by, an index will now be selected if one exists.
@@ -21,7 +21,7 @@
 
 ### Relevant internal changes
 
-Internally, much of the Query and Future interfaces have been refactored to support the Query limit big fix.
+Internally, much of the Query and Future interfaces have been refactored to support the Query limit bug fix.
 In particular, we are now using `:erlfdb_range_iterator`, which provides more control over the paged retrieval
 of key-values from the database server. We hope these paths are now simpler and easier to maintain over time.
 
@@ -105,7 +105,7 @@ transactions, we have chosen to deprecate `Repo.transaction` in favor of `Repo.t
 
 ### New documentation
 
-* [Guide for Operators](operators_manual.html): Describes how to use the `EctoFoundationDB.CLI` functions to rename a field while guaraneeting that all
+* [Guide for Operators](operators_manual.html): Describes how to use the `EctoFoundationDB.CLI` functions to rename a field while guaranteeing that all
 concurrent queries in your distributed application are successful.
 * [Metadata Design](metadata.html): Describes how index metadata is managed and cached in EctoFDB.
 * [Sync Engine Part I - Single Object](watches.livemd): Revamped Livebook that demonstrates how to create a Sync Engine for a single object (for syncing reads)

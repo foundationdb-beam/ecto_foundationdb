@@ -3,7 +3,7 @@
 ```elixir
 Mix.install([
   {:phoenix_playground, "~> 0.1.0"},
-  {:ecto_foundationdb, "~> 0.6"}
+  {:ecto_foundationdb, "~> 0.7"}
 ])
 ```
 
@@ -103,7 +103,7 @@ for {author, content} <- quotes, do:
 
 ## Setup LiveView
 
-Just like in Part I, we're using Phoenix Playground to create a sample LiveView. Here are the key takeways:
+Just like in Part I, we're using Phoenix Playground to create a sample LiveView. Here are the key takeaways:
 
 1. In `sync_all!/4`, we're initializing our mini sync engine. Notice that we use `Repo.all` and `SchemaMetadata.watch_changes`.
 

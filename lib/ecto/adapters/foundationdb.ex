@@ -26,7 +26,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ```elixir
   defp deps do
     [
-      {:ecto_foundationdb, "~> 0.6"}
+      {:ecto_foundationdb, "~> 0.7"}
     ]
   end
   ```
@@ -233,7 +233,7 @@ defmodule Ecto.Adapters.FoundationDB do
   in a well-defined order, the order of the fields in your index determines the Between queries you can perform.
 
   > **_RULE:_**  For any Query, there can be 0 or 1 Between clauses, and if one exists for a field, then there must not
-  exist an Equal clause for ay field that follows, according to the list of fields in the index. Moreover, the Between
+  exist an Equal clause for any field that follows, according to the list of fields in the index. Moreover, the Between
   field must be of a [Data Type](#module-data-types) supported for Between queries.
 
   Above, we demonstrated a nontrivial query with 2 Equal constraints and 1 Between constraint. Compare that with an invalid
@@ -258,7 +258,7 @@ defmodule Ecto.Adapters.FoundationDB do
   1. Purposefully over-extract the data using Stream, and do the filtering in Elixir:
 
   ```elixir
-  from(u in User, where: u.birthyear >= ^1992 and u.birthyear < 1995 and)
+  from(u in User, where: u.birthyear >= ^1992 and u.birthyear < ^1995)
   |> MyApp.Repo.stream(prefix: tenant)
   |> Stream.filter(&((&1).department == "Engineering"))
   |> Enum.to_list()
@@ -356,7 +356,7 @@ defmodule Ecto.Adapters.FoundationDB do
   and are split into multiple key-values, then the distinction becomes important. The Option key_imit constrains
   the total number of keys retrieved from FoundationDB. The Query Limit constrains the total number of items
   in the returned list. Therefore, in rare cases it's valid and reasonable to provide two separate limits
-  in a funcation call.
+  in a function call.
 
   When only the Query limit is provided, keys will be retrieved to satisfy the limit. EctoFDB may retrieve at-most
   one extra page from the internal GetRange operation.
@@ -471,7 +471,7 @@ defmodule Ecto.Adapters.FoundationDB do
       [
         {0, MyApp.IndexUserByDepartment}
         # At a later date, we my add a new index with a corresponding addition
-        # tho the migrations list:
+        # to the migrations list:
         #    {1, MyApp.IndexUserByRole}
       ]
     end
@@ -614,7 +614,7 @@ defmodule Ecto.Adapters.FoundationDB do
   Note:
 
    - The approach to inserting above is guaranteed to have zero conflicts with other keys in the database.
-   - A group of records inserted in a single transaction **will** have versionatmps that are guaranteed to increment by 1.
+   - A group of records inserted in a single transaction **will** have versionstamps that are guaranteed to increment by 1.
    - Records inserted in different transactions **will not** have a predictable versionstamp distance from each other. That distance
      is very unlikely to ever be 1.
 
@@ -786,8 +786,8 @@ defmodule Ecto.Adapters.FoundationDB do
   behavior. You should only consider its use if one of the following is true:
 
   - (a) your schema has no indexes
-  - (b) you know apriori that any indexed fields are unchanged at the time of upsert, or
-  - (c) you know apirori that the primary key you're inserting doesn't already exist.
+  - (b) you know a priori that any indexed fields are unchanged at the time of upsert, or
+  - (c) you know a priori that the primary key you're inserting doesn't already exist.
 
   For these use cases, this option may speed up the loading of initial data at scale.
 

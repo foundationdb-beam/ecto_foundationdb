@@ -1,6 +1,6 @@
 defmodule EctoFoundationDB.Indexer.SchemaMetadata do
   @moduledoc """
-  This is Indexer keeps track of various actions for a Schema:
+  This Indexer keeps track of various actions for a Schema:
 
   - `inserts`: Incremented for each insert or upsert
   - `deletes`: Incremented for each delete

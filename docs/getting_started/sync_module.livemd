@@ -404,7 +404,7 @@ defmodule ProductAdminCard do
         <label for={@form[:name].id}>Product Name</label>
         <input type="text" id={"#{@product.id}-#{@form[:name].id}"} name={@form[:name].name} value={@form[:name].value} />
         <label for={@form[:description].id}>Description</label>
-        <input type="text" id={"#{@product.id}#{@form[:description].id}"} name={@form[:description].name} value={@form[:description].value}} />
+        <input type="text" id={"#{@product.id}#{@form[:description].id}"} name={@form[:description].name} value={@form[:description].value} />
         <button>Save</button>
       </.form>
     </div>

@@ -32,7 +32,7 @@ defmodule EctoFoundationDB.Versionstamp do
     raise Unsupported, """
     Versionstamps must be completed before they are useful, so we disallow converting an incomplete versionstamp to an integer.
 
-    Verstionstamp discovery can be done within the transaction that created it, and an incomplete versionstamp can be made complete with `resolve/2`.
+    Versionstamp discovery can be done within the transaction that created it, and an incomplete versionstamp can be made complete with `resolve/2`.
 
         alias EctoFoundationDB.Future
         alias EctoFoundationDB.Versionstamp
