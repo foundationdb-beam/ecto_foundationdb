@@ -16,10 +16,6 @@ defmodule EctoFoundationDB.Migration.SchemaMigration do
     timestamps(updated_at: false)
   end
 
-  def versions() do
-    from(m in SchemaMigration, select: m.version)
-  end
-
   def up(repo, version, opts \\ []) do
     %__MODULE__{version: version}
     |> repo.insert(opts)

@@ -83,10 +83,10 @@ defmodule EctoFoundationDB.Indexer do
     do: apply(idx[:indexer], :unpack, [idx, plan, fdb_kv], &_unpack/3)
 
   ## Default behavior for standard key-value response
-  defp _unpack(_idx, plan, {fdb_key, fdb_value}) do
+  defp _unpack(_idx, plan = %QueryPlan{}, {fdb_key, fdb_value}) do
     [kv] =
       [{fdb_key, fdb_value}]
-      |> PrimaryKVCodec.stream_decode(plan.tenant)
+      |> PrimaryKVCodec.decode_as_stream(plan.tenant)
       |> Enum.to_list()
 
     kv
@@ -96,10 +96,10 @@ defmodule EctoFoundationDB.Indexer do
   defp _unpack(_idx, _plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, []}),
     do: nil
 
-  defp _unpack(_idx, plan, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, fdb_kvs}) do
+  defp _unpack(_idx, plan = %QueryPlan{}, {{_pkey, _pvalue}, {_skeybegin, _skeyend}, fdb_kvs}) do
     [kv] =
       fdb_kvs
-      |> PrimaryKVCodec.stream_decode(plan.tenant)
+      |> PrimaryKVCodec.decode_as_stream(plan.tenant)
       |> Enum.to_list()
 
     kv

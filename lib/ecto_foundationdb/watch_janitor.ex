@@ -179,7 +179,7 @@ defmodule EctoFoundationDB.WatchJanitor do
       futures
       |> Stream.filter(fn {ts, future} ->
         if now - ts >= check_older_than do
-          erlfdb_future = Future.erlfdb_future(future)
+          {:erlfdb_future, erlfdb_future} = Future.get_promise(future)
           !:erlfdb.is_ready(erlfdb_future)
         else
           true

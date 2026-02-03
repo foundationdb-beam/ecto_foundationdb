@@ -1,4 +1,5 @@
 defmodule EctoFoundationDB.Layer.Ordering do
+  alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
 
   @moduledoc false
@@ -8,59 +9,57 @@ defmodule EctoFoundationDB.Layer.Ordering do
   @doc """
   Returns the ordering function that needs to be applied on a query result.
   """
-  def get_ordering_fn(_schema, []), do: {[], &Function.identity/1}
-  def get_ordering_fn(_schema, nil), do: {[], &Function.identity/1}
+  def get_post_query_ordering_fn(_schema, []), do: nil
+  def get_post_query_ordering_fn(_schema, nil), do: nil
 
-  def get_ordering_fn(schema, ordering) do
+  def get_post_query_ordering_fn(schema, ordering) do
     field_types = if is_nil(schema), do: %{}, else: Schema.field_types(schema) |> Enum.into(%{})
-    parsed_ordering = parse_ordering(ordering)
 
     fun = fn data ->
-      Enum.sort(data, &sort(&1, &2, field_types, parsed_ordering))
+      Enum.sort(data, &sort(&1, &2, field_types, ordering))
     end
 
-    {parsed_ordering, fun}
-  end
-
-  defp parse_ordering(ordering) do
-    ordering
-    |> join_exprs()
-    |> Enum.map(fn {dir, {{:., [], [{:&, [], [0]}, field]}, _, _}} ->
-      {dir, field}
-    end)
+    fun
   end
 
   defp sort(left, right, field_types, ordering) do
-    cmp(left, right, field_types, ordering) == :lt
+    v = cmp(left, right, field_types, ordering, :lt)
+    v in [:lt, :eq]
   end
 
-  defp join_exprs([%{expr: exprs1}, %{expr: exprs2} | t]) do
-    join_exprs([%{expr: Keyword.merge(exprs1, exprs2)} | t])
-  end
+  defp cmp(_, _, _, [], default), do: default
 
-  defp join_exprs([%{expr: exprs1}]), do: exprs1
-
-  defp cmp(left, right, field_types, [{:asc, field} | t]) do
+  defp cmp(
+         left,
+         right,
+         field_types,
+         [%QueryPlan.Order{monotonicity: :asc, field: field} | t],
+         _default
+       ) do
     case cmp_field(field_types[field], left[field], right[field]) do
       :eq ->
-        cmp(left, right, field_types, t)
+        cmp(left, right, field_types, t, :eq)
 
       cmp_res ->
         cmp_res
     end
   end
 
-  defp cmp(left, right, field_types, [{:desc, field} | t]) do
+  defp cmp(
+         left,
+         right,
+         field_types,
+         [%QueryPlan.Order{monotonicity: :desc, field: field} | t],
+         _default
+       ) do
     case cmp_field(field_types[field], left[field], right[field]) do
       :eq ->
-        cmp(left, right, field_types, t)
+        cmp(left, right, field_types, t, :eq)
 
       cmp_res ->
         reverse_cmp(cmp_res)
     end
   end
-
-  defp cmp(_, _, _, []), do: :gt
 
   if Code.ensure_loaded?(Decimal) do
     defp cmp_field(:decimal, lhs, rhs), do: Decimal.compare(lhs, rhs)

@@ -12,6 +12,8 @@ defmodule EctoFoundationDB.MigrationsPJ do
   alias EctoFoundationDB.Schema
   alias EctoFoundationDB.Tenant
 
+  import Ecto.Query
+
   require Logger
 
   @behaviour EctoFoundationDB.ProgressiveJob
@@ -28,10 +30,9 @@ defmodule EctoFoundationDB.MigrationsPJ do
     for source <- sources, do: claim_key(tenant, source)
   end
 
-  def tx_get_claim_status(tenant, tx, source, future) do
-    Future.set(
-      future,
-      tx,
+  def tx_get_claim_status(tenant, tx, source) do
+    Future.new(
+      :erlfdb_future,
       :erlfdb.get(tx, claim_key(tenant, source)),
       &decode_claim_status(&1, source)
     )
@@ -45,7 +46,7 @@ defmodule EctoFoundationDB.MigrationsPJ do
     do: Pack.namespaced_pack(tenant, SchemaMigration.source(), "claim", ["#{source}"])
 
   def transactional(repo, tenant, migrator, limit, options) do
-    active_versions = repo.all(SchemaMigration.versions(), prefix: tenant)
+    active_versions = get_max_versions(tenant, repo)
 
     tenant = Tenant.set_metadata_cache(tenant, :disabled)
 
@@ -105,8 +106,13 @@ defmodule EctoFoundationDB.MigrationsPJ do
 
   @impl true
   def done?(state, _tx) do
-    active_versions = state.repo.all(SchemaMigration.versions())
+    active_versions = get_max_versions(state.tenant, state.repo)
     {state.final_version in active_versions, state}
+  end
+
+  defp get_max_versions(tenant, repo) do
+    from(m in SchemaMigration, select: m.version, limit: 1, order_by: {:desc, m.version})
+    |> repo.all(prefix: tenant, key_limit: 1)
   end
 
   @impl true

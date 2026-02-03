@@ -1,4 +1,5 @@
 defmodule EctoFoundationDB.Layer.DecodedKV do
   @moduledoc false
-  defstruct codec: nil, data_object: nil, multikey?: false
+  @enforce_keys [:codec, :data_object, :multikey?, :range]
+  defstruct @enforce_keys
 end

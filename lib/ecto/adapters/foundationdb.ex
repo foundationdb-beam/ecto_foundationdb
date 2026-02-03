@@ -26,7 +26,7 @@ defmodule Ecto.Adapters.FoundationDB do
   ```elixir
   defp deps do
     [
-      {:ecto_foundationdb, "~> 0.6"}
+      {:ecto_foundationdb, "~> 0.7"}
     ]
   end
   ```
@@ -233,7 +233,7 @@ defmodule Ecto.Adapters.FoundationDB do
   in a well-defined order, the order of the fields in your index determines the Between queries you can perform.
 
   > **_RULE:_**  For any Query, there can be 0 or 1 Between clauses, and if one exists for a field, then there must not
-  exist an Equal clause for ay field that follows, according to the list of fields in the index. Moreover, the Between
+  exist an Equal clause for any field that follows, according to the list of fields in the index. Moreover, the Between
   field must be of a [Data Type](#module-data-types) supported for Between queries.
 
   Above, we demonstrated a nontrivial query with 2 Equal constraints and 1 Between constraint. Compare that with an invalid
@@ -258,7 +258,7 @@ defmodule Ecto.Adapters.FoundationDB do
   1. Purposefully over-extract the data using Stream, and do the filtering in Elixir:
 
   ```elixir
-  from(u in User, where: u.birthyear >= ^1992 and u.birthyear < 1995 and)
+  from(u in User, where: u.birthyear >= ^1992 and u.birthyear < ^1995)
   |> MyApp.Repo.stream(prefix: tenant)
   |> Stream.filter(&((&1).department == "Engineering"))
   |> Enum.to_list()
@@ -310,13 +310,13 @@ defmodule Ecto.Adapters.FoundationDB do
   compared to SQL databases. But you can develop with confidence that your queries will always be
   efficient.
 
-  #### Using `order_by` and `limit` in the same query
+  #### Using `order_by` and `key_limit` in the same query
 
-  EctoFDB will always attempt to return query result that has the ordering applied first and then the limit. If it's
-  unable to do so, then an exception is raised. Remember: a key design decision of our Layer is that a query is valid
+  EctoFDB will always attempt to return query result that has the ordering applied first and then the key_limit. If it's
+  unable to do so, then an exception is raised. Remember: a central design decision of our Layer is that a query is valid
   only if it can be achieved with a single Get or GetRange.
 
-  `order_by` and `limit` will work as expected as long as one of the following conditions is true:
+  `order_by` and `key_limit` will work as expected as long as one of the following conditions is true:
 
   1. An index is not being queried AND the `order_by` is defined on the primary key field.
   2. The fields of the selected index match with the fields in the `order_by` clause.
@@ -324,7 +324,7 @@ defmodule Ecto.Adapters.FoundationDB do
   Examples:
 
   ```elixir
-  opts = [prefix: tenant, limit: 10]
+  opts = [prefix: tenant, key_limit: 10]
 
   # order_by primary key field
   Repo.all(
@@ -345,43 +345,36 @@ defmodule Ecto.Adapters.FoundationDB do
   )
   ```
 
-  #### Query limit and option limit
+  #### Query limit and option key_limit
 
   EctoFDB supports two types of limits.
 
   1. **Query limit**: A `limit: n` clause provided to an `Ecto.Query`
-  2. **Option limit**: A `limit: n` option procide to a `Repo.all` call
+  2. **Option key_limit**: A `key_limit: n` option provided to a `Repo.all` call
 
-  In almost all cases, the two are equivalent. However, if objects surpass the `:max_single_value_size`
-  and are split into multiple key-values, then the distinction becomes important. The Option Limit constrains
-  the total number of keys retrieved from FoundationDB. The Query Limit contrains the total number of items
-  in the returned list. Therefore, in some cases it's valid and reasonable to provide two separate limits
-  in a funcation call.
+  In almost all cases, the two are equivalent. However, if any objects surpass the `:max_single_value_size`
+  and are split into multiple key-values, then the distinction becomes important. The Option key_imit constrains
+  the total number of keys retrieved from FoundationDB. The Query Limit constrains the total number of items
+  in the returned list. Therefore, in rare cases it's valid and reasonable to provide two separate limits
+  in a function call.
+
+  When only the Query limit is provided, keys will be retrieved to satisfy the limit. EctoFDB may retrieve at-most
+  one extra page from the internal GetRange operation.
 
   ```elixir
   Repo.all(
     from(p in Post, limit: 10), #=> a maximum of 10 %Post{} will be returned
-    prefix: tenant, limit: 100) #=> a maximum of 100 key-values will be retrieved
+    prefix: tenant)
   ```
 
-  To disable splitting objects across multiple keys, set `max_value_size` to match
-  `:max_single_value_size`, which is `100_000` by default.
-
-  Finally, if you wish to make use of object splitting and guarantee a correct and consistent limiting contraint,
-  you must instead use `Repo.stream`:
+  When the Option key_limit is provided, EctoFDB guarantees that no more than that number of keys will be retrieved
+  by the internal GetRange operation. Any Query limit is executed after this fact.
 
   ```elixir
-  from(p in Post)
-  |> MyApp.Repo.stream(prefix: tenant)
-  |> Stream.take(10)
+  Repo.all(
+    from(p in Post, limit: 10), #=> a maximum of 10 %Post{} will be **returned**
+    prefix: tenant, key_limit: 100) #=> a maximum of 100 key-values will be **retrieved**
   ```
-
-  The stream operation will continue to retrieve keys as long as necessary to satisfy the `10` contraint on the
-  Elixir Stream.
-
-  While confusing, the behavior is consistant with EctoFoundationDB's goals of preventing the over-extraction
-  of data behind the scenes. As always, the developer may choose to accept over-extraction risk by constraining
-  the data in Elixir code rather than the query itself.
 
   ### Custom indexes
 
@@ -478,7 +471,7 @@ defmodule Ecto.Adapters.FoundationDB do
       [
         {0, MyApp.IndexUserByDepartment}
         # At a later date, we my add a new index with a corresponding addition
-        # tho the migrations list:
+        # to the migrations list:
         #    {1, MyApp.IndexUserByRole}
       ]
     end
@@ -621,7 +614,7 @@ defmodule Ecto.Adapters.FoundationDB do
   Note:
 
    - The approach to inserting above is guaranteed to have zero conflicts with other keys in the database.
-   - A group of records inserted in a single transaction **will** have versionatmps that are guaranteed to increment by 1.
+   - A group of records inserted in a single transaction **will** have versionstamps that are guaranteed to increment by 1.
    - Records inserted in different transactions **will not** have a predictable versionstamp distance from each other. That distance
      is very unlikely to ever be 1.
 
@@ -793,8 +786,8 @@ defmodule Ecto.Adapters.FoundationDB do
   behavior. You should only consider its use if one of the following is true:
 
   - (a) your schema has no indexes
-  - (b) you know apriori that any indexed fields are unchanged at the time of upsert, or
-  - (c) you know apirori that the primary key you're inserting doesn't already exist.
+  - (b) you know a priori that any indexed fields are unchanged at the time of upsert, or
+  - (c) you know a priori that the primary key you're inserting doesn't already exist.
 
   For these use cases, this option may speed up the loading of initial data at scale.
 

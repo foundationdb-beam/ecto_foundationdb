@@ -38,25 +38,26 @@ defmodule EctoFoundationDB.Layer.MetadataVersion do
     :erlfdb.max(tx, app_version_key(tenant, idx), val)
   end
 
-  def tx_get_new(tx, future) do
-    Future.set(future, tx, :erlfdb.get(tx, @fdb_metadata_version_key), &new/1)
+  def tx_get_new(tx) do
+    Future.new(:erlfdb_future, :erlfdb.get(tx, @fdb_metadata_version_key), &new/1)
   end
 
-  def tx_with_app(mdv = %__MODULE__{app: nil}, tenant, tx, idx, future) do
-    Future.set(
-      future,
-      tx,
+  def tx_with_app(mdv = %__MODULE__{app: nil}, tenant, tx, idx) do
+    Future.new(
+      :erlfdb_future,
       :erlfdb.get(tx, app_version_key(tenant, idx)),
       &with_decoded_app(mdv, &1)
     )
   end
 
-  def tx_get_full(tenant, tx, idx, future) do
-    fut1 = Future.set(future, tx, :erlfdb.get(tx, @fdb_metadata_version_key))
-    fut2 = Future.set(future, tx, :erlfdb.get(tx, app_version_key(tenant, idx)), &decode_app/1)
+  def tx_get_full(tenant, tx, idx) do
+    future1 = Future.new(:erlfdb_future, :erlfdb.get(tx, @fdb_metadata_version_key))
+
+    future2 =
+      Future.new(:erlfdb_future, :erlfdb.get(tx, app_version_key(tenant, idx)), &decode_app/1)
 
     [global, app] =
-      [fut1, fut2]
+      [future1, future2]
       |> Future.await_all()
       |> Enum.map(&Future.result/1)
 

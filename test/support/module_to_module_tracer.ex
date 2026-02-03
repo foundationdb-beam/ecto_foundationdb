@@ -39,7 +39,9 @@ defmodule EctoFoundationDB.ModuleToModuleTracer do
     match_spec = [{:_, [], [{:message, {{:cp, {:caller}}}}]}]
 
     :trace.function(session, :on_load, match_spec, [:local])
-    :trace.function(session, {:erlfdb, :_, :_}, match_spec, [:local])
+
+    for {module, function, arity} <- call_specs,
+        do: :trace.function(session, {module, function, arity}, match_spec, [:local])
 
     {tracer, session}
   end

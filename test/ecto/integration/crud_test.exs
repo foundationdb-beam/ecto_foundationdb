@@ -172,9 +172,13 @@ defmodule Ecto.Integration.CrudTest do
 
       {2, nil} = TestRepo.insert_all(Account, [account2, account1], prefix: tenant)
 
-      [%{name: "Jane" <> _}, %{name: "John" <> _}] =
-        from(Account, order_by: :name)
-        |> TestRepo.all(prefix: tenant)
+      assert [%{name: "Jane" <> _}, %{name: "John" <> _}] =
+               TestRepo.all(Account, prefix: tenant)
+               |> Enum.sort(fn %Account{name: a}, %Account{name: b} -> a <= b end)
+
+      assert [%{name: "Jane" <> _}, %{name: "John" <> _}] =
+               from(Account, order_by: :name)
+               |> TestRepo.all(prefix: tenant)
     end
 
     test "tx_insert", context do
@@ -232,8 +236,8 @@ defmodule Ecto.Integration.CrudTest do
                |> Enum.sort()
 
       assert [_, _] =
-               from(u in "users", select: [u.name, u.id])
-               |> TestRepo.all(prefix: tenant, limit: 2)
+               from(u in "users", select: [u.name, u.id], limit: 2)
+               |> TestRepo.all(prefix: tenant)
                |> Enum.sort()
     end
 
@@ -277,7 +281,14 @@ defmodule Ecto.Integration.CrudTest do
                TestRepo.all_range(from("users", select: [:id, :name]), "0001", "0002",
                  inclusive_right?: true,
                  prefix: tenant,
-                 limit: 1
+                 key_limit: 1
+               )
+               |> Enum.map(&Map.to_list/1)
+
+      assert [[id: "0001", name: "Alice"]] =
+               TestRepo.all_range(from("users", select: [:id, :name], limit: 1), "0001", "0002",
+                 inclusive_right?: true,
+                 prefix: tenant
                )
                |> Enum.map(&Map.to_list/1)
     end

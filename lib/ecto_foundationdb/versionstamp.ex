@@ -25,14 +25,14 @@ defmodule EctoFoundationDB.Versionstamp do
   def incomplete?(_), do: false
 
   def get(tx) do
-    Future.new_deferred(:erlfdb.get_versionstamp(tx), &from_binary/1)
+    Future.new(:erlfdb_future, :erlfdb.get_versionstamp(tx), &from_binary/1)
   end
 
   def to_integer({:versionstamp, @inc_id, @inc_batch, _}) do
     raise Unsupported, """
     Versionstamps must be completed before they are useful, so we disallow converting an incomplete versionstamp to an integer.
 
-    Verstionstamp discovery can be done within the transaction that created it, and an incomplete versionstamp can be made complete with `resolve/2`.
+    Versionstamp discovery can be done within the transaction that created it, and an incomplete versionstamp can be made complete with `resolve/2`.
 
         alias EctoFoundationDB.Future
         alias EctoFoundationDB.Versionstamp

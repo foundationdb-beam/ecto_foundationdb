@@ -2,47 +2,49 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   @moduledoc false
   @behaviour Ecto.Adapter.Queryable
 
-  alias Ecto.Adapters.FoundationDB
+  alias Ecto.Adapters.FoundationDB.EctoAdapterQueryable.Continuation
+
   alias EctoFoundationDB.Assert.CorrectTenancy
-  alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Future
+  alias EctoFoundationDB.Layer.DecodedKV
   alias EctoFoundationDB.Layer.Fields
-  alias EctoFoundationDB.Layer.Ordering
   alias EctoFoundationDB.Layer.Query
+  alias EctoFoundationDB.Layer.Tx
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
 
-  @impl Ecto.Adapter.Queryable
-  def prepare(operation, query) do
-    %Ecto.Query{
-      from: %Ecto.Query.FromExpr{source: {_source, schema}},
-      order_bys: order_bys,
-      limit: limit
-    } = query
+  alias FDB.LazyRangeIterator
 
-    {ordering, ordering_fn} = Ordering.get_ordering_fn(schema, order_bys)
-    limit = get_query_limit(limit)
-    limit_fn = if limit == nil, do: & &1, else: &Stream.take(&1, limit)
-    {:nocache, {operation, query, {limit, limit_fn}, %{}, ordering, ordering_fn}}
+  defmodule Continuation do
+    @moduledoc false
+    defstruct more?: false, start_key: nil
+  end
+
+  @impl Ecto.Adapter.Queryable
+  def prepare(operation, query = %Ecto.Query{}) do
+    # :nocache required by Ecto
+    {:nocache, {operation, query}}
   end
 
   @impl Ecto.Adapter.Queryable
   def execute(
-        adapter_meta = %{opts: repo_config},
+        adapter_meta,
         _query_meta,
-        _query_cache =
-          {:nocache,
-           {:all,
-            query = %Ecto.Query{
-              from: %Ecto.Query.FromExpr{source: {_source, _schema}},
-              select: %Ecto.Query.SelectExpr{
-                fields: select_fields
-              }
-            }, {limit, limit_fn}, %{}, ordering, ordering_fn}},
+        {:nocache, {:all, query = %Ecto.Query{}}},
         params,
         options
       ) do
-    options = adjust_limit_options(options, limit)
+    %{opts: repo_config} = adapter_meta
+
+    %Ecto.Query{
+      from: %Ecto.Query.FromExpr{source: {source, schema}},
+      wheres: wheres,
+      order_bys: order_bys,
+      select: %Ecto.Query.SelectExpr{
+        fields: select_fields
+      },
+      limit: limit
+    } = query
 
     case options[:noop] do
       query_result when not is_nil(query_result) ->
@@ -50,40 +52,37 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         query_result
 
       _ ->
-        {%{context: context}, query = %Ecto.Query{prefix: tenant}} =
+        {%{context: context}, %Ecto.Query{prefix: tenant}} =
           CorrectTenancy.assert_by_query!(repo_config, query)
 
-        future = execute_all(tenant, adapter_meta, context, query, params, ordering, options)
+        limit = parse_query_limit(limit)
 
-        future =
-          Future.apply(future, fn {objs, _continuation} ->
-            objs
-            |> ordering_fn.()
-            |> limit_fn.()
-            |> select(Fields.parse_select_fields(select_fields), nil)
-          end)
+        plan =
+          QueryPlan.get(tenant, source, schema, context, wheres, [], params, order_bys, limit)
 
-        handle_returning(future, options)
+        select_fields = Fields.parse_select_fields(select_fields)
+
+        create_query_all_future(tenant, adapter_meta, plan, :all, select_fields, options)
+        |> handle_returning(options)
     end
   end
 
   def execute(
         adapter_meta = %{opts: repo_config},
         _query_meta,
-        _query_cache =
-          {:nocache,
-           {:delete_all,
-            query = %Ecto.Query{
-              from: %Ecto.Query.FromExpr{source: {source, schema}},
-              wheres: wheres
-            }, {nil, _limit_fn}, %{}, _ordering, _ordering_fn}},
+        {:nocache, {:delete_all, query = %Ecto.Query{limit: nil}}},
         params,
         _options
       ) do
+    %Ecto.Query{
+      from: %Ecto.Query.FromExpr{source: {source, schema}},
+      wheres: wheres
+    } = query
+
     {%{context: context}, %Ecto.Query{prefix: tenant}} =
       CorrectTenancy.assert_by_query!(repo_config, query)
 
-    plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params, [])
+    plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params, [], nil)
     num = Query.delete(tenant, adapter_meta, plan)
 
     {num, []}
@@ -92,8 +91,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   def execute(
         adapter_meta = %{opts: repo_config},
         _query_meta,
-        _query_cache =
-          {:nocache, {:update_all, query, {nil, _limit_fn}, %{}, _ordering, _ordering_fn}},
+        {:nocache, {:update_all, query = %Ecto.Query{limit: nil}}},
         params,
         _options
       ) do
@@ -110,29 +108,15 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   def stream(
         adapter_meta = %{opts: repo_config},
         _query_meta,
-        _query_cache =
-          {:nocache, {:all, query, {nil, _limit_fn}, %{}, [], _ordering_fn}},
+        {:nocache, {:all, query = %Ecto.Query{limit: nil, order_bys: order_bys}}},
         params,
         options
-      ) do
+      )
+      when order_bys in [nil, []] do
     {%{context: context}, query = %Ecto.Query{prefix: tenant}} =
       CorrectTenancy.assert_by_query!(repo_config, query)
 
-    tenant
-    |> stream_all(adapter_meta, context, query, params, options)
-  end
-
-  def stream(
-        _adapter_meta,
-        _query_meta,
-        _query_cache =
-          {:nocache, {:all, _query, {nil, _limit_fn}, %{}, _ordering, _ordering_fn}},
-        _params,
-        _options
-      ) do
-    raise Unsupported, """
-    Stream ordering is not supported.
-    """
+    stream_all(tenant, adapter_meta, context, query, params, options)
   end
 
   def execute_all_range(_module, _repo, queryable, id_s, id_e, {adapter_meta, options}) do
@@ -150,86 +134,51 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         schema: schema
       })
 
-    plan = QueryPlan.all_range(tenant, source, schema, context, id_s, id_e, options)
-    future = Query.all(tenant, adapter_meta, plan, options)
+    limit =
+      case queryable do
+        %Ecto.Query{limit: limit} ->
+          parse_query_limit(limit)
 
-    future =
-      Future.apply(future, fn {objs, _continuation} ->
-        case return_handler do
-          :all_from_source ->
-            objs = Enum.to_list(objs)
-            select_fields = select_fields || get_field_names_union(objs)
-            {select_fields, select(objs, select_fields, nil)}
+        _ ->
+          nil
+      end
 
-          _ ->
-            select(objs, select_fields, nil)
-        end
-      end)
+    plan = QueryPlan.all_range(tenant, source, schema, context, id_s, id_e, limit, options)
 
-    options = options ++ [returning: {:future, return_handler}]
-
-    handle_returning(future, options)
-  end
-
-  # Extract limit from an `Ecto.Query`
-  defp get_query_limit(nil), do: nil
-  defp get_query_limit(%Ecto.Query.LimitExpr{expr: limit}), do: limit
-
-  defp adjust_limit_options(options, nil), do: options
-
-  defp adjust_limit_options(options, query_limit) do
-    {_, options} =
-      Keyword.get_and_update(options, :limit, fn
-        nil ->
-          {nil, query_limit}
-
-        option_limit ->
-          {option_limit, option_limit}
-      end)
-
-    options
-  end
-
-  defp execute_all(
-         tenant,
-         adapter_meta,
-         context,
-         %Ecto.Query{
-           from: %Ecto.Query.FromExpr{source: {source, schema}},
-           wheres: wheres
-         },
-         params,
-         ordering,
-         options
-       ) do
-    # Steps:
-    #   0. Validate wheres for supported query types
-    #     i. Equal -> where_field == param[0]
-    #     ii. Between -> where_field > param[0] and where_field < param[1]
-    #     iii. None -> empty where clause
-    #   1. pk or index?
-    #   2. construct start key and end key from the first where expression
-    #   3. Use :erlfdb.get, :erlfdb.get_range
-    #   4. Post-get filtering (Remove :not_found, remove index conflicts, )
-    #   5. Arrange fields based on the select input
-    plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params, ordering)
-
-    Query.all(tenant, adapter_meta, plan, options)
+    create_query_all_future(tenant, adapter_meta, plan, return_handler, select_fields, options)
+    |> handle_returning(options ++ [returning: {:future, return_handler}])
   end
 
   defp handle_returning(future, options) do
     case options[:returning] do
-      {:future, return_handler} ->
-        Process.put(
-          Future.token(),
-          Future.apply(future, fn res -> {return_handler, res} end)
-        )
+      {:future, :all_from_source} ->
+        future =
+          Future.then(
+            future,
+            fn result ->
+              {select_fields, objs} = result
+              {:all_from_source, {select_fields, {length(objs), objs}}}
+            end
+          )
 
+        Process.put(Future.token(), future)
+        {0, []}
+
+      {:future, return_handler} ->
+        future =
+          Future.then(
+            future,
+            fn result ->
+              {return_handler, {length(result), result}}
+            end
+          )
+
+        Process.put(Future.token(), future)
         {0, []}
 
       _ ->
-        # Future: If there is a wrapping transaction without an `async_*` qualifier, the wait happens here
-        Future.result(future)
+        rows = Future.result(future)
+        {length(rows), rows}
     end
   end
 
@@ -244,7 +193,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
          },
          params
        ) do
-    plan = QueryPlan.get(tenant, source, schema, context, wheres, updates, params, [])
+    plan = QueryPlan.get(tenant, source, schema, context, wheres, updates, params, [], nil)
     Query.update(tenant, adapter_meta, plan, options)
   end
 
@@ -261,24 +210,24 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     # It is supported at least by Postgres and MySQL and defaults to 500.
     fdb_limit = options[:max_rows] || 500
 
-    query_options = fn
+    ef_query_options = fn
       nil ->
-        [limit: fdb_limit]
+        [key_limit: fdb_limit]
 
-      %Query.Continuation{start_key: start_key} ->
-        [start_key: start_key, limit: fdb_limit]
+      %Continuation{start_key: start_key} ->
+        [start_key: start_key, key_limit: fdb_limit]
 
       x ->
         raise "opt #{inspect(x)}"
     end
 
     start_fun = fn ->
-      plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params, [])
+      plan = QueryPlan.get(tenant, source, schema, context, wheres, [], params, [], nil)
 
       %{
         adapter_meta: adapter_meta,
         tenant: tenant,
-        query_options: query_options,
+        ef_query_options: ef_query_options,
         user_callback: options[:tx_callback],
         plan: plan,
         field_names: Fields.parse_select_fields(select_fields),
@@ -290,7 +239,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     Stream.resource(start_fun, &stream_all_next/1, &stream_all_after/1)
   end
 
-  defp stream_all_next(acc = %{continuation: %Query.Continuation{more?: false}}) do
+  defp stream_all_next(acc = %{continuation: %Continuation{more?: false}}) do
     {:halt, acc}
   end
 
@@ -298,37 +247,58 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     %{
       tenant: tenant,
       adapter_meta: adapter_meta,
-      query_options: query_options,
+      ef_query_options: ef_query_options,
       field_names: field_names,
       user_callback: user_callback,
       plan: plan,
       continuation: continuation
     } = acc
 
-    # Note for future: wrapping Query.all in a transaction is tricky because it creates the
-    # future internally, which doesn't allow us to use the before_transactional test.
-    # To work around this, we make sure we resolve the future inside the transactional.
-    # It doesn't matter because the 'stream' API doesn't support async_* APIs.
-    FoundationDB.transactional(tenant, fn tx ->
-      future = Query.all(tenant, adapter_meta, plan, query_options.(continuation))
+    options = ef_query_options.(continuation)
 
-      tx_callback = if is_nil(user_callback), do: nil, else: &user_callback.(tx, &1)
+    compute_cont = fn
+      [] ->
+        {0, nil}
 
-      future =
-        Future.apply(future, fn {objs, continuation} ->
-          {[select(objs, field_names, tx_callback)], %{acc | continuation: continuation}}
-        end)
+      pages ->
+        last_page = List.last(pages)
+        {Enum.sum(Stream.map(pages, &length/1)), List.last(last_page)}
+    end
 
-      Future.result(future)
-    end)
+    {cont, stream} =
+      Tx.transactional(tenant, fn tx ->
+        # Advance the stream so that we can retrieve the last key for building
+        # the continuation
+        {ri, nil} = Query.all(tenant, adapter_meta, plan, options)
+        {cont, ri} = LazyRangeIterator.advance(ri, compute_cont)
+
+        stream = FDB.Stream.from_iterator(ri)
+
+        stream =
+          if is_nil(user_callback) do
+            stream
+          else
+            Enum.to_list(user_callback.(tx, stream))
+          end
+
+        {cont, stream}
+      end)
+
+    objs =
+      stream
+      |> select(nil, field_names)
+      |> Enum.to_list()
+
+    {[{length(objs), objs}], %{acc | continuation: continuation(cont, options)}}
   end
 
   defp stream_all_after(_acc), do: :ok
 
-  defp get_field_names_union(objs) do
+  defp get_field_names_union(dkvs) do
     {all_fields, _} =
-      objs
-      |> Enum.reduce({[], MapSet.new()}, fn data_object, {list, set_a} ->
+      dkvs
+      |> Enum.reduce({[], MapSet.new()}, fn dkv = %DecodedKV{}, {list, set_a} ->
+        %{data_object: data_object} = dkv
         fields = Keyword.keys(data_object)
         set_b = MapSet.new(fields)
 
@@ -344,18 +314,18 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     all_fields
   end
 
-  defp select(objs, select_field_names, callback) do
-    stream = if is_nil(callback), do: objs, else: callback.(objs)
-
-    rows =
+  defp select(stream, post_query_ordering_fn, select_field_names) do
+    stream =
       stream
-      |> Stream.map(fn data_object ->
+      |> Stream.map(fn %DecodedKV{data_object: data_object} ->
         Fields.arrange(data_object, select_field_names)
       end)
-      |> Fields.strip_field_names_for_ecto()
-      |> Enum.to_list()
 
-    {length(rows), rows}
+    enum = if is_nil(post_query_ordering_fn), do: stream, else: post_query_ordering_fn.(stream)
+
+    enum
+    |> Fields.strip_field_names_for_ecto()
+    |> Enum.to_list()
   end
 
   defp queryable_to_schema_source_tuplet(queryable) do
@@ -411,4 +381,55 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   defp queryable_to_tenant(_queryable, options) do
     options[:prefix]
   end
+
+  defp continuation({len, last_kv}, options) do
+    case options[:key_limit] do
+      nil ->
+        %Continuation{more?: false}
+
+      key_limit ->
+        if len >= key_limit do
+          {fdb_key, _} = last_kv
+          %Continuation{more?: true, start_key: :erlfdb_key.strinc(fdb_key)}
+        else
+          %Continuation{more?: false}
+        end
+    end
+  end
+
+  defp create_query_all_future(tenant, adapter_meta, plan, return_handler, select_fields, options) do
+    must_wait? = not Tx.in_tx?()
+
+    {future, post_query_ordering_fn} =
+      Tx.transactional(tenant, fn _tx ->
+        {ri, post_query_ordering_fn} = Query.all(tenant, adapter_meta, plan, options)
+        future = Future.new(:erlfdb_iterator, ri)
+
+        future =
+          if must_wait? do
+            Future.await(future)
+          else
+            future
+          end
+
+        {future, post_query_ordering_fn}
+      end)
+
+    Future.then(future, fn dkvs ->
+      case return_handler do
+        :all_from_source ->
+          dkvs = Enum.to_list(dkvs)
+          select_fields = select_fields || get_field_names_union(dkvs)
+          objs = select(dkvs, post_query_ordering_fn, select_fields)
+          {select_fields, objs}
+
+        _ ->
+          select(dkvs, post_query_ordering_fn, select_fields)
+      end
+    end)
+  end
+
+  # Extract limit from an `Ecto.Query`
+  defp parse_query_limit(nil), do: nil
+  defp parse_query_limit(%Ecto.Query.LimitExpr{expr: limit}), do: limit
 end

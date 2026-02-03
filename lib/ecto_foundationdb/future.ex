@@ -7,223 +7,255 @@ defmodule EctoFoundationDB.Future do
   for that API for dealing with the Future. The functions here are intended to be for
   internal use only.
   """
-  alias EctoFoundationDB.Layer.Tx
-  defstruct [:ref, :tx, :erlfdb_future, :result, :handler, :must_wait?]
+  defstruct [:ref, :type, :promise, :result, :handler]
 
   @token :__ectofdbfuture__
 
   def token(), do: @token
 
-  # Before entering a transactional that uses this Future module, we must know whether or not
-  # we are required to wait on the Future upon leaving the transactional (`must_wait?`).
-  def before_transactional() do
+  def new(type, promise, f \\ &Function.identity/1)
+
+  def new(:result, result, f) do
+    set_result(%__MODULE__{handler: f}, result)
+  end
+
+  def new(type = :erlfdb_iterator, promise, f) do
+    true = is_tuple(promise)
+
     %__MODULE__{
-      ref: nil,
-      handler: &Function.identity/1,
-      must_wait?: not Tx.in_tx?()
+      ref: get_ref(type, promise),
+      type: type,
+      promise: promise,
+      handler: f
     }
   end
 
-  # Upon leaving a transactional that uses this Future module, `leaving_transactional` must
-  # be called so that any Futures have a change to wait on their results if necessary.
-  def leaving_transactional(fut = %__MODULE__{must_wait?: true}) do
-    %{
-      fut
-      | tx: nil,
-        erlfdb_future: nil,
-        result: result(fut),
-        handler: &Function.identity/1
+  def new(type, promise, f)
+      when type in [:erlfdb_future, :tx_fold_future, :stream, :erlfdb_iterator] do
+    %__MODULE__{
+      ref: get_ref(type, promise),
+      type: type,
+      promise: promise,
+      handler: f
     }
-  end
-
-  def leaving_transactional(fut = %__MODULE__{must_wait?: false}) do
-    fut
-  end
-
-  def new() do
-    %__MODULE__{handler: &Function.identity/1, must_wait?: true}
   end
 
   def ref(%__MODULE__{ref: ref}), do: ref
 
-  def erlfdb_future(%__MODULE__{erlfdb_future: erlfdb_future}), do: erlfdb_future
+  def get_promise(%__MODULE__{type: type, promise: promise}), do: {type, promise}
 
-  def cancel(future = %__MODULE__{}) do
-    %{erlfdb_future: erlfdb_future} = future
+  def cancel(future = %__MODULE__{type: :erlfdb_future}) do
+    %{promise: erlfdb_future} = future
     :erlfdb.cancel(erlfdb_future, flush: true)
+    set_result(%{future | handler: &Function.identity/1}, nil)
+  end
+
+  def cancel(future = %__MODULE__{type: :tx_fold_future}) do
+    %{promise: {_tx, fold_future}} = future
+    :erlfdb.cancel(fold_future, flush: true)
+    set_result(%{future | handler: &Function.identity/1}, nil)
+  end
+
+  def cancel(future = %__MODULE__{type: :stream}) do
+    %{promise: stream} = future
+
+    stream
+    |> Stream.take(0)
+    |> Stream.run()
+
+    set_result(%{future | handler: &Function.identity/1}, nil)
+  end
+
+  def cancel(future = %__MODULE__{type: :erlfdb_iterator}) do
+    %{promise: iterator} = future
+    :erlfdb_iterator.stop(iterator)
+    set_result(%{future | handler: &Function.identity/1}, nil)
+  end
+
+  defp set_result(future = %__MODULE__{}, result) do
+    %{handler: f} = future
 
     %{
       future
-      | tx: nil,
-        ref: nil,
-        erlfdb_future: nil,
-        result: nil,
-        handler: &Function.identity/1,
-        must_wait?: false
-    }
-  end
-
-  @doc """
-  Creates a Future that will be resolved outside of the transaction in which it was created.
-
-  Used for:
-
-    - watch
-    - versionstamp
-  """
-  def new_deferred(erlfdb_future, handler \\ &Function.identity/1) do
-    # The future for a watch and versionstamp is fulfilled outside of a transaction, so there is no tx val
-    %__MODULE__{
-      tx: :deferred,
-      ref: get_ref(erlfdb_future),
-      erlfdb_future: erlfdb_future,
-      handler: handler,
-      must_wait?: false
-    }
-  end
-
-  def set(fut = %__MODULE__{}, tx, erlfdb_future, f \\ &Function.identity/1) do
-    ref = get_ref(erlfdb_future)
-    %{handler: g} = fut
-    %{fut | ref: ref, tx: tx, erlfdb_future: erlfdb_future, handler: &f.(g.(&1))}
-  end
-
-  def set_result(fut = %__MODULE__{}, result) do
-    %{handler: f} = fut
-
-    %{
-      fut
-      | tx: nil,
-        erlfdb_future: nil,
+      | ref: nil,
+        type: :result,
+        promise: nil,
         result: f.(result),
         handler: &Function.identity/1
     }
   end
 
-  def result(fut = %__MODULE__{erlfdb_future: nil, handler: f}) do
-    f.(fut.result)
+  def result(future = %__MODULE__{type: :result}) do
+    %{result: result, handler: f} = future
+    f.(result)
   end
 
-  def result(fut = %__MODULE__{tx: :deferred}) do
-    %{erlfdb_future: erlfdb_future, handler: handler} = fut
+  def result(future = %__MODULE__{type: :erlfdb_future}) do
+    %{promise: erlfdb_future, handler: handler} = future
     res = :erlfdb.wait(erlfdb_future)
     handler.(res)
   end
 
-  def result(fut = %__MODULE__{}) do
-    %{tx: tx, erlfdb_future: erlfdb_future, handler: handler} = fut
-
-    # Since we only have a single future, we can use :erlfdb.wait/1 as long as it's
-    # not a :fold_future. Doing so is good for bookkeeping (fdb_api_counting_test)
-    res =
-      case elem(erlfdb_future, 0) do
-        :fold_future ->
-          [res] = :erlfdb.wait_for_all_interleaving(tx, [erlfdb_future])
-          res
-
-        _ ->
-          :erlfdb.wait(erlfdb_future)
-      end
-
+  def result(future = %__MODULE__{type: :tx_fold_future}) do
+    %{promise: {tx, fold_future}, handler: handler} = future
+    [res] = :erlfdb.wait_for_all_interleaving(tx, [fold_future])
     handler.(res)
   end
 
-  def await_all(futs) do
-    futs
+  def result(future = %__MODULE__{type: :stream}) do
+    %{promise: stream, handler: handler} = future
+
+    stream
+    |> Enum.to_list()
+    |> handler.()
+  end
+
+  def result(future = %__MODULE__{type: :erlfdb_iterator}) do
+    %{promise: iterator, handler: handler} = future
+
+    iterator
+    |> FDB.Stream.from_iterator()
+    |> Enum.to_list()
+    |> handler.()
+  end
+
+  def await(future) do
+    [future] = await_all([future])
+    future
+  end
+
+  def await_all(futures) do
+    futures
     |> await_stream()
     |> Enum.to_list()
   end
 
   # Future: If there is a wrapping transaction with an `async_*` qualifier, the wait happens here
-  def await_stream(futs) do
-    futs = Enum.to_list(futs)
+  def await_stream(futures) do
+    futures = Enum.to_list(futures)
 
-    # important to maintain order of the input futures
-    reffed_futures =
-      for %__MODULE__{ref: ref, erlfdb_future: erlfdb_future} <- futs,
-          not is_nil(erlfdb_future),
-          do: {ref, erlfdb_future}
+    {tx, reffed_folds, reffed_iterators} = get_pipelineable(futures, nil, %{}, %{})
 
-    results =
-      if Enum.empty?(reffed_futures) do
+    results_folds =
+      if Enum.empty?(reffed_folds) do
         %{}
       else
-        [%__MODULE__{tx: tx} | _] = futs
-        {refs, erlfdb_futures} = Enum.unzip(reffed_futures)
-        Enum.zip(refs, :erlfdb.wait_for_all_interleaving(tx, erlfdb_futures)) |> Enum.into(%{})
+        refs = Map.keys(reffed_folds)
+        fold_futures = Map.values(reffed_folds)
+        Enum.zip(refs, :erlfdb.wait_for_all_interleaving(tx, fold_futures)) |> Enum.into(%{})
       end
 
-    Stream.map(
-      futs,
-      fn fut = %__MODULE__{ref: ref, result: result, handler: f} ->
-        case Map.get(results, ref, nil) do
-          nil ->
-            %{
-              fut
-              | tx: nil,
-                erlfdb_future: nil,
-                result: f.(result),
-                handler: &Function.identity/1
-            }
+    results_iterators =
+      if Enum.empty?(reffed_iterators) do
+        %{}
+      else
+        refs = Map.keys(reffed_iterators)
+        iterators = Map.values(reffed_iterators)
+        iterator_results = :erlfdb_iterator.pipeline(iterators)
+        {results, iterators} = Enum.unzip(iterator_results)
+        Enum.each(iterators, &:erlfdb_iterator.stop/1)
+        Enum.zip(refs, results) |> Enum.into(%{})
+      end
 
-          new_result ->
-            %{
-              fut
-              | tx: nil,
-                erlfdb_future: nil,
-                result: f.(new_result),
-                handler: &Function.identity/1
-            }
+    results = Map.merge(results_folds, results_iterators)
+
+    Stream.map(
+      futures,
+      fn future = %__MODULE__{} ->
+        %{ref: ref, type: type, promise: promise, result: result} = future
+
+        case {type, Map.get(results, ref, nil)} do
+          {:result, nil} ->
+            set_result(future, result)
+
+          {:erlfdb_future, nil} ->
+            set_result(future, :erlfdb.wait(promise))
+
+          {:stream, nil} ->
+            set_result(future, Enum.to_list(promise))
+
+          {pipelined_type, new_result}
+          when pipelined_type in [:tx_fold_future, :erlfdb_iterator] ->
+            set_result(future, new_result)
         end
       end
     )
   end
 
-  def apply(fut = %__MODULE__{erlfdb_future: nil}, f) do
-    %{handler: g, result: result} = fut
-    %{fut | result: f.(g.(result)), handler: &Function.identity/1}
+  def then(future = %__MODULE__{type: :result}, f) do
+    %{handler: g, result: result} = future
+    set_result(future, f.(g.(result)))
   end
 
-  def apply(fut = %__MODULE__{}, f) do
-    %{handler: g} = fut
-    %{fut | handler: &f.(g.(&1))}
+  def then(future = %__MODULE__{}, f) do
+    %{handler: g} = future
+    %{future | handler: &f.(g.(&1))}
   end
 
-  def find_ready(futs, ready_ref) when is_map(futs) do
-    {label, found_future, futs} = find_ready(Enum.into(futs, []), ready_ref)
-    {label, found_future, Enum.into(futs, %{})}
+  def find_ready(futures, ready_ref) when is_map(futures) do
+    {label, found_future, futures} = find_ready(Enum.into(futures, []), ready_ref)
+    {label, found_future, Enum.into(futures, %{})}
   end
 
-  def find_ready(futs, ready_ref) when is_list(futs) do
+  def find_ready(futures, ready_ref) when is_list(futures) do
     # Must only be called if you've received a {ready_ref, :ready}
     # message in your mailbox.
 
-    find_ready(futs, ready_ref, [])
+    find_ready(futures, ready_ref, [])
   end
 
   defp find_ready([], _ready_ref, acc), do: {nil, nil, Enum.reverse(acc)}
 
-  defp find_ready([h = %__MODULE__{erlfdb_future: erlfdb_future} | t], ready_ref, acc) do
-    if match_ref?(erlfdb_future, ready_ref) do
+  defp find_ready([h = %__MODULE__{} | t], ready_ref, acc) do
+    %{type: type, promise: promise} = h
+
+    if match_ref?(type, promise, ready_ref) do
       {nil, h, Enum.reverse(acc) ++ t}
     else
       find_ready(t, ready_ref, [h | acc])
     end
   end
 
-  defp find_ready([{label, h = %__MODULE__{erlfdb_future: erlfdb_future}} | t], ready_ref, acc) do
-    if match_ref?(erlfdb_future, ready_ref) do
+  defp find_ready([{label, h = %__MODULE__{}} | t], ready_ref, acc) do
+    %{type: type, promise: promise} = h
+
+    if match_ref?(type, promise, ready_ref) do
       {label, h, Enum.reverse(acc) ++ t}
     else
       find_ready(t, ready_ref, [{label, h} | acc])
     end
   end
 
-  defp match_ref?({:erlfdb_future, ref1, _}, ref2) when ref1 === ref2, do: true
-  defp match_ref?({:fold_future, _, erlfdb_future}, ref2), do: match_ref?(erlfdb_future, ref2)
-  defp match_ref?(_, _), do: false
+  # find_ready only useful for watches and versionstamps, so we don't handle the other types
+  defp match_ref?(:erlfdb_future, {:erlfdb_future, ref1, _}, ref2) when ref1 === ref2, do: true
+  defp match_ref?(_type, _promise, _ref), do: false
 
-  defp get_ref({:erlfdb_future, ref, _}), do: ref
-  defp get_ref({:fold_future, _, {:erlfdb_future, ref, _}}), do: ref
-  defp get_ref(_), do: :erlang.error(:badarg)
+  defp get_ref(:erlfdb_future, {:erlfdb_future, ref, _}), do: ref
+  defp get_ref(:tx_fold_future, {_tx, {:fold_future, _, {:erlfdb_future, ref, _}}}), do: ref
+  defp get_ref(:stream, _), do: make_ref()
+  defp get_ref(:erlfdb_iterator, _), do: make_ref()
+  defp get_ref(_, _), do: :erlang.error(:badarg)
+
+  defp get_pipelineable([], tx, acc_folds, acc_iterators), do: {tx, acc_folds, acc_iterators}
+
+  defp get_pipelineable(
+         [%__MODULE__{type: :tx_fold_future, ref: ref, promise: {tx, fold_future}} | futures],
+         _tx,
+         acc_folds,
+         acc_iterators
+       ) do
+    get_pipelineable(futures, tx, Map.put(acc_folds, ref, fold_future), acc_iterators)
+  end
+
+  defp get_pipelineable(
+         [%__MODULE__{type: :erlfdb_iterator, ref: ref, promise: iterator} | futures],
+         tx,
+         acc_folds,
+         acc_iterators
+       ) do
+    get_pipelineable(futures, tx, acc_folds, Map.put(acc_iterators, ref, iterator))
+  end
+
+  defp get_pipelineable([_future | futures], tx, acc_folds, acc_iterators),
+    do: get_pipelineable(futures, tx, acc_folds, acc_iterators)
 end

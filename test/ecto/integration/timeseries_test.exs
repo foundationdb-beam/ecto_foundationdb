@@ -115,10 +115,10 @@ defmodule Ecto.Integration.TimeSeriesTest do
              TestRepo.all(
                from(e in Event,
                  where: e.date > ^~D[2444-01-01],
-                 order_by: [desc: e.date]
+                 order_by: [desc: e.date],
+                 limit: 2
                ),
-               prefix: tenant,
-               limit: 2
+               prefix: tenant
              )
   end
 end

@@ -24,7 +24,7 @@ defmodule EctoFoundationDBPrimaryKVCodecTest do
                multikey?: true
              }
            ] =
-             PrimaryKVCodec.stream_decode(a_kvs, tenant) |> Enum.to_list()
+             PrimaryKVCodec.decode_as_stream(a_kvs, tenant) |> Enum.to_list()
 
     b_codec = PrimaryKVCodec.new({"b"})
     b_data = [id: "xx"]
@@ -45,6 +45,6 @@ defmodule EctoFoundationDBPrimaryKVCodecTest do
                multikey?: false
              }
            ] =
-             PrimaryKVCodec.stream_decode(a_kvs ++ b_kvs, tenant) |> Enum.to_list()
+             PrimaryKVCodec.decode_as_stream(a_kvs ++ b_kvs, tenant) |> Enum.to_list()
   end
 end

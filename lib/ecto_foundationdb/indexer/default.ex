@@ -157,20 +157,19 @@ defmodule EctoFoundationDB.Indexer.Default do
 
   @impl true
   def create(tenant, tx, idx, schema, {start_key, end_key}, limit) do
-    {count, last_fdb_key} =
+    {count, end_proc_fdb_key} =
       tx
       |> :erlfdb.get_range(start_key, end_key, limit: limit, wait: true)
-      |> PrimaryKVCodec.stream_decode(tenant, emit_db_key?: true)
-      |> Enum.reduce({0, nil}, fn {fdb_key, decoded_kv}, {count, _acc} ->
-        %DecodedKV{codec: kv_codec, data_object: data_object} = decoded_kv
+      |> PrimaryKVCodec.decode_as_stream(tenant)
+      |> Enum.reduce({0, nil}, fn decoded_kv = %DecodedKV{}, {count, _acc} ->
+        %{codec: kv_codec, data_object: data_object, range: {_, end_fdb_key}} = decoded_kv
         entry = get_index_entry(tenant, idx, schema, {kv_codec, data_object})
         set_index_entry(tx, entry)
-        {count + 1, fdb_key}
+        {count + 1, end_fdb_key}
       end)
 
     if count > 0 do
-      next_key = :erlfdb_key.strinc(last_fdb_key)
-      {count, {next_key, end_key}}
+      {count, {end_proc_fdb_key, end_key}}
     else
       {0, {end_key, end_key}}
     end
@@ -219,10 +218,28 @@ defmodule EctoFoundationDB.Indexer.Default do
   end
 
   @impl true
-  def range(_idx, %QueryPlan{constraints: [%QueryPlan.None{}]}, _options) do
-    raise Unsupported, """
-    FoundationDB Adapter does not support empty where clause on an index. In fact, this code path should not be reachable.
-    """
+  def range(
+        idx,
+        plan = %QueryPlan{constraints: constraints = [%QueryPlan.None{}]},
+        options
+      ) do
+    fields = idx[:fields]
+    :ok = assert_constraints(fields, constraints)
+
+    {start_key, end_key} =
+      Pack.default_index_range(
+        plan.tenant,
+        plan.source,
+        idx[:id]
+      )
+
+    start_key = options[:start_key] || start_key
+
+    if Keyword.get(idx[:options], :mapped?, true) do
+      {start_key, end_key, mapper(plan.tenant, length(fields))}
+    else
+      {start_key, end_key}
+    end
   end
 
   def range(idx, plan = %QueryPlan{constraints: constraints}, options) do
@@ -330,6 +347,18 @@ defmodule EctoFoundationDB.Indexer.Default do
 
   defp assert_constraints(_fields, []) do
     :ok
+  end
+
+  defp assert_constraints(fields, [%QueryPlan.None{fields: c_fields}]) do
+    valid? = Enum.slice(fields, 0, length(c_fields)) == c_fields
+
+    if valid? do
+      :ok
+    else
+      raise Unsupported, """
+      Provided order_by is not compatible with any index.
+      """
+    end
   end
 
   defp assert_constraints([field | fields], [%QueryPlan.Equal{field: eq_field} | constraints]) do

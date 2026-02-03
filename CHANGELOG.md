@@ -5,9 +5,29 @@
 ### Enhancements
 
 * A Repo can be configured to be locked to a single tenant by specifying `:tenant_id` config.
+* `:key_limit` is a valid Repo option. When specified, the underlying FDB GetRange will be limited to the
+  specified number of keys. Note that there is not always a 1-to-1 mapping of keys to objects, due to
+  large objects being split across multiple keys.
+* Metadata retrieval is now skipped when querying a schema by its primary key only. e.g. `Repo.all(User, ...)`
+* Added `FDB.stream_range/4`, currently undocumented, that wraps the `:erlfdb_range_iterator` in a `Stream` for
+  easier use in Elixir apps.
+* When querying with no where clause and an order_by, an index will now be selected if one exists.
+
+### Bug fixes
+
+* A `:limit` in `Ecto.Query` will now work as expected when encountering objects split across multiple keys.
+* When reading SchemaMigration versions, only the maximum version number is retrieved, which will result in
+  a small performance benefit when opening a Tenant.
+
+### Relevant internal changes
+
+Internally, much of the Query and Future interfaces have been refactored to support the Query limit bug fix.
+In particular, we are now using `:erlfdb_range_iterator`, which provides more control over the paged retrieval
+of key-values from the database server. We hope these paths are now simpler and easier to maintain over time.
 
 ### Dependencies
 
+* `erlfdb ~> 0.3.4`
 * Elixir 1.19 and Erlang 28
 * Updated CI FDB to 7.3.69
 * Updated all outdated deps
@@ -85,7 +105,7 @@ transactions, we have chosen to deprecate `Repo.transaction` in favor of `Repo.t
 
 ### New documentation
 
-* [Guide for Operators](operators_manual.html): Describes how to use the `EctoFoundationDB.CLI` functions to rename a field while guaraneeting that all
+* [Guide for Operators](operators_manual.html): Describes how to use the `EctoFoundationDB.CLI` functions to rename a field while guaranteeing that all
 concurrent queries in your distributed application are successful.
 * [Metadata Design](metadata.html): Describes how index metadata is managed and cached in EctoFDB.
 * [Sync Engine Part I - Single Object](watches.livemd): Revamped Livebook that demonstrates how to create a Sync Engine for a single object (for syncing reads)

@@ -48,12 +48,12 @@ defmodule EctoFoundationDB.Layer.Fields do
 
   ## Examples
 
-    iex> EctoFoundationDB.Layer.Fields.strip_field_names_for_ecto([[a: 0, b: 1, c: 2]])
+    iex> EctoFoundationDB.Layer.Fields.strip_field_names_for_ecto([[a: 0, b: 1, c: 2]]) |> Enum.to_list()
     [[0,1,2]]
 
   """
   def strip_field_names_for_ecto(entries) do
-    Enum.map(entries, &Keyword.values/1)
+    Stream.map(entries, &Keyword.values/1)
   end
 
   @doc """
