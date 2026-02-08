@@ -236,14 +236,14 @@ defmodule EctoFoundationDB.Layer.Query do
     %{cont_state: cont_state} = state
     %{tenant: tenant, limit: limit, layer_data: layer_data = %__MODULE__{}} = plan
     %{backward?: backward?} = layer_data
-    # @todo reverse
+
     iterator =
       PrimaryKVCodec.decode_as_iterator(cont_state, kvs, tenant,
         backward?: backward?,
         limit: limit
       )
 
-    {objs, iterator} = :erlfdb_iterator.run(iterator)
+    {objs, iterator} = PrimaryKVCodec.Iterator.run(iterator)
     cont_state = PrimaryKVCodec.get_iterator_state(iterator)
     {:cont, objs, %{state | cont_state: cont_state, plan: decr_limit(plan, length(objs))}}
   end
@@ -360,10 +360,12 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp idx_backward?([_field | fields], ordering), do: idx_backward?(fields, ordering)
 
-  defp idx_backward?(_, [_ | _]) do
-    raise(Unsupported, """
-    When querying with an order_by, the ordering must correspond to the primary key or an indexed field.
-    """)
+  defp idx_backward?(_, [%QueryPlan.Order{field: field} | _]) do
+    raise Unsupported, """
+    When querying with a key_limit, order_by must correspond to the primary key or an indexed field.
+
+      order_by field: #{inspect(field)}
+    """
   end
 
   defp idx_backward?(_, _), do: false
@@ -419,8 +421,18 @@ defmodule EctoFoundationDB.Layer.Query do
         {[qo], nil}
 
       limited? and not pk_only_ordering? ->
-        raise Unsupported,
-              "When querying with a limit, you are only allowed to order_by a single field, and that field must be part of the where constraint."
+        ordering_fields = for %QueryPlan.Order{field: f} <- ordering, do: f
+
+        raise Unsupported, """
+        When querying with a limit, ordering must be on the primary key only.
+
+          order_by: #{inspect(ordering_fields)}
+
+        To order by non-primary-key fields with a limit, create an index that
+        includes those fields and add a where clause that constrains on the index.
+
+        Without a limit, any order_by is supported (applied after fetching all results).
+        """
 
       not limited? and pk_only_ordering? ->
         fun = Ordering.get_post_query_ordering_fn(schema, ordering)
@@ -458,8 +470,20 @@ defmodule EctoFoundationDB.Layer.Query do
         {[qo], nil}
 
       limited? and not ffaec_only_ordering? ->
-        raise Unsupported,
-              "When querying with a limit, you are only allowed to order_by a single field, and that field must be part of the where constraint."
+        ordering_fields = for %QueryPlan.Order{field: f} <- ordering, do: f
+        equal_fields = for %QueryPlan.Equal{field: f} <- constraints, do: f
+
+        raise Unsupported, """
+        When querying with a limit on index #{inspect(idx[:id])}, ordering must be
+        on the first field after your equal constraints.
+
+          order_by: #{inspect(ordering_fields)}
+          index fields: #{inspect(idx[:fields])}
+          equal constraints on: #{inspect(equal_fields)}
+          valid order_by field: #{inspect(ffaec)}
+
+        Without a limit, any order_by is supported (applied after fetching all results).
+        """
 
       not limited? and ffaec_only_ordering? ->
         fun = Ordering.get_post_query_ordering_fn(schema, ordering)

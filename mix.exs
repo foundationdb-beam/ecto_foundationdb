@@ -45,7 +45,8 @@ defmodule EctoFoundationdb.MixProject do
         "docs/getting_started/sync_module.livemd",
         "docs/developer_guides/testing.md",
         "docs/developer_guides/operators_manual.md",
-        "docs/design/metadata.md"
+        "docs/design/metadata.md",
+        "docs/design/serialization.md"
       ],
       groups_for_extras: [
         "Getting Started": ~r/getting_started/,

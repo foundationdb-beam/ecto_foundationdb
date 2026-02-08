@@ -72,6 +72,8 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec.Iterator do
     :erlfdb_iterator.new(__MODULE__, state)
   end
 
+  def run(iterator), do: :erlfdb_iterator.run(iterator)
+
   def get_state(iterator) do
     {state, _} = :erlfdb_iterator.call(iterator, :get_state)
     state

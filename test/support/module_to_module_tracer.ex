@@ -36,7 +36,7 @@ defmodule EctoFoundationDB.ModuleToModuleTracer do
     session = :trace.session_create(name, tracer, [])
     :trace.process(session, target, true, [:call, :arity])
 
-    match_spec = [{:_, [], [{:message, {{:cp, {:caller}}}}]}]
+    match_spec = [{:_, [], [{:message, {{{{:cp, {:caller}}}, {:current_stacktrace, 10}}}}]}]
 
     :trace.function(session, :on_load, match_spec, [:local])
 
@@ -76,10 +76,12 @@ defmodule EctoFoundationDB.ModuleToModuleTracer do
 
   @impl true
   def handle_info(
-        {:trace, _pid, :call, call = {_module, _fun, _arity}, {:cp, {caller, _, _}}},
+        {:trace, _pid, :call, call = {_module, _fun, _arity}, {{:cp, caller_mfa}, stacktrace}},
         state = %__MODULE__{}
       ) do
-    if match?(caller, call, state) do
+    caller = resolve_caller(caller_mfa, stacktrace, state)
+
+    if caller != nil and matching_call?(call, state) do
       {:noreply, %{state | traced_calls: [{caller, call} | state.traced_calls]}}
     else
       {:noreply, state}
@@ -91,8 +93,20 @@ defmodule EctoFoundationDB.ModuleToModuleTracer do
     {:noreply, state}
   end
 
-  defp match?(caller, call, state) do
-    matching_origin?(caller, state) and matching_call?(call, state)
+  # When the continuation pointer resolves to a named function (e.g. a direct call),
+  # check if it matches a caller_spec. If it doesn't (e.g. the call was inside a `for`
+  # comprehension whose anonymous function has `Enum` as the cp), fall back to searching
+  # the stacktrace for the first matching caller.
+  defp resolve_caller(:undefined, stacktrace, state) do
+    caller_from_stacktrace(stacktrace, state)
+  end
+
+  defp resolve_caller({caller, _, _}, stacktrace, state) do
+    if matching_origin?(caller, state) do
+      caller
+    else
+      caller_from_stacktrace(stacktrace, state)
+    end
   end
 
   defp matching_origin?(caller, state) do
@@ -101,6 +115,12 @@ defmodule EctoFoundationDB.ModuleToModuleTracer do
 
   defp matching_call?(call, state) do
     any_match?(state.call_specs, call)
+  end
+
+  defp caller_from_stacktrace(stacktrace, state) do
+    Enum.find_value(stacktrace, fn {module, _fun, _arity, _location} ->
+      if matching_origin?(module, state), do: module
+    end)
   end
 
   defp any_match?(specs, item) do

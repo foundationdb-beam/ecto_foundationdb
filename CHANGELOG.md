@@ -12,6 +12,7 @@
 * Added `FDB.stream_range/4`, currently undocumented, that wraps the `:erlfdb_range_iterator` in a `Stream` for
   easier use in Elixir apps.
 * When querying with no where clause and an order_by, an index will now be selected if one exists.
+* Improved error messages for unsupported order_by + limit interactions.
 
 ### Bug fixes
 
@@ -24,6 +25,11 @@
 Internally, much of the Query and Future interfaces have been refactored to support the Query limit bug fix.
 In particular, we are now using `:erlfdb_range_iterator`, which provides more control over the paged retrieval
 of key-values from the database server. We hope these paths are now simpler and easier to maintain over time.
+
+### New documentation
+
+* [Serialization Design](serialization.html): Describes how your data is serialized to FDB values.
+* Improvements to implementation traces in `fdb_api_counting_test.exs`
 
 ### Dependencies
 

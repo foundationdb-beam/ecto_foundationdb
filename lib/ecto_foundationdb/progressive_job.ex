@@ -195,6 +195,11 @@ defmodule EctoFoundationDB.ProgressiveJob do
     end
   end
 
+  # done? is called both in in_tx_stream_next (pre-next, to avoid unnecessary
+  # work when a concurrent worker already finished) and here (post-next, to
+  # detect that this worker's step completed the job). A :cont/:halt return
+  # from next could eliminate the post-next call, but would couple next with
+  # completion semantics that belong to done?.
   defp in_tx_stream_next_exec(job = %__MODULE__{module: module, state: state}, tx) do
     now = now()
     {claimed?, claimed_by, cursor} = claimed?(job, tx)
@@ -282,10 +287,12 @@ defmodule EctoFoundationDB.ProgressiveJob do
   defp claimed?(%__MODULE__{ref: ref, claim_keys: claim_keys, cursor: cursor}, tx) do
     futures = for claim_key <- claim_keys, do: :erlfdb.get(tx, claim_key)
 
-    # All values should be equivalent, so we can uniq them
+    # All values should be equivalent, so we can uniq them.
+    # If claim keys are inconsistent (e.g. partial write from a bug), the case
+    # below will intentionally crash with CaseClauseError.
     res =
       futures
-      |> :erlfdb.wait_for_all(futures)
+      |> :erlfdb.wait_for_all()
       |> Enum.uniq()
 
     case res do

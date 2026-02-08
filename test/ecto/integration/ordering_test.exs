@@ -120,7 +120,7 @@ defmodule Ecto.Integration.OrderingTest.OrderByDataField do
 
     # limited ordering not possible, raise error instead of allowing this
     assert_raise Unsupported,
-                 ~r/field must be part of the where constraint/,
+                 ~r/ordering must be/,
                  fn ->
                    TestRepo.all(from(q in QueueItem, order_by: {:asc, :data}),
                      prefix: tenant,
@@ -144,7 +144,7 @@ defmodule Ecto.Integration.OrderingTest.OrderByDataField do
 
     # limited ordering not possible, raise error instead of allowing this
     assert_raise Unsupported,
-                 ~r/field must be part of the where constraint/,
+                 ~r/ordering must be/,
                  fn ->
                    TestRepo.all(from(q in QueueItem, order_by: {:asc, :data}, limit: 2),
                      prefix: tenant
@@ -255,7 +255,7 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
     put_idx_data(tenant)
 
     assert_raise Unsupported,
-                 ~r/field must be part of the where constraint/,
+                 ~r/ordering must be/,
                  fn ->
                    TestRepo.all(from(e in Event, order_by: [asc: e.user_id]),
                      prefix: tenant,
@@ -270,7 +270,7 @@ defmodule Ecto.Integration.OrderingTest.IndexWithNoneConstraint do
     put_idx_data(tenant)
 
     assert_raise Unsupported,
-                 ~r/field must be part of the where constraint/,
+                 ~r/ordering must be/,
                  fn ->
                    TestRepo.all(from(e in Event, order_by: [asc: e.user_id], limit: 1),
                      prefix: tenant

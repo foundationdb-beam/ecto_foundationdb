@@ -105,6 +105,8 @@ defmodule EctoFoundationDB.MigrationsPJ do
   end
 
   @impl true
+  # Note: EctoFDB's repo.all uses the existing FDB transaction when called
+  # within a transactional context, so this does not open a new transaction.
   def done?(state, _tx) do
     active_versions = get_max_versions(state.tenant, state.repo)
     {state.final_version in active_versions, state}
