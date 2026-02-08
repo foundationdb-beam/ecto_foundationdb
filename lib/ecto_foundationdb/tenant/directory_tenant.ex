@@ -26,7 +26,18 @@ defmodule EctoFoundationDB.Tenant.DirectoryTenant do
   @impl true
   def get_name(id, _options), do: id
   @impl true
-  def list(db, options), do: :erlfdb_directory.list(db, tenant_node(db, options))
+  def list(db, options) do
+    raw_list = :erlfdb_directory.list(db, tenant_node(db, options))
+
+    # Backend.list not intended to open the tenant. The Directory Layer
+    # returns the node as if it were opened, so we discard it.
+    Enum.map(
+      raw_list,
+      fn {{:utf8, name}, _node} ->
+        name
+      end
+    )
+  end
 
   @impl true
   def create(db, "", options) do
@@ -82,7 +93,7 @@ defmodule EctoFoundationDB.Tenant.DirectoryTenant do
     tenant_dir_name = "#{Options.get(options, :storage_id)}"
 
     if :erlfdb_directory.exists(db, root_node(), tenant_dir_name) do
-      {:ok, tenant_node(db, options)}
+      {:ok, tenant_dir_name}
     else
       {:error, :tenant_does_not_exist}
     end
@@ -90,7 +101,7 @@ defmodule EctoFoundationDB.Tenant.DirectoryTenant do
 
   def get(db, tenant_name, options) do
     if :erlfdb_directory.exists(db, tenant_node(db, options), tenant_name) do
-      {:ok, open(db, tenant_name, options)}
+      {:ok, tenant_name}
     else
       {:error, :tenant_does_not_exist}
     end
@@ -116,7 +127,7 @@ defmodule EctoFoundationDB.Tenant.DirectoryTenant do
   end
 
   @impl true
-  def get_id({{:utf8, id}, _node}, _options), do: id
+  def get_id(id, _options), do: id
 
   @impl true
   def extend_tuple(x, meta), do: add_tuple_head(x, meta.prefix)

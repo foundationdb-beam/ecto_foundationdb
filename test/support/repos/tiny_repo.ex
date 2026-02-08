@@ -4,10 +4,21 @@ defmodule Ecto.Integration.TinyRepo do
 
   use EctoFoundationDB.Migrator
 
+  defmodule TinyMigration do
+    @moduledoc false
+    alias EctoFoundationDB.Schemas.User
+    use EctoFoundationDB.Migration
+
+    @impl true
+    def change() do
+      [create(index(User, [:name]))]
+    end
+  end
+
   @impl true
   def migrations() do
     [
-      {0, EctoFoundationDB.Integration.Migration.UserIndex}
+      {0, TinyMigration}
     ]
   end
 end

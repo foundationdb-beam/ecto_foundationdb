@@ -38,33 +38,46 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     {:erlfdb, :wait_for_all, 1},
     {:erlfdb, :watch, 2},
     {:erlfdb, :wait_for_all_interleaving, 2},
-    {:erlfdb_range_iterator, :start, 3},
-    {:erlfdb_range_iterator, :start, 4},
-    {:erlfdb_iterator, :next, 1},
     {:erlfdb_iterator, :pipeline, 1},
+    {:erlfdb_iterator, :run, 1},
+    {:erlfdb_directory, :create, 3},
+    {:erlfdb_directory, :create_or_open, 3},
+    {:erlfdb_directory, :open, 3},
     {FDB.LazyRangeIterator, :start, 3},
     {FDB.LazyRangeIterator, :start, 4},
-    {FDB.LazyRangeIterator, :advance, 1}
+    {FDB.LazyRangeIterator, :advance, 2},
+    {FDB.Stream, :from_iterator, 1}
   ]
 
   def with_erlfdb_calls(name, fun) do
-    caller_spec = fn caller_module ->
-      try do
-        case Module.split(caller_module) do
-          ["Ecto", "Adapters", "FoundationDB" | _] ->
-            true
+    caller_spec =
+      fn
+        :erlfdb_directory ->
+          true
 
-          ["EctoFoundationDB" | _] ->
-            true
+        :erlfdb_hca ->
+          true
 
-          _ ->
-            false
-        end
-      rescue
-        _e in ArgumentError ->
-          false
+        :erlfdb_iterator ->
+          true
+
+        caller_module ->
+          try do
+            case Module.split(caller_module) do
+              ["Ecto", "Adapters", "FoundationDB" | _] ->
+                true
+
+              ["EctoFoundationDB" | _] ->
+                true
+
+              _ ->
+                false
+            end
+          rescue
+            _e in ArgumentError ->
+              false
+          end
       end
-    end
 
     {traced_calls, res} =
       ModuleToModuleTracer.with_traced_calls(name, [caller_spec], @traced_calls, fun)
@@ -75,7 +88,20 @@ defmodule Ecto.Integration.FdbApiCountingTest do
         {caller, {module, call_fun}}
       end
 
-    {traced_calls, res}
+    # Filter out calls from other FDB layers
+    filtered_traces =
+      Enum.filter(
+        traced_calls,
+        fn
+          {caller, _data} when caller in [:erlfdb_directory, :erlfdb_iterator, :erlfdb_hca] ->
+            false
+
+          _ ->
+            true
+        end
+      )
+
+    {filtered_traces, res}
   end
 
   test "open new tenant", context do
@@ -88,32 +114,71 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
     Tenant.clear_delete!(TinyRepo, id)
 
-    # @todo: Do we really need all these calls? seems excessive for a single migration on zero data
+    # TinyRepo has 1 migration (version 0) with 1 command: create index on
+    # User[:name]. ProgressiveJob processes the command in its own transaction,
+    # plus a start tx and a finalize tx, giving us 3 transactions total.
     assert [
+             # -- db_open!: create the tenant directory, then open it --
+             {EctoFoundationDB.Tenant.DirectoryTenant, {:erlfdb_directory, :create}},
+             {EctoFoundationDB.Tenant.Backend, {:erlfdb_directory, :open}},
+
+             # -- MigrationsPJ.transactional: read max SchemaMigration version --
+             # This runs outside the ProgressiveJob, so the future is awaited
+             # immediately via pipeline. Result: empty (no version 0 yet).
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
              {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}},
+
+             # -- tx_stream_start (T0): check done?, acquire claim --
+             # done? reads schema_migrations (version 0 not yet present)
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.Future, {FDB.Stream, :from_iterator}},
+             # claimed? reads claim key; :not_found so we claim it
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :get}},
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :wait_for_all}},
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :set}},
+
+             # -- tx_stream_next iteration 1 (T1): create User :name index --
+             # pre-next done? check (version 0 still absent)
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.Future, {FDB.Stream, :from_iterator}},
+             # claimed? verifies this worker still owns the job
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :get}},
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :wait_for_all}},
+             # set global metadataVersion (signals metadata change to readers)
              {EctoFoundationDB.MigrationsPJ, {:erlfdb, :set_versionstamped_value}},
+             # scan User primary data for existing records to index (empty table)
              {EctoFoundationDB.Indexer.Default, {:erlfdb, :get_range}},
+             {EctoFoundationDB.Indexer.Default, {FDB.Stream, :from_iterator}},
+             # 0 < limit, so command is done; write index metadata key
              {EctoFoundationDB.MigrationsPJ, {:erlfdb, :set}},
+             # post-next done? check (version 0 not yet recorded)
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.Future, {FDB.Stream, :from_iterator}},
+             # not done, claimed -> update claim key with cursor progress
              {EctoFoundationDB.ProgressiveJob, {:erlfdb, :set}},
-             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :set}},
+
+             # -- tx_stream_next iteration 2 (T2): record version 0, finalize --
+             # pre-next done? check (version 0 still absent)
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.MigrationsPJ, {:erlfdb, :set_versionstamped_value}},
-             {EctoFoundationDB.Indexer.Default, {:erlfdb, :get_range}},
-             {EctoFoundationDB.MigrationsPJ, {:erlfdb, :set}},
-             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :set}},
-             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :set}},
-             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.Future, {FDB.Stream, :from_iterator}},
+             # claimed?
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :get}},
+             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :wait_for_all}},
+             # all commands done for version 0, so insert SchemaMigration record:
+             # read-before-write existence check
              {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
              {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
+             # write SchemaMigration {version: 0} primary data
              {EctoFoundationDB.Layer.PrimaryKVCodec, {:erlfdb, :set}},
+             # atomic max on app version key
              {EctoFoundationDB.Indexer.MDVAppVersion, {:erlfdb, :max}},
+             # set_versionstamped_value for SchemaMigration insert
+             {EctoFoundationDB.Layer.TxInsert, {:erlfdb, :set_versionstamped_value}},
+             # post-next done? check: finds version 0, decodes it -> done? = true
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.ProgressiveJob, {:erlfdb, :clear}},
+             {EctoFoundationDB.Future, {FDB.Stream, :from_iterator}},
+             {EctoFoundationDB.Layer.Query, {:erlfdb_iterator, :run}},
+             # done? = true, claimed -> clear claim key to release the lock
              {EctoFoundationDB.ProgressiveJob, {:erlfdb, :clear}}
            ] = calls
   end
@@ -125,9 +190,15 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # read app version
+             # open the directory
+             {EctoFoundationDB.Tenant.Backend, {:erlfdb_directory, :open}},
+
+             # reads schema migration version
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}},
+
+             # decode with PrimaryKVCodec.Iterator
+             {EctoFoundationDB.Layer.Query, {:erlfdb_iterator, :run}}
            ] = calls
   end
 
@@ -292,7 +363,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # (metadata is skipped when querying primary key)
              # get and wait primary write key
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}},
+
+             # decode (tail-call)
+             {EctoFoundationDB.Layer.Query, {:erlfdb_iterator, :run}}
            ] = calls
   end
 
@@ -310,7 +384,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # (metadata is skipped when querying primary key)
              # get and wait primary write key
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}},
+
+             # decode (tail-call)
+             {EctoFoundationDB.Layer.Query, {:erlfdb_iterator, :run}}
            ] = calls
   end
 
@@ -331,7 +408,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # (metadata is skipped when querying primary key)
              # wait for results
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}},
+
+             # decode (tail-call)
+             {EctoFoundationDB.Layer.Query, {:erlfdb_iterator, :run}}
            ] = calls
   end
 
@@ -405,7 +485,10 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
 
              # wait for get_mapped_range result
-             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}},
+
+             # unpack index results via from_iterator
+             {EctoFoundationDB.Indexer, {FDB.Stream, :from_iterator}}
            ] == calls
   end
 
@@ -442,7 +525,11 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
 
              # wait for results of both get_mapped_range calls
-             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}}
+             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}},
+
+             # unpack index results via from_iterator (one per async_get_by)
+             {EctoFoundationDB.Indexer, {FDB.Stream, :from_iterator}},
+             {EctoFoundationDB.Indexer, {FDB.Stream, :from_iterator}}
            ] == calls
   end
 
@@ -533,6 +620,9 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
              {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
 
+             # decode multikey data via from_iterator
+             {EctoFoundationDB.Layer.Tx, {FDB.Stream, :from_iterator}},
+
              # clear all existing multikey keys
              {EctoFoundationDB.Layer.Tx, {:erlfdb, :clear_range}},
 
@@ -591,6 +681,9 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # check for existence
              {EctoFoundationDB.Layer.Tx, {:erlfdb, :get_range}},
              {EctoFoundationDB.Future, {:erlfdb, :wait_for_all_interleaving}},
+
+             # decode multikey data via from_iterator
+             {EctoFoundationDB.Layer.Tx, {FDB.Stream, :from_iterator}},
 
              # clear multikey range
              {EctoFoundationDB.Layer.Tx, {:erlfdb, :clear_range}},
