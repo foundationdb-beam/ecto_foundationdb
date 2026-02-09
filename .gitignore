@@ -26,3 +26,4 @@ ecto_foundationdb-*.tar
 /tmp/
 
 .erlfdb_sandbox
+.ex_fdbmonitor
