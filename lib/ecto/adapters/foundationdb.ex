@@ -851,12 +851,12 @@ defmodule Ecto.Adapters.FoundationDB do
   Conceptually, only 1 network round-trip is required, so this will be faster than
   waiting on each in sequence.
 
-  ### Pipelining on range queries (interleaving waits)
+  ### Pipelining on range queries (interleaved waits)
 
   The functions `Repo.async_all/1` and `Repo.async_all/2` work a little bit different on the await. When the DB must
   return a list of results, if that list ends up being larger than `:erlfdb`'s configured `:target_bytes`,
   then the result set is split into multiple round-trips to the database. If your application awaits multiple
-  such queries, then `:erlfdb`'s "interleaving waits" feature is used.
+  such queries, waited on pages of data are pipelined for optimal throughput.
 
   Consider this example, where we're retrieving all Users and all Posts in the same transaction.
 
@@ -881,8 +881,7 @@ defmodule Ecto.Adapters.FoundationDB do
       Server-->>Client: {10 users, done}
   ```
 
-  With `:erlfdb`'s interleaving waits, we send as many get_range requests as possible with pipelining
-  until all are exhausted.
+  We send as many get_range requests as possible with pipelining until all are exhausted.
 
   ```mermaid
   sequenceDiagram
