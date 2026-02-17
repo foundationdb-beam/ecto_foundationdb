@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.7.0 (TBD)
+## v0.7.0 (2026-02-16)
 
 ### Enhancements
 
@@ -34,7 +34,7 @@ of key-values from the database server. We hope these paths are now simpler and 
 ### Dependencies
 
 * `erlfdb ~> 0.3.4`
-* Elixir 1.19 and Erlang 28
+* Added support for Elixir 1.19 and Erlang 28
 * Updated CI FDB to 7.3.69
 * Updated all outdated deps
 
