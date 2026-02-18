@@ -123,15 +123,15 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Tenant.Backend, {:erlfdb_directory, :open}},
 
              # -- MigrationsPJ.transactional: read max SchemaMigration version --
-             # This runs outside the ProgressiveJob, so the future is awaited
-             # immediately via pipeline. Result: empty (no version 0 yet).
+             # This runs outside the ProgressiveJob via SchemaMigration.get_max_versions.
+             # Result: empty (no version 0 yet).
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}},
+             {EctoFoundationDB.Migration.SchemaMigration, {FDB.Stream, :from_iterator}},
 
              # -- tx_stream_start (T0): check done?, acquire claim --
              # done? reads schema_migrations (version 0 not yet present)
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.Future, {FDB.Stream, :from_iterator}},
+             {EctoFoundationDB.Migration.SchemaMigration, {FDB.Stream, :from_iterator}},
              # claimed? reads claim key; :not_found so we claim it
              {EctoFoundationDB.ProgressiveJob, {:erlfdb, :get}},
              {EctoFoundationDB.ProgressiveJob, {:erlfdb, :wait_for_all}},
@@ -140,7 +140,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              # -- tx_stream_next iteration 1 (T1): create User :name index --
              # pre-next done? check (version 0 still absent)
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.Future, {FDB.Stream, :from_iterator}},
+             {EctoFoundationDB.Migration.SchemaMigration, {FDB.Stream, :from_iterator}},
              # claimed? verifies this worker still owns the job
              {EctoFoundationDB.ProgressiveJob, {:erlfdb, :get}},
              {EctoFoundationDB.ProgressiveJob, {:erlfdb, :wait_for_all}},
@@ -153,14 +153,14 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.MigrationsPJ, {:erlfdb, :set}},
              # post-next done? check (version 0 not yet recorded)
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.Future, {FDB.Stream, :from_iterator}},
+             {EctoFoundationDB.Migration.SchemaMigration, {FDB.Stream, :from_iterator}},
              # not done, claimed -> update claim key with cursor progress
              {EctoFoundationDB.ProgressiveJob, {:erlfdb, :set}},
 
              # -- tx_stream_next iteration 2 (T2): record version 0, finalize --
              # pre-next done? check (version 0 still absent)
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.Future, {FDB.Stream, :from_iterator}},
+             {EctoFoundationDB.Migration.SchemaMigration, {FDB.Stream, :from_iterator}},
              # claimed?
              {EctoFoundationDB.ProgressiveJob, {:erlfdb, :get}},
              {EctoFoundationDB.ProgressiveJob, {:erlfdb, :wait_for_all}},
@@ -176,7 +176,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
              {EctoFoundationDB.Layer.TxInsert, {:erlfdb, :set_versionstamped_value}},
              # post-next done? check: finds version 0, decodes it -> done? = true
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.Future, {FDB.Stream, :from_iterator}},
+             {EctoFoundationDB.Migration.SchemaMigration, {FDB.Stream, :from_iterator}},
              {EctoFoundationDB.Layer.Query, {:erlfdb_iterator, :run}},
              # done? = true, claimed -> clear claim key to release the lock
              {EctoFoundationDB.ProgressiveJob, {:erlfdb, :clear}}
@@ -195,7 +195,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
 
              # reads schema migration version
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
-             {EctoFoundationDB.Future, {:erlfdb_iterator, :pipeline}},
+             {EctoFoundationDB.Migration.SchemaMigration, {FDB.Stream, :from_iterator}},
 
              # decode with PrimaryKVCodec.Iterator
              {EctoFoundationDB.Layer.Query, {:erlfdb_iterator, :run}}

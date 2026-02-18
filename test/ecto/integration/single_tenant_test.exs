@@ -10,6 +10,59 @@ defmodule Ecto.Integration.SingleTenantTest do
 
   alias EctoFoundationDB.Exception.IncorrectTenancy
 
+  # Reproduces: https://github.com/foundationdb-beam/ecto_foundationdb/issues/83
+  # When a Repo uses both `tenant_id` (single-tenant) and `use EctoFoundationDB.Migrator`,
+  # starting the repo causes a deadlock: the SingleTenantRepo GenServer handles the
+  # `:open` cast, which calls Tenant.open!/3, which runs migrations. The migration
+  # queries call CorrectTenancy.fetch_matching_single_tenant/2 with an explicit
+  # prefix, which calls SingleTenantRepo.get!/1 — a synchronous GenServer.call back
+  # into the same process that is still executing the cast, causing the process to
+  # attempt to call itself.
+  defmodule SingleTenantWithMigratorRepo do
+    @moduledoc false
+    use Ecto.Repo, otp_app: :ecto_foundationdb, adapter: Ecto.Adapters.FoundationDB
+    use EctoFoundationDB.Migrator
+
+    defmodule Migration0 do
+      @moduledoc false
+      alias EctoFoundationDB.Schemas.User
+      use EctoFoundationDB.Migration
+
+      @impl true
+      def change() do
+        [create(index(User, [:name]))]
+      end
+    end
+
+    @impl true
+    def migrations() do
+      [{0, Migration0}]
+    end
+  end
+
+  describe "single tenant with migrator" do
+    test "starting a single-tenant repo that has a migrator does not deadlock" do
+      # The bug: SingleTenantRepo.init/1 casts :open to itself, then handle_cast
+      # calls Tenant.open!/3, which runs migrations. During migration, MigrationsPJ
+      # queries with an explicit `prefix: tenant`, triggering CorrectTenancy to call
+      # SingleTenantRepo.get!/1 — a synchronous call back into the still-running
+      # cast handler, causing "process attempted to call itself".
+      Application.put_env(:ecto_foundationdb, SingleTenantWithMigratorRepo,
+        open_db: &EctoFoundationDB.Sandbox.open_db/1,
+        storage_id: EctoFoundationDB.Sandbox,
+        tenant_id: "single-tenant-with-migrator"
+      )
+
+      assert {:ok, pid} = SingleTenantWithMigratorRepo.start_link()
+
+      # Also verify the repo is functional after initialization
+      assert {:ok, _} = SingleTenantWithMigratorRepo.insert(%User{name: "Alice"})
+
+      # Cleanup
+      Supervisor.stop(pid)
+    end
+  end
+
   describe "single tenant - schema behaviour" do
     test "insert" do
       assert {:ok, _user1} = Repo.insert(%User{name: "Alice"})
