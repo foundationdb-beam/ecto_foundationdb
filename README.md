@@ -51,7 +51,7 @@ Include `:ecto_foundationdb` in your list of dependencies in `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:ecto_foundationdb, "~> 0.6"}
+    {:ecto_foundationdb, "~> 0.7"}
   ]
 end
 ```
