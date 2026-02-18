@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.1 (2026-02-17)
+
+### Bug fixes
+
+* (#83): Fixed re-entrancy problem when running a migration on a single tenant repo
+
 ## v0.7.0 (2026-02-16)
 
 ### Enhancements
