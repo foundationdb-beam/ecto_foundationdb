@@ -45,7 +45,7 @@ defmodule EctoFoundationDB.Migrator do
 
     if migrations? do
       limit = Options.get(options, :migration_step)
-      MigrationsPJ.transactional(repo, tenant, migrator, limit, options)
+      MigrationsPJ.transactional(tenant, migrator, limit, options)
     else
       :ok
     end

@@ -30,6 +30,8 @@ defmodule EctoFoundationDB.Layer.Metadata do
     }
   }
 
+  def builtin_metadata(source), do: struct(__MODULE__, @builtin_metadata[source])
+
   defstruct indexes: [], partial_indexes: [], other: []
 
   @type t() :: %__MODULE__{}

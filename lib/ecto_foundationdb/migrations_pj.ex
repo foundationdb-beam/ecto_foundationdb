@@ -12,15 +12,13 @@ defmodule EctoFoundationDB.MigrationsPJ do
   alias EctoFoundationDB.Schema
   alias EctoFoundationDB.Tenant
 
-  import Ecto.Query
-
   require Logger
 
   @behaviour EctoFoundationDB.ProgressiveJob
 
   defmodule State do
     @moduledoc false
-    defstruct [:tenant, :repo, :final_version, :limit, :options]
+    defstruct [:tenant, :final_version, :limit, :options]
   end
 
   alias __MODULE__.State
@@ -45,14 +43,13 @@ defmodule EctoFoundationDB.MigrationsPJ do
   def claim_key(tenant, source),
     do: Pack.namespaced_pack(tenant, SchemaMigration.source(), "claim", ["#{source}"])
 
-  def transactional(repo, tenant, migrator, limit, options) do
-    active_versions = get_max_versions(tenant, repo)
+  def transactional(tenant, migrator, limit, options) do
+    active_versions = SchemaMigration.get_max_versions(tenant)
 
     tenant = Tenant.set_metadata_cache(tenant, :disabled)
 
     ProgressiveJob.new(tenant, __MODULE__, %{
       active_versions: active_versions,
-      repo: repo,
       migrator: migrator,
       limit: limit,
       options: options
@@ -65,7 +62,6 @@ defmodule EctoFoundationDB.MigrationsPJ do
   def init(tenant, args) do
     %{
       active_versions: active_versions,
-      repo: repo,
       migrator: migrator,
       limit: limit,
       options: options
@@ -96,7 +92,6 @@ defmodule EctoFoundationDB.MigrationsPJ do
       {:ok, claim_keys(tenant, new_migrations), new_migrations,
        %State{
          tenant: tenant,
-         repo: repo,
          final_version: final_version,
          limit: limit,
          options: options
@@ -105,16 +100,9 @@ defmodule EctoFoundationDB.MigrationsPJ do
   end
 
   @impl true
-  # Note: EctoFDB's repo.all uses the existing FDB transaction when called
-  # within a transactional context, so this does not open a new transaction.
   def done?(state, _tx) do
-    active_versions = get_max_versions(state.tenant, state.repo)
+    active_versions = SchemaMigration.get_max_versions(state.tenant)
     {state.final_version in active_versions, state}
-  end
-
-  defp get_max_versions(tenant, repo) do
-    from(m in SchemaMigration, select: m.version, limit: 1, order_by: {:desc, m.version})
-    |> repo.all(prefix: tenant, key_limit: 1)
   end
 
   @impl true
@@ -124,7 +112,7 @@ defmodule EctoFoundationDB.MigrationsPJ do
   end
 
   def next(state, _tx, [{vsn, []} | new_migrations]) do
-    {:ok, _} = SchemaMigration.up(state.repo, vsn)
+    {:ok, _} = SchemaMigration.up(state.tenant, vsn)
     after_tx = fn -> :ok end
     {after_tx, [vsn], new_migrations, state}
   end
