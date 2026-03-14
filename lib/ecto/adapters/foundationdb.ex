@@ -1087,7 +1087,7 @@ defmodule Ecto.Adapters.FoundationDB do
   For example, a transaction must complete
   [within 5 seconds](https://apple.github.io/foundationdb/developer-guide.html#long-running-transactions).
   """
-  @spec transactional(Tenant.t() | nil, function()) :: any()
+  @spec transactional(Tenant.t(), function()) :: any()
   def transactional(tenant, fun), do: Tx.transactional_external(tenant, fun)
 
   @impl Ecto.Adapter

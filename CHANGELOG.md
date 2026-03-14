@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.2 (TBD)
+
+### Bug fixes
+
+* (#86): Added `Repo.transactional/1` for use on single-tenant repos. 
+
 ## v0.7.1 (2026-02-17)
 
 ### Bug fixes
