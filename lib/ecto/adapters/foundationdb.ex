@@ -427,6 +427,19 @@ defmodule Ecto.Adapters.FoundationDB do
   Note: If you're looking for PubSub-like functionality pushed from the database itself, please see
   [Watches](#module-watches).
 
+  For a single-tenant Repo (one configured with `:tenant_id`), you can use `Repo.transactional/1`,
+  which automatically uses the configured tenant:
+
+  ```elixir
+  MyApp.SystemRepo.transactional(fn ->
+    MyApp.SystemRepo.insert(%User{name: "Alice"})
+    # ...
+  end)
+  ```
+
+  `Repo.transactional/1` raises `EctoFoundationDB.Exception.IncorrectTenancy` if called on
+  a multi-tenant Repo.
+
   ## Migrations
 
   At first glance, EctoFoundationDB migrations may look similar to that of `:ecto_sql`,
@@ -1081,6 +1094,11 @@ defmodule Ecto.Adapters.FoundationDB do
   defmacro __before_compile__(_env) do
     quote do
       def transactional(tenant, fun), do: Ecto.Adapters.FoundationDB.transactional(tenant, fun)
+
+      def transactional(fun) do
+        tenant = EctoFoundationDB.Assert.CorrectTenancy.assert_single_tenant!(__MODULE__)
+        Ecto.Adapters.FoundationDB.transactional(tenant, fun)
+      end
 
       def async_insert_all!(schema, list, opts \\ []) do
         repo = get_dynamic_repo()
