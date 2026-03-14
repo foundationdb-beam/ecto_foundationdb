@@ -5,6 +5,7 @@ defmodule Ecto.Integration.SingleTenantTest do
   use ExUnit.Case
 
   alias Ecto.Integration.SingleTenantTestRepo, as: Repo
+  alias Ecto.Integration.TestRepo
   alias EctoFoundationDB.Schemas.User
   alias EctoFoundationDB.Sync
 
@@ -144,6 +145,36 @@ defmodule Ecto.Integration.SingleTenantTest do
       state = %{private: %{}}
       assert {:ok, user} = Repo.insert(%User{name: "Alice"})
       assert %{} = Sync.sync_one(state, Repo, :alice, User, user.id, sync_opts)
+    end
+  end
+
+  describe "single tenant - transactional/1" do
+    test "basic insert and get within a transaction" do
+      result =
+        Repo.transactional(fn ->
+          {:ok, user} = Repo.insert(%User{name: "Transactional Alice"})
+          Repo.get!(User, user.id)
+        end)
+
+      assert %User{name: "Transactional Alice"} = result
+    end
+
+    test "multiple operations within a single transaction" do
+      {user1, user2} =
+        Repo.transactional(fn ->
+          {:ok, u1} = Repo.insert(%User{name: "Bob"})
+          {:ok, u2} = Repo.insert(%User{name: "Carol"})
+          {u1, u2}
+        end)
+
+      assert %User{name: "Bob"} = user1
+      assert %User{name: "Carol"} = user2
+    end
+
+    test "raises IncorrectTenancy when called on a multi-tenant repo" do
+      assert_raise(IncorrectTenancy, ~r/single-tenant/, fn ->
+        TestRepo.transactional(fn -> :ok end)
+      end)
     end
   end
 end

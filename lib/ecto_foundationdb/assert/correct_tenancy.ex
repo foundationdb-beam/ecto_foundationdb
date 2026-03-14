@@ -17,6 +17,21 @@ defmodule EctoFoundationDB.Assert.CorrectTenancy do
     end
   end
 
+  def assert_single_tenant!(repo) do
+    repo_config = [repo: repo] ++ repo.config()
+
+    if single?(repo_config) do
+      SingleTenantRepo.get!(repo)
+    else
+      raise IncorrectTenancy, """
+      Repo.transactional/1 can only be used with a single-tenant Repo \
+      (one configured with `:tenant_id`).
+
+      Use Repo.transactional/2 with an explicit tenant argument instead.
+      """
+    end
+  end
+
   def assert_by_schema!(repo_config, schema_meta) do
     if single?(repo_config) do
       assert_single_tenancy_by_schema!(repo_config, schema_meta)
