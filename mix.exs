@@ -4,7 +4,7 @@ defmodule EctoFoundationdb.MixProject do
   def project do
     [
       app: :ecto_foundationdb,
-      version: "0.7.1",
+      version: "0.7.2",
       description: "FoundationDB adapter for Ecto",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
@@ -74,14 +74,14 @@ defmodule EctoFoundationdb.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:erlfdb, "~> 0.3.4"},
+      {:erlfdb, "~> 1.0"},
       {:ecto, "~> 3.13"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.6", only: [:dev, :test, :docs]},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.16", only: :dev, runtime: false},
       {:benchee, "~> 1.0", only: :bench},
-      {:ex_fdbmonitor, "~> 0.1", only: :bench, runtime: false}
+      {:ex_fdbmonitor, "~> 0.2", only: :bench, runtime: false}
     ] ++ optional_deps()
   end
 
