@@ -1,10 +1,14 @@
 # Changelog
 
-## v0.7.2 (TBD)
+## v0.7.2 (2026-04-05)
 
 ### Bug fixes
 
 * (#86): Added `Repo.transactional/1` for use on single-tenant repos. 
+
+### Dependencies
+
+* `erlfdb ~> 1.0` - no functional changes, adopting v1.0 release that matches v0.3 API
 
 ## v0.7.1 (2026-02-17)
 
