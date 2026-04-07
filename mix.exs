@@ -4,7 +4,7 @@ defmodule EctoFoundationdb.MixProject do
   def project do
     [
       app: :ecto_foundationdb,
-      version: "0.7.2",
+      version: "0.7.3",
       description: "FoundationDB adapter for Ecto",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,

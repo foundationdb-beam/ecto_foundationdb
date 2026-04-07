@@ -55,7 +55,8 @@ defmodule EctoFoundationDB.Versionstamp do
 
   def from_integer(int) when is_integer(int) do
     bin = :binary.encode_unsigned(int, :big)
-    {vs} = :erlfdb_tuple.unpack(<<@vs96>> <> bin)
+    padding = :binary.copy(<<0>>, 12 - byte_size(bin))
+    {vs} = :erlfdb_tuple.unpack(<<@vs96>> <> padding <> bin)
     vs
   end
 

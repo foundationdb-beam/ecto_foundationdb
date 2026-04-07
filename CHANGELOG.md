@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.3 (2026-04-06)
+
+### Bug fixes
+
+* Fixed `Versionstamp.from_integer/1` raising `FunctionClauseError` when the versionstamp id has leading zero bytes.
+
 ## v0.7.2 (2026-04-05)
 
 ### Bug fixes
