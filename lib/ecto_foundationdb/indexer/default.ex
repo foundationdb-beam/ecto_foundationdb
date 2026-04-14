@@ -186,7 +186,7 @@ defmodule EctoFoundationDB.Indexer.Default do
   # same transaction. So, we must choose either the key or the value of the index entry.
   # A natural choice is to use the value to have the versionstamp so that
   # get_mapped_range works correctly. However, then we lose the ability to manage the index
-  # on updates and clears. Therefore, we must put the versionstamp in the index_key and
+  # on updates and clears. Therefore, we must put the versionstamp in the index_key,
   # which forces our mapper to inspect both the key and value to extract the pk.
   #
   # This means that the value portion of the index kv will always be written with an
@@ -393,18 +393,25 @@ defmodule EctoFoundationDB.Indexer.Default do
     """
   end
 
-  # See key-value design in get_index_entry
   defp mapper(tenant, idx_len) do
+    # (#93) We choose to extract all items from the Key, because when Versionstamps are in play,
+    # the Value is not actually a valid tuple. It contains the incomplete versionstamp, which
+    # which has a short trailing portion. If FDB allowed us to set_versionstamp_key_and_value
+    # then we'd be free to define the mapper on either the key or the value. But since we are
+    # forced to pick set_versionstamped_key, which must also extract the tuple items from the
+    # Key.
+    #
+    # Also see key-value design in get_index_entry and set_index_entry for more details.
     offset_fun = fn offset ->
       [
         # prefix
-        "{V[#{offset}]}",
+        "{K[#{offset}]}",
 
         # source
-        "{V[#{offset + 1}]}",
+        "{K[#{offset + 1}]}",
 
         # namespace
-        "{V[#{offset + 2}]}",
+        "d",
 
         # pk: get it from the index_key because the versionstamp lives there, not in the value
         "{K[#{offset + 5 + idx_len}]}",

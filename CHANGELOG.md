@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.7.4 (2026-04-13)
+
+### Bug fixes
+
+* (#93) Fixed the Mapper used by GetMappedRange, critical for rare cases when the server attempts to fully tuple-decode
+  an Incomplete Versionstamp in the value portion of the Index Entry instead of lazy evaluation. We believe this could
+  cause Error 2042: "The value cannot be parsed as a tuple" in rare cases.
+
 ## v0.7.3 (2026-04-06)
 
 ### Bug fixes
