@@ -148,6 +148,21 @@ defmodule EctoFoundationDB.Layer.Tx do
         options
       ) do
     write_primary = Schema.get_option(context, :write_primary)
+    partition_field = Schema.get_partition_by_field(schema)
+
+    if partition_field do
+      raise Unsupported, """
+      Repo.update is not supported for schemas with a partition field (#{inspect(partition_field)}).
+
+      Use Repo.update_all with a compound primary key constraint instead:
+
+          Repo.update_all(
+            from(s in #{inspect(schema)}, where: s.id == ^{partition_value, id}),
+            [set: [field: value]],
+            prefix: tenant
+          )
+      """
+    end
 
     futures =
       Enum.map(pks, fn pk ->
@@ -196,6 +211,8 @@ defmodule EctoFoundationDB.Layer.Tx do
     %DecodedKV{codec: kv_codec, data_object: orig_data_object} = decoded_kv
     orig_data_object = Fields.to_front(orig_data_object, pk_field)
 
+    assert_partition_by_unchanged!(schema, orig_data_object, updates)
+
     data_object =
       orig_data_object
       |> Keyword.merge(updates[:set] || [])
@@ -220,6 +237,21 @@ defmodule EctoFoundationDB.Layer.Tx do
   end
 
   def delete_pks(tenant, tx, {schema, source, _context}, pks, metadata) do
+    partition_field = Schema.get_partition_by_field(schema)
+
+    if partition_field do
+      raise Unsupported, """
+      Repo.delete is not supported for schemas with a partition field (#{inspect(partition_field)}).
+
+      Use Repo.delete_all with a compound primary key constraint instead:
+
+          Repo.delete_all(
+            from(s in #{inspect(schema)}, where: s.id == ^{partition_value, id}),
+            prefix: tenant
+          )
+      """
+    end
+
     futures =
       Enum.map(pks, fn pk ->
         kv_codec = Pack.primary_codec(tenant, source, pk)
@@ -270,6 +302,32 @@ defmodule EctoFoundationDB.Layer.Tx do
     end
 
     Indexer.clear(tenant, tx, metadata, schema, {kv_codec, v})
+  end
+
+  defp assert_partition_by_unchanged!(nil, _orig, _updates), do: :ok
+
+  defp assert_partition_by_unchanged!(schema, orig_data_object, updates) do
+    partition_field = Schema.get_partition_by_field(schema)
+
+    if partition_field do
+      orig_value = orig_data_object[partition_field]
+      updates_set = updates[:set] || []
+
+      case Keyword.fetch(updates_set, partition_field) do
+        {:ok, new_value} when new_value != orig_value ->
+          raise Unsupported, """
+          Cannot change the partition_by field #{inspect(partition_field)} on a schema with partition support.
+
+          The field #{inspect(partition_field)} determines the keyspace partition for this record.
+          Changing it would require moving the record to a different partition, which is not supported.
+
+          To move a record to a different partition, delete it and re-insert it with the new partition value.
+          """
+
+        _ ->
+          :ok
+      end
+    end
   end
 
   def clear_all(tenant, tx, %{opts: _adapter_opts}, source) do

@@ -12,6 +12,10 @@ defmodule EctoFoundationDB.Layer.Query do
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Schema
 
+  # Sentinel for "no partition info in param". Distinct from nil so a nil partition
+  # value (while inadvisable) does not interfere with this logic.
+  @no_partition :__no_partition__
+
   defstruct [:idx, :range, :backward?]
 
   @doc """
@@ -275,7 +279,10 @@ defmodule EctoFoundationDB.Layer.Query do
          },
          _options
        ) do
-    kv_codec = Pack.primary_codec(tenant, plan.source, param)
+    partition_field = get_plan_partition_by_field(plan)
+    assert_compound_param!(param, partition_field, plan)
+    {partition_value, id} = split_partition_param(param, partition_field)
+    kv_codec = build_primary_codec(tenant, plan.source, partition_value, id)
     layer_data = %{layer_data | range: PrimaryKVCodec.range(kv_codec)}
     %{plan | layer_data: layer_data}
   end
@@ -293,20 +300,57 @@ defmodule EctoFoundationDB.Layer.Query do
       inclusive_right?: inclusive_right?
     } = between
 
+    partition_field = get_plan_partition_by_field(plan)
+
+    assert_compound_param!(param_left, partition_field, plan)
+    assert_compound_param!(param_right, partition_field, plan)
+
+    if partition_field && (is_nil(param_left) || is_nil(param_right)) do
+      pk_field = Fields.get_pk_field!(plan.schema)
+
+      raise Unsupported, """
+      Single-sided range queries are not supported on partitioned Versionstamp fields.
+
+      An open-ended >= or <= on a partitioned field is ambiguous: it is unclear
+      whether the intent is to stay within one partition or to span partitions.
+
+      To scan within a single partition, use both bounds with the same partition value:
+
+          from(s in #{inspect(plan.schema)},
+            where: s.#{pk_field} >= ^{partition_value, Versionstamp.min()} and
+                   s.#{pk_field} <= ^{partition_value, Versionstamp.max()})
+
+      To scan across partitions, either use a full-table scan:
+
+          Repo.all(#{inspect(plan.schema)}, prefix: tenant)
+
+      Or define the bounding partitions:
+
+          from(s in #{inspect(plan.schema)},
+            where: s.#{pk_field} >= ^{partition_value_a, Versionstamp.min()} and
+                   s.#{pk_field} <= ^{partition_value_b, Versionstamp.max()})
+      """
+    end
+
+    {left_partition, actual_left} = split_partition_param(param_left, partition_field)
+    {right_partition, actual_right} = split_partition_param(param_right, partition_field)
+
     {left_range_start, left_range_end} =
-      if is_nil(param_left) do
-        Pack.primary_range(tenant, plan.source)
+      if is_nil(actual_left) do
+        build_primary_range(tenant, plan.source, left_partition)
       else
-        codec_left = Pack.primary_codec(tenant, plan.source, param_left)
-        PrimaryKVCodec.range(codec_left)
+        PrimaryKVCodec.range(
+          build_primary_codec(tenant, plan.source, left_partition, actual_left)
+        )
       end
 
     {right_range_start, right_range_end} =
-      if is_nil(param_right) do
-        Pack.primary_range(tenant, plan.source)
+      if is_nil(actual_right) do
+        build_primary_range(tenant, plan.source, right_partition)
       else
-        codec_right = Pack.primary_codec(tenant, plan.source, param_right)
-        PrimaryKVCodec.range(codec_right)
+        PrimaryKVCodec.range(
+          build_primary_codec(tenant, plan.source, right_partition, actual_right)
+        )
       end
 
     start_key = if inclusive_left?, do: left_range_start, else: left_range_end
@@ -319,6 +363,63 @@ defmodule EctoFoundationDB.Layer.Query do
 
   defp make_datakey_range(_plan, _options) do
     raise Unsupported, "Between query must have binary parameters"
+  end
+
+  # Returns the partition field name from the plan's schema, or nil if not partitioned.
+  defp get_plan_partition_by_field(%QueryPlan{schema: nil}), do: nil
+
+  defp get_plan_partition_by_field(%QueryPlan{schema: schema}) do
+    Schema.get_partition_by_field(schema)
+  end
+
+  # Raises if a partitioned schema receives a param that is not a compound
+  # {partition_value, versionstamp} tuple (or nil, which is handled separately).
+  defp assert_compound_param!(nil, _partition_field, _plan), do: :ok
+  defp assert_compound_param!(_param, nil, _plan), do: :ok
+
+  defp assert_compound_param!({_, {:versionstamp, _, _, _}}, _partition_field, _plan), do: :ok
+
+  defp assert_compound_param!(param, partition_field, plan) do
+    pk_field = Fields.get_pk_field!(plan.schema)
+
+    raise Unsupported, """
+    Queries on partitioned Versionstamp schemas require a compound \
+    {partition_value, versionstamp} parameter for field #{inspect(pk_field)}.
+
+    Received: #{inspect(param)}
+
+    The partition field is #{inspect(partition_field)}. Without the partition value, \
+    the record cannot be located in its keyspace. Use:
+
+        ^{partition_value, id}
+    """
+  end
+
+  # Splits a query param into {partition_value_or_nil, id_or_nil}.
+  # When partition is configured and the param is a 2-tuple, the first element is the
+  # partition value and the second is the primary key id.
+  defp split_partition_param(nil, _partition_field), do: {@no_partition, nil}
+
+  defp split_partition_param({partition_value, id}, partition_field)
+       when not is_nil(partition_field),
+       do: {partition_value, id}
+
+  defp split_partition_param(id, _partition_field), do: {@no_partition, id}
+
+  defp build_primary_codec(tenant, source, @no_partition, id) do
+    Pack.primary_codec(tenant, source, id)
+  end
+
+  defp build_primary_codec(tenant, source, partition_value, id) do
+    Pack.primary_codec(tenant, source, partition_value, id)
+  end
+
+  defp build_primary_range(tenant, source, @no_partition) do
+    Pack.primary_range(tenant, source)
+  end
+
+  defp build_primary_range(tenant, source, partition_value) do
+    Pack.primary_range(tenant, source, partition_value)
   end
 
   defp backward?(plan = %{layer_data: layer_data = %__MODULE__{idx: idx}}, ordering, _options)
