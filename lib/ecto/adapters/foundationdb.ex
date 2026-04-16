@@ -631,6 +631,80 @@ defmodule Ecto.Adapters.FoundationDB do
    - Records inserted in different transactions **will not** have a predictable versionstamp distance from each other. That distance
      is very unlikely to ever be 1.
 
+  ### Partition-by
+
+  Versionstamp primary keys are strictly ordered across the entire (Tenant, Schema). When you query a range of records
+  for a particular user or entity (e.g. all sessions for `"alice"`), FoundationDB must scan from a starting
+  key through all records until the desired end, potentially reading records along the way that would have to be
+  filtered out.
+
+  The `partition_by:` option solves this by prefixing the primary key with the value of a chosen field.
+  Records with the same field value are co-located in the keyspace, so a range query scoped to one value
+  is a single contiguous FDB GetRange with no extraneous data.
+
+  To configure, pass `partition_by:` as a type option on the primary key:
+
+  ```elixir
+  @primary_key {:id, EctoFoundationDB.Versionstamp, partition_by: :user_id, autogenerate: false}
+
+  schema "sessions" do
+    field :user_id, :string
+    field :data, :string
+  end
+  ```
+
+  #### Partition-scoped queries
+
+  Pass a `{partition_value, id}` tuple as the primary key parameter to scope a query to one partition:
+
+  ```elixir
+  # All of alice's sessions from a checkpoint onwards
+  Repo.all(
+    from(s in Session, where: s.id >= ^{"alice", checkpoint} and s.id < ^{"alice", Versionstamp.max()}),
+    prefix: tenant
+  )
+
+  # Alice's sessions between two checkpoints
+  Repo.all(
+    from(s in Session, where: s.id >= ^{"alice", first} and s.id <= ^{"alice", last}),
+    prefix: tenant
+  )
+
+  # Exact lookup by compound key
+  Repo.all(
+    from(s in Session, where: s.id == ^{"alice", alices_session_id}),
+    prefix: tenant
+  )
+  ```
+
+  A query with no partition constraint (e.g. `Repo.all(Session, prefix: tenant)`) performs a full scan
+  across all partitions and returns all records.
+
+  #### Mutations on partitioned schemas
+
+  `Repo.delete` and `Repo.update` are not supported for schemas with `partition_by:`, because the Ecto
+  adapter protocol does not provide the partition field value for those callbacks. Use `delete_all` and
+  `update_all` with a compound key constraint instead:
+
+  ```elixir
+  # Delete one record
+  Repo.delete_all(
+    from(s in Session, where: s.id == ^{session.user_id, session.id}),
+    prefix: tenant
+  )
+
+  # Update a non-partition field
+  Repo.update_all(
+    from(s in Session, where: s.id == ^{session.user_id, session.id}),
+    [set: [data: "new value"]],
+    prefix: tenant
+  )
+  ```
+
+  The `partition_by:` field value cannot be changed on an existing record. Attempting to do so via
+  `update_all` raises `EctoFoundationDB.Exception.Unsupported`. To move a record to a different
+  partition, delete it and re-insert it with the new value.
+
   ## Watches
 
   [FoundationDB Watches](https://apple.github.io/foundationdb/developer-guide.html#watches) are

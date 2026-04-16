@@ -7,6 +7,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.Tx
+  alias EctoFoundationDB.Schema
 
   defstruct [:tenant, :schema, :source, :metadata, :write_primary, :options]
 
@@ -29,10 +30,20 @@ defmodule EctoFoundationDB.Layer.TxInsert do
       ) do
     %__MODULE__{
       tenant: tenant,
-      source: source
+      source: source,
+      schema: schema
     } = acc
 
-    kv_codec = Pack.primary_codec(tenant, source, pk)
+    partition_field = Schema.get_partition_by_field(schema)
+
+    kv_codec =
+      if partition_field do
+        partition_value = Keyword.get(data_object, partition_field)
+        Pack.primary_codec(tenant, source, partition_value, pk)
+      else
+        Pack.primary_codec(tenant, source, pk)
+      end
+
     read_before_write = if kv_codec.vs?, do: false, else: read_before_write
     data_object = [{pk_field, pk} | Keyword.delete(data_object, pk_field)]
     kv = %DecodedKV{codec: kv_codec, data_object: data_object, multikey?: false, range: nil}

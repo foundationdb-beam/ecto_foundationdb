@@ -97,6 +97,28 @@ defmodule EctoFoundationDB.Layer.Pack do
   end
 
   @doc """
+  This function computes a key for use in FDB for a partitioned primary key.
+
+  For partitioned schemas, the key encodes both the partition value and the primary key id,
+  giving the key structure `{adapter_prefix, source, "d", partition_value, id}`.
+
+  ## Examples
+
+    iex> alias EctoFoundationDB.Layer.PrimaryKVCodec
+    iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
+    iex> %{packed: packed} = EctoFoundationDB.Layer.Pack.primary_codec(tenant, "my-source", "alice", "my-id") |> PrimaryKVCodec.with_packed_key()
+    iex> EctoFoundationDB.Tenant.unpack(tenant, packed)
+    {"\\xFD", "my-source", "d", "alice", "my-id"}
+  """
+  def primary_codec(tenant, source, partition_value, id) do
+    namespaced_tuple(source, @data_namespace, [
+      encode_pk_for_key(partition_value),
+      encode_pk_for_key(id)
+    ])
+    |> then(&Tenant.primary_codec(tenant, &1, Versionstamp.incomplete?(id)))
+  end
+
+  @doc """
   ## Examples
 
     iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
@@ -105,6 +127,19 @@ defmodule EctoFoundationDB.Layer.Pack do
   """
   def primary_range(tenant, source) do
     namespaced_range(tenant, source, @data_namespace, [])
+  end
+
+  @doc """
+  Returns the key range for all primary data within a specific partition value.
+
+  ## Examples
+
+    iex> tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
+    iex> EctoFoundationDB.Layer.Pack.primary_range(tenant, "my-source", "alice")
+    {"\\x01\\xFD\\0\\x01my-source\\0\\x01d\\0\\x01alice\\0\\0", "\\x01\\xFD\\0\\x01my-source\\0\\x01d\\0\\x01alice\\0\\xFF"}
+  """
+  def primary_range(tenant, source, partition_value) do
+    namespaced_range(tenant, source, @data_namespace, [encode_pk_for_key(partition_value)])
   end
 
   @doc """

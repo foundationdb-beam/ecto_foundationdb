@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.7.5 (TBD)
+
+### Enhancements
+
+* Versionstamp primary keys now support an optional `partition_by:` type option. When set, records with the same
+  value for the designated field are co-located in the FDB keyspace, enabling efficient single-partition
+  range scans via `{partition_value, id}` query parameters. `Repo.delete` and `Repo.update` raise
+  `Unsupported` for partitioned schemas; use `delete_all` / `update_all` with a compound key constraint
+  instead. Changing the `partition_by:` field on an existing record is also unsupported.
+
+  ```elixir
+  @primary_key {:id, EctoFoundationDB.Versionstamp, partition_by: :user_id, autogenerate: false}
+  ```
+
+* `EctoFoundationDB.Versionstamp` is now an `Ecto.ParameterizedType`. Existing schemas using bare
+  `Versionstamp` as the type continue to work unchanged. This change is backwards compatible with
+  existing data.
+
 ## v0.7.4 (2026-04-13)
 
 ### Bug fixes
