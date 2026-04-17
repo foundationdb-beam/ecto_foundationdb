@@ -6,6 +6,8 @@ defmodule Ecto.Integration.MaxValueSizeTest do
   alias Ecto.Integration.TestRepo
 
   alias EctoFoundationDB.Future
+  alias EctoFoundationDB.Schemas.QueueItem
+  alias EctoFoundationDB.Schemas.Session
   alias EctoFoundationDB.Schemas.User
   alias EctoFoundationDB.Test.Util
 
@@ -82,6 +84,44 @@ defmodule Ecto.Integration.MaxValueSizeTest do
 
       assert [%{id: "bob"}, %{id: "alice"}] =
                TestRepo.all(from(u in User, order_by: [desc: u.id]), prefix: tenant)
+    end
+  end
+
+  describe "versionstamp with large value" do
+    test "split works with plain versionstamp primary key", %{tenant: tenant} do
+      data = Util.get_random_bytes(100_000)
+
+      future =
+        TestRepo.transactional(tenant, fn ->
+          TestRepo.async_insert_all!(QueueItem, [%QueueItem{data: data}],
+            max_single_value_size: 10_000
+          )
+        end)
+
+      [item] = TestRepo.await(future)
+
+      assert %QueueItem{data: ^data} = TestRepo.get(QueueItem, item.id, prefix: tenant)
+    end
+
+    test "split works with partitioned versionstamp primary key", %{tenant: tenant} do
+      str = String.duplicate("x", 100_000)
+
+      future =
+        TestRepo.transactional(tenant, fn ->
+          TestRepo.async_insert_all!(Session, [%Session{user_id: "alice", data: str}],
+            max_single_value_size: 10_000
+          )
+        end)
+
+      [item] = TestRepo.await(future)
+
+      results =
+        TestRepo.all(
+          from(s in Session, where: s.id == ^{"alice", item.id}),
+          prefix: tenant
+        )
+
+      assert [%Session{data: ^str}] = results
     end
   end
 end
