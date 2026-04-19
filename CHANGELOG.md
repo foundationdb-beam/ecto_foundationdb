@@ -18,6 +18,13 @@
   `Versionstamp` as the type continue to work unchanged. This change is backwards compatible with
   existing data.
 
+### Bug fixes
+
+* Fixed `all_range/4` returning an empty list when passed a schemaless `from("source")` query with no `select:` clause.
+  The adapter now injects the discovered field names as the select expression, consistent with the behaviour when passing
+  a plain source string.
+* Fixed schemaless queries on partitioned versionstamp primary keys
+
 ## v0.7.4 (2026-04-13)
 
 ### Bug fixes

@@ -98,10 +98,16 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAsync do
       :all_from_source ->
         {select_fields, data_result} = result
 
-        queryable =
-          if is_struct(queryable), do: queryable, else: from(queryable, select: ^select_fields)
+        if select_fields == [] do
+          []
+        else
+          queryable =
+            if is_struct(queryable, Ecto.Query) and not is_nil(queryable.select),
+              do: queryable,
+              else: from(q in queryable, select: ^select_fields)
 
-        repo.all(queryable, noop: data_result)
+          repo.all(queryable, noop: data_result)
+        end
     end
   end
 
