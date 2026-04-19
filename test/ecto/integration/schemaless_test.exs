@@ -7,6 +7,7 @@ defmodule Ecto.Integration.SchemalessTest do
   alias EctoFoundationDB.Schemas.Session
   alias EctoFoundationDB.Schemas.User
   alias EctoFoundationDB.Versionstamp
+
   alias Ecto.Integration.TestRepo
 
   @moduletag :integration
@@ -91,7 +92,8 @@ defmodule Ecto.Integration.SchemalessTest do
       TestRepo.insert(%User{id: "0002", name: "Bob"}, prefix: tenant)
       TestRepo.insert(%User{id: "0003", name: "Charlie"}, prefix: tenant)
 
-      results = TestRepo.all_range("users", "0001", "0002", inclusive_right?: true, prefix: tenant)
+      results =
+        TestRepo.all_range("users", "0001", "0002", inclusive_right?: true, prefix: tenant)
 
       assert length(results) == 2
       assert Enum.all?(results, &is_map/1)
@@ -364,8 +366,7 @@ defmodule Ecto.Integration.SchemalessTest do
 
       bob_results =
         from(s in "sessions",
-          where:
-            s.id >= ^{"bob", Versionstamp.min()} and s.id <= ^{"bob", Versionstamp.max()},
+          where: s.id >= ^{"bob", Versionstamp.min()} and s.id <= ^{"bob", Versionstamp.max()},
           select: map(s, [:user_id])
         )
         |> TestRepo.all(prefix: tenant)

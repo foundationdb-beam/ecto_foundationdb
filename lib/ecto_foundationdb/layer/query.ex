@@ -332,8 +332,11 @@ defmodule EctoFoundationDB.Layer.Query do
       """
     end
 
-    {left_partition, actual_left} = split_partition_param(plan.schema, param_left, partition_field)
-    {right_partition, actual_right} = split_partition_param(plan.schema, param_right, partition_field)
+    {left_partition, actual_left} =
+      split_partition_param(plan.schema, param_left, partition_field)
+
+    {right_partition, actual_right} =
+      split_partition_param(plan.schema, param_right, partition_field)
 
     {left_range_start, left_range_end} =
       if is_nil(actual_left) do

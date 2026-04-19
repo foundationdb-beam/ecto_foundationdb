@@ -96,19 +96,21 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAsync do
         repo.one(queryable, noop: result)
 
       :all_from_source ->
-        {select_fields, data_result} = result
-
-        if select_fields == [] do
-          []
-        else
-          queryable =
-            if is_struct(queryable, Ecto.Query) and not is_nil(queryable.select),
-              do: queryable,
-              else: from(q in queryable, select: ^select_fields)
-
-          repo.all(queryable, noop: data_result)
-        end
+        invoke_all_from_source_return(repo, queryable, result)
     end
+  end
+
+  defp invoke_all_from_source_return(_repo, _queryable, {[], _}) do
+    []
+  end
+
+  defp invoke_all_from_source_return(repo, queryable, {select_fields, data_result}) do
+    queryable =
+      if is_struct(queryable, Ecto.Query) and not is_nil(queryable.select),
+        do: queryable,
+        else: from(q in queryable, select: ^select_fields)
+
+    repo.all(queryable, noop: data_result)
   end
 
   defp resolve_versionstamp(tenant, x, vs, pk_field) do
