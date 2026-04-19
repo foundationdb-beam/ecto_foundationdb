@@ -281,7 +281,7 @@ defmodule EctoFoundationDB.Layer.Query do
        ) do
     partition_field = get_plan_partition_by_field(plan)
     assert_compound_param!(param, partition_field, plan)
-    {partition_value, id} = split_partition_param(param, partition_field)
+    {partition_value, id} = split_partition_param(plan.schema, param, partition_field)
     kv_codec = build_primary_codec(tenant, plan.source, partition_value, id)
     layer_data = %{layer_data | range: PrimaryKVCodec.range(kv_codec)}
     %{plan | layer_data: layer_data}
@@ -332,8 +332,11 @@ defmodule EctoFoundationDB.Layer.Query do
       """
     end
 
-    {left_partition, actual_left} = split_partition_param(param_left, partition_field)
-    {right_partition, actual_right} = split_partition_param(param_right, partition_field)
+    {left_partition, actual_left} =
+      split_partition_param(plan.schema, param_left, partition_field)
+
+    {right_partition, actual_right} =
+      split_partition_param(plan.schema, param_right, partition_field)
 
     {left_range_start, left_range_end} =
       if is_nil(actual_left) do
@@ -398,13 +401,17 @@ defmodule EctoFoundationDB.Layer.Query do
   # Splits a query param into {partition_value_or_nil, id_or_nil}.
   # When partition is configured and the param is a 2-tuple, the first element is the
   # partition value and the second is the primary key id.
-  defp split_partition_param(nil, _partition_field), do: {@no_partition, nil}
+  defp split_partition_param(_schema, nil, _partition_field), do: {@no_partition, nil}
 
-  defp split_partition_param({partition_value, id}, partition_field)
+  defp split_partition_param(_schema, {partition_value, id}, partition_field)
        when not is_nil(partition_field),
        do: {partition_value, id}
 
-  defp split_partition_param(id, _partition_field), do: {@no_partition, id}
+  # Schemaless (nil partition_field): auto-detect compound partition param by shape
+  defp split_partition_param(nil, {partition_value, id}, nil) when is_binary(partition_value),
+    do: {partition_value, id}
+
+  defp split_partition_param(_schema, id, _partition_field), do: {@no_partition, id}
 
   defp build_primary_codec(tenant, source, @no_partition, id) do
     Pack.primary_codec(tenant, source, id)

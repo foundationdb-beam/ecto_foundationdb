@@ -265,6 +265,7 @@ defmodule EctoFoundationDB.QueryPlan do
     []
   end
 
+  defp pk?(nil, :id), do: true
   defp pk?(nil, _param), do: nil
 
   defp pk?(schema, param) do
