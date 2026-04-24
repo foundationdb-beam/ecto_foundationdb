@@ -81,7 +81,7 @@ defmodule EctoFoundationDB.Layer.PrimaryKVCodec do
 
   def binary_chunk_by(bin, size, acc) do
     case bin do
-      <<chunk::binary-size(size), rest::binary>> ->
+      <<chunk::binary-size(^size), rest::binary>> ->
         binary_chunk_by(rest, size, [chunk | acc])
 
       chunk ->
