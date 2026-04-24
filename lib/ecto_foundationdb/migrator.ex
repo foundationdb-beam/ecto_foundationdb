@@ -3,8 +3,6 @@ defmodule EctoFoundationDB.Migrator do
   Implement this behaviour to define migrations for `Ecto.Adapters.FoundationDB`
   """
 
-  require Logger
-
   @callback migrations() :: [{non_neg_integer(), module()}]
 
   alias Ecto.Adapters.FoundationDB
