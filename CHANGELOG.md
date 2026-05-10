@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.7.5 (TBD)
+## v0.7.5 (2026-05-10)
 
 ### Enhancements
 
@@ -17,6 +17,8 @@
 * `EctoFoundationDB.Versionstamp` is now an `Ecto.ParameterizedType`. Existing schemas using bare
   `Versionstamp` as the type continue to work unchanged. This change is backwards compatible with
   existing data.
+
+* Added cache for open tenants via `:erlfdb_directory_cache` to speed up calls to `Tenant.open`
 
 ### Bug fixes
 

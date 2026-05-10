@@ -12,6 +12,7 @@ defmodule EctoFoundationDB.Options do
           | {:max_single_value_size, integer()}
           | {:max_value_size, integer()}
           | {:log, boolean()}
+          | {:reset_tenant_cache, boolean()}
 
   @fdb_max_single_value_size_bytes 100_000
 
@@ -56,6 +57,9 @@ defmodule EctoFoundationDB.Options do
 
   def get(options, :log),
     do: Keyword.get(options, :log, true)
+
+  def get(options, :reset_tenant_cache),
+    do: Keyword.get(options, :reset_tenant_cache, false)
 
   def get(options, key),
     do:
