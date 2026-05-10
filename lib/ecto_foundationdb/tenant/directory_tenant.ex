@@ -12,6 +12,7 @@ defmodule EctoFoundationDB.Tenant.DirectoryTenant do
 
   alias EctoFoundationDB.Options
   alias EctoFoundationDB.Tenant.Backend
+  alias EctoFoundationDB.TenantCache
 
   @behaviour Backend
 
@@ -60,11 +61,14 @@ defmodule EctoFoundationDB.Tenant.DirectoryTenant do
 
   @impl true
   def delete(db, "", options) do
-    tenant_dir_name = "#{Options.get(options, :storage_id)}"
+    storage_id = Options.get(options, :storage_id)
+    tenant_dir_name = "#{storage_id}"
     :persistent_term.erase({__MODULE__, tenant_dir_name})
+    cache = TenantCache.cache_name(storage_id)
 
     try do
-      :erlfdb_directory.remove(db, root_node(), tenant_dir_name)
+      root = root_node()
+      :erlfdb_directory_cache.remove(cache, db, root, tenant_dir_name)
     rescue
       e in ErlangError ->
         case e do
@@ -77,7 +81,10 @@ defmodule EctoFoundationDB.Tenant.DirectoryTenant do
   end
 
   def delete(db, tenant_name, options) do
-    :erlfdb_directory.remove(db, tenant_node(db, options), tenant_name)
+    storage_id = Options.get(options, :storage_id)
+    parent = tenant_node(db, options)
+    cache = TenantCache.cache_name(storage_id)
+    :erlfdb_directory_cache.remove(cache, db, parent, tenant_name)
   rescue
     e in ErlangError ->
       case e do
@@ -90,7 +97,8 @@ defmodule EctoFoundationDB.Tenant.DirectoryTenant do
 
   @impl true
   def get(db, "", options) do
-    tenant_dir_name = "#{Options.get(options, :storage_id)}"
+    storage_id = Options.get(options, :storage_id)
+    tenant_dir_name = "#{storage_id}"
 
     if :erlfdb_directory.exists(db, root_node(), tenant_dir_name) do
       {:ok, tenant_dir_name}
@@ -110,8 +118,19 @@ defmodule EctoFoundationDB.Tenant.DirectoryTenant do
   @impl true
   def open(db, "", options), do: tenant_node(db, options)
 
-  def open(db, tenant_name, options),
-    do: :erlfdb_directory.open(db, tenant_node(db, options), tenant_name)
+  def open(db, tenant_name, options) do
+    storage_id = Options.get(options, :storage_id)
+    reset_tenant_cache = Options.get(options, :reset_tenant_cache)
+    cache = TenantCache.cache_name(storage_id)
+
+    tenant_node = tenant_node(db, options)
+
+    if reset_tenant_cache do
+      :erlfdb_directory_cache.invalidate(cache, tenant_node, tenant_name)
+    end
+
+    :erlfdb_directory_cache.open(cache, db, tenant_node, tenant_name)
+  end
 
   @impl true
   def all_data_ranges(meta) do
@@ -154,17 +173,10 @@ defmodule EctoFoundationDB.Tenant.DirectoryTenant do
   end
 
   defp tenant_node(db, options) do
-    tenant_dir_name = "#{Options.get(options, :storage_id)}"
-
-    case :persistent_term.get({__MODULE__, tenant_dir_name}, nil) do
-      nil ->
-        tenant_dir = :erlfdb_directory.create_or_open(db, root_node(), tenant_dir_name)
-        :persistent_term.put({__MODULE__, tenant_dir_name}, tenant_dir)
-        tenant_dir
-
-      tenant_dir ->
-        tenant_dir
-    end
+    storage_id = Options.get(options, :storage_id)
+    tenant_dir_name = "#{storage_id}"
+    cache = TenantCache.cache_name(storage_id)
+    :erlfdb_directory_cache.create_or_open(cache, db, root_node(), tenant_dir_name)
   end
 
   defp root_node() do

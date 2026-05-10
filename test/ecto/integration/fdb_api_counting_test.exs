@@ -55,6 +55,9 @@ defmodule Ecto.Integration.FdbApiCountingTest do
         :erlfdb_directory ->
           true
 
+        :erlfdb_directory_cache ->
+          true
+
         :erlfdb_hca ->
           true
 
@@ -120,7 +123,7 @@ defmodule Ecto.Integration.FdbApiCountingTest do
     assert [
              # -- db_open!: create the tenant directory, then open it --
              {EctoFoundationDB.Tenant.DirectoryTenant, {:erlfdb_directory, :create}},
-             {EctoFoundationDB.Tenant.Backend, {:erlfdb_directory, :open}},
+             {:erlfdb_directory_cache, {:erlfdb_directory, :open}},
 
              # -- MigrationsPJ.transactional: read max SchemaMigration version --
              # This runs outside the ProgressiveJob via SchemaMigration.get_max_versions.
@@ -190,8 +193,23 @@ defmodule Ecto.Integration.FdbApiCountingTest do
       end)
 
     assert [
-             # open the directory
-             {EctoFoundationDB.Tenant.Backend, {:erlfdb_directory, :open}},
+             # reads schema migration version
+             {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},
+             {EctoFoundationDB.Migration.SchemaMigration, {FDB.Stream, :from_iterator}},
+
+             # decode with PrimaryKVCodec.Iterator
+             {EctoFoundationDB.Layer.Query, {:erlfdb_iterator, :run}}
+           ] = calls
+  end
+
+  test "open existing tenant without cache", context = %{tenant_id: tenant_id} do
+    {calls, _tenant} =
+      with_erlfdb_calls(context.test, fn ->
+        Tenant.open!(TestRepo, tenant_id, reset_tenant_cache: true)
+      end)
+
+    assert [
+             {:erlfdb_directory_cache, {:erlfdb_directory, :open}},
 
              # reads schema migration version
              {EctoFoundationDB.Layer.Query, {FDB.LazyRangeIterator, :start}},

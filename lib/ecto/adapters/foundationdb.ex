@@ -1006,6 +1006,9 @@ defmodule Ecto.Adapters.FoundationDB do
     * `:migration_step` - The maximum number of keys to process in a single transaction
       when running migrations. Defaults to `1000`. If you use a number that is
       too large, the FDB transactions run by the Migrator will fail.
+    * `:reset_tenant_cache` - When set to `true`, the cached directory node for each tenant
+      is invalidated before it is opened, forcing a fresh lookup from FoundationDB. Useful
+      for testing or debugging purposes. Defaults to `false`.
     * `:metadata_cache` - When set to `:enabled`, the Ecto ets cache is used to store the
       available indexes per tenant. This speeds up all database operations.
       Defaults to `:enabled`.

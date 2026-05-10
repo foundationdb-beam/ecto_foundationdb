@@ -74,7 +74,7 @@ defmodule EctoFoundationdb.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:erlfdb, "~> 1.0"},
+      {:erlfdb, "~> 1.2"},
       {:ecto, "~> 3.13"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.6", only: [:dev, :test, :docs]},
