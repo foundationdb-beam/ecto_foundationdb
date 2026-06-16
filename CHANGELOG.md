@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.6 (2026-06-15)
+
+### Bug fixes
+
+* Upgrade erlfdb to 1.2.1 to fix issue with directory cache collisions.
+
 ## v0.7.5 (2026-05-10)
 
 ### Enhancements
