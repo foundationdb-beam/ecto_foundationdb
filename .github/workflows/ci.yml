@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         os: ["ubuntu-latest"]
-        elixir: ["1.19"]
+        elixir: ["1.20"]
         otp: ["28"]
         fdb: ["7.3.69"]
     steps:
@@ -44,7 +44,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-latest"]
-        elixir: ["1.19"]
+        elixir: ["1.20"]
         otp: ["28"]
         fdb: ["7.3.69"]
     env:

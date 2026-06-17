@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.7.7 (TBD)
+
+### Dependencies
+
+ * Updated all deps to latest.
+ * Changed default Elixir version to 1.20 for dev and CI
+
 ## v0.7.6 (2026-06-15)
 
 ### Bug fixes
