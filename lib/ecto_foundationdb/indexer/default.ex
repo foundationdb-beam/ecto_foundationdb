@@ -3,6 +3,7 @@ defmodule EctoFoundationDB.Indexer.Default do
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.DecodedKV
+  alias EctoFoundationDB.Layer.Fields
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.QueryPlan
@@ -157,6 +158,19 @@ defmodule EctoFoundationDB.Indexer.Default do
 
   @impl true
   def create(tenant, tx, idx, schema, {start_key, end_key}, limit) do
+    :ok = assert_no_pk_index_fields!(idx, schema)
+
+    if Fields.composite_pk?(schema) do
+      raise Unsupported, """
+      FoundationDB Adapter does not support indexes on schemas with composite primary keys.
+
+      Schema: #{inspect(schema)}
+      Index: #{inspect(idx[:id])}
+
+      This is a temporary limitation. A future enhancement could add index support for composite keys.
+      """
+    end
+
     {count, end_proc_fdb_key} =
       tx
       |> :erlfdb.get_range(start_key, end_key, limit: limit, wait: true)
@@ -224,6 +238,7 @@ defmodule EctoFoundationDB.Indexer.Default do
         options
       ) do
     fields = idx[:fields]
+    :ok = assert_no_pk_index_fields!(idx, plan.schema)
     :ok = assert_constraints(fields, constraints)
 
     {start_key, end_key} =
@@ -243,6 +258,7 @@ defmodule EctoFoundationDB.Indexer.Default do
   end
 
   def range(idx, plan = %QueryPlan{constraints: constraints}, options) do
+    :ok = assert_no_pk_index_fields!(idx, plan.schema)
     :ok = assert_constraints(idx[:fields], constraints)
     fields = idx[:fields]
     types = if is_nil(plan.schema), do: nil, else: Schema.field_types(plan.schema, fields)
@@ -303,6 +319,10 @@ defmodule EctoFoundationDB.Indexer.Default do
   #
   #
   # Note: pk is always first. See insert and update paths
+  #
+  # idx_len is always `length(index_values)` -- the count of elements actually spliced in
+  # ahead of the trailing pk -- so that the key stays self-describing. See the keyspace
+  # notes in `Pack`.
   defp get_index_entry(tenant, idx, schema, {kv_codec, data_object = [{pk_field, pk_value} | _]}) do
     index_name = idx[:id]
     index_fields = idx[:fields]
@@ -322,7 +342,7 @@ defmodule EctoFoundationDB.Indexer.Default do
           tenant,
           source,
           index_name,
-          length(index_fields),
+          length(index_values),
           index_values,
           pk_value
         )
@@ -331,7 +351,7 @@ defmodule EctoFoundationDB.Indexer.Default do
           tenant,
           source,
           index_name,
-          length(index_fields),
+          length(index_values),
           index_values,
           pk_value
         )
@@ -342,6 +362,40 @@ defmodule EctoFoundationDB.Indexer.Default do
     else
       # unmapped index values do not support key/value splitting
       {index_key, Pack.to_fdb_value(data_object), vs?, mapped?}
+    end
+  end
+
+  # An index field that is also a primary key field would be stripped from the index
+  # values below and reappear only in the trailing primary key, which puts it after every
+  # other index field in sort order. That is never the order the index was declared for,
+  # and it makes `idx_len` disagree between the write path (which counts the stripped
+  # list) and the read path (which counts `idx[:fields]`), so the range never matches.
+  #
+  # Rather than settle that now, we refuse the shape, so no database persists index keys
+  # under a layout we may still change. It matters most for a composite primary key, where
+  # an index scoped to a leading key field is the natural thing to reach for.
+  defp assert_no_pk_index_fields!(_idx, nil), do: :ok
+
+  defp assert_no_pk_index_fields!(idx, schema) do
+    pk_fields = Fields.get_pk_fields!(schema)
+
+    case Enum.filter(idx[:fields], &(&1 in pk_fields)) do
+      [] ->
+        :ok
+
+      offending ->
+        raise Unsupported, """
+        FoundationDB Adapter does not support an index whose fields include a primary key field.
+
+          index: #{inspect(idx[:id])}
+          index fields: #{inspect(idx[:fields])}
+          primary key: #{inspect(pk_fields)}
+          offending: #{inspect(offending)}
+
+        The primary key is already appended to every index key, so naming it again is either
+        redundant or a request for an ordering the current key layout cannot answer with one
+        GetRange. Drop #{inspect(offending)} from the index.
+        """
     end
   end
 

@@ -247,7 +247,7 @@ defmodule EctoFoundationDB.Layer.Query do
          metadata,
          options
        ) do
-    pk_field = Fields.get_pk_fields!(plan.schema)
+    pk_fields = Fields.get_pk_fields!(plan.schema)
     write_primary = Schema.get_option(plan.context, :write_primary)
 
     tx
@@ -259,7 +259,7 @@ defmodule EctoFoundationDB.Layer.Query do
         plan.tenant,
         tx,
         plan.schema,
-        pk_field,
+        pk_fields,
         {&1, updates},
         metadata,
         write_primary,
@@ -381,7 +381,7 @@ defmodule EctoFoundationDB.Layer.Query do
     assert_compound_param!(param_right, partition_field, plan)
 
     if partition_field && (is_nil(param_left) || is_nil(param_right)) do
-      pk_field = Fields.get_pk_field!(plan.schema)
+      [pk_field] = Fields.get_pk_fields!(plan.schema)
 
       raise Unsupported, """
       Single-sided range queries are not supported on partitioned Versionstamp fields.
@@ -458,7 +458,7 @@ defmodule EctoFoundationDB.Layer.Query do
   defp assert_compound_param!({_, {:versionstamp, _, _, _}}, _partition_field, _plan), do: :ok
 
   defp assert_compound_param!(param, partition_field, plan) do
-    pk_field = Fields.get_pk_field!(plan.schema)
+    [pk_field] = Fields.get_pk_fields!(plan.schema)
 
     raise Unsupported, """
     Queries on partitioned Versionstamp schemas require a compound \
@@ -594,7 +594,18 @@ defmodule EctoFoundationDB.Layer.Query do
     #
     # If there's no limit, then we can support post query ordering
 
-    %{pk?: pk?} = qo
+    %{pk?: pk?, field: field} = qo
+
+    if pk? and Fields.composite_pk?(schema) do
+      raise Unsupported, """
+      FoundationDB Adapter does not support order_by on composite primary key fields.
+
+      Field: #{inspect(field)}
+      Schema: #{inspect(schema)}
+
+      This is a temporary limitation. In the future, ordering by a prefix of the composite primary key could be supported.
+      """
+    end
 
     limited? = !is_nil(limit) or Keyword.has_key?(options, :key_limit)
     pk_only_ordering? = pk? and Enum.empty?(tail_ordering)

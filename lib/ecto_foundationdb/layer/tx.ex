@@ -141,7 +141,7 @@ defmodule EctoFoundationDB.Layer.Tx do
         tenant,
         tx,
         {schema, source, context},
-        pk_field,
+        pk_fields,
         pks,
         set_data,
         metadata,
@@ -178,7 +178,7 @@ defmodule EctoFoundationDB.Layer.Tx do
               tenant,
               tx,
               schema,
-              pk_field,
+              pk_fields,
               {decoded_kv, [set: set_data]},
               metadata,
               write_primary,
@@ -202,14 +202,14 @@ defmodule EctoFoundationDB.Layer.Tx do
         tenant,
         tx,
         schema,
-        pk_field,
+        pk_fields,
         {decoded_kv, updates},
         metadata,
         write_primary,
         options
       ) do
     %DecodedKV{codec: kv_codec, data_object: orig_data_object} = decoded_kv
-    orig_data_object = Fields.to_front(orig_data_object, pk_field)
+    orig_data_object = Fields.to_front(orig_data_object, pk_fields)
 
     assert_partition_by_unchanged!(schema, orig_data_object, updates)
 
@@ -340,7 +340,7 @@ defmodule EctoFoundationDB.Layer.Tx do
     num
   end
 
-  def watch(tenant, tx, {_schema, source, context}, {_pk_field, pk}, _options) do
+  def watch(tenant, tx, {_schema, source, context}, {_pk_fields, pk}, _options) do
     if not Schema.get_option(context, :write_primary) do
       raise Unsupported, "Watches on schemas with `write_primary: false` are not supported."
     end

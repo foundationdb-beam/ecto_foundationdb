@@ -67,23 +67,6 @@ defmodule EctoFoundationDB.Layer.Fields do
   end
 
   @doc """
-  Gets the name of the primary key field from the schema. Raises for a
-  composite key; those callers use `get_pk_fields!/1`.
-  """
-  def get_pk_field!(schema) do
-    case schema.__schema__(:primary_key) do
-      [pk_field] ->
-        pk_field
-
-      pk_fields ->
-        raise ArgumentError, """
-        #{inspect(schema)} has a composite primary key #{inspect(pk_fields)}, and this \
-        operation supports a single primary key field only.
-        """
-    end
-  end
-
-  @doc """
   Gets the primary key field names, in declared order. That order decides the
   order of the elements in the FDB key tuple, and so the sort order.
   """

@@ -32,7 +32,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     entries =
       Enum.map(entries, fn data_object ->
-        pk_field = hd(Fields.get_pk_fields!(schema))
+        pk_fields = Fields.get_pk_fields!(schema)
         pk = Fields.get_pk_value!(schema, data_object)
 
         if nil_pk?(pk) do
@@ -41,7 +41,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
           """
         end
 
-        {{pk_field, pk}, data_object}
+        {{pk_fields, pk}, data_object}
       end)
 
     num_ins =
@@ -88,7 +88,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     %{source: source, schema: schema, prefix: tenant, context: context} =
       CorrectTenancy.assert_by_schema!(adapter_meta[:opts], schema_meta)
 
-    pk_field = Fields.get_pk_fields!(schema)
+    pk_fields = Fields.get_pk_fields!(schema)
     pk = Fields.get_pk_value!(schema, filters)
 
     res =
@@ -97,7 +97,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
           tenant,
           tx,
           {schema, source, context},
-          pk_field,
+          pk_fields,
           [pk],
           update_data,
           metadata,
@@ -152,9 +152,21 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   end
 
   def watch(module, repo, struct, {adapter_meta, options}) do
+    schema = struct.__struct__
+
+    if Fields.composite_pk?(schema) do
+      raise Unsupported, """
+      `Repo.watch` is not supported for schemas with composite primary keys.
+
+      Schema: #{inspect(schema)}
+
+      This is a temporary limitation. Future enhancements could add support for watching composite key records.
+      """
+    end
+
     # This is not an Ecto callback, so we have to construct our own schema_meta
     schema_meta = %{
-      schema: struct.__struct__,
+      schema: schema,
       source: Ecto.get_meta(struct, :source),
       prefix: Keyword.get(options, :prefix, Ecto.get_meta(struct, :prefix))
     }
@@ -162,11 +174,11 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     %{schema: schema, source: source, context: context, prefix: tenant} =
       CorrectTenancy.assert_by_schema!(adapter_meta[:opts], schema_meta)
 
-    pk_field = Fields.get_pk_fields!(schema)
+    pk_fields = Fields.get_pk_fields!(schema)
     pk = Fields.get_pk_value!(schema, struct)
 
     Tx.transactional(tenant, fn tx ->
-      erlfdb_future = Tx.watch(tenant, tx, {schema, source, context}, {pk_field, pk}, options)
+      erlfdb_future = Tx.watch(tenant, tx, {schema, source, context}, {pk_fields, pk}, options)
 
       # See EctoAdapterAssigns for the other half of this implementation.
       Future.new(:erlfdb_future, erlfdb_future, fn _ ->

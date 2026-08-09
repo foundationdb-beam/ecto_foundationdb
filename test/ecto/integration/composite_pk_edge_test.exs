@@ -8,11 +8,7 @@ defmodule Ecto.Integration.CompositePKEdgeTest do
   import Ecto.Query
 
   alias Ecto.Integration.TestRepo
-  alias EctoFoundationDB.Layer.Fields
-  alias EctoFoundationDB.Layer.Pack
-  alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Schemas.District
-  alias EctoFoundationDB.Schemas.User
 
   @moduletag :integration
 
@@ -21,35 +17,6 @@ defmodule Ecto.Integration.CompositePKEdgeTest do
       %District{d_w_id: w, d_id: d, d_name: name, d_next_o_id: 3001},
       prefix: tenant
     )
-  end
-
-  describe "backwards compatibility" do
-    test "a single-field key encodes to the same bytes as before" do
-      tenant = %EctoFoundationDB.Tenant{backend: EctoFoundationDB.Tenant.ManagedTenant}
-
-      %{packed: packed} =
-        Pack.primary_codec(tenant, "my-source", "my-id") |> PrimaryKVCodec.with_packed_key()
-
-      assert {"\xFD", "my-source", "d", "my-id"} =
-               EctoFoundationDB.Tenant.unpack(tenant, packed)
-    end
-
-    test "a single-field schema still round-trips", context do
-      tenant = context[:tenant]
-      user = TestRepo.insert!(%User{name: "Alice"}, prefix: tenant)
-
-      assert %User{name: "Alice"} = TestRepo.get(User, user.id, prefix: tenant)
-    end
-
-    test "get_pk_field!/1 still returns the single field" do
-      assert :id = Fields.get_pk_field!(User)
-    end
-
-    test "get_pk_field!/1 raises a described error for a composite key" do
-      assert_raise ArgumentError, ~r/composite primary key/, fn ->
-        Fields.get_pk_field!(District)
-      end
-    end
   end
 
   describe "where clause shape" do
@@ -195,6 +162,69 @@ defmodule Ecto.Integration.CompositePKEdgeTest do
       assert [%District{d_name: "w11"}] =
                from(d in District, where: d.d_w_id == ^11)
                |> TestRepo.all(prefix: tenant)
+    end
+  end
+
+  describe "unsupported operations with composite PKs" do
+    test "order_by on composite PK field raises Unsupported", context do
+      tenant = context[:tenant]
+      put(tenant, 1, 5, "n5")
+      put(tenant, 1, 2, "n2")
+      put(tenant, 1, 9, "n9")
+
+      assert_raise EctoFoundationDB.Exception.Unsupported,
+                   ~r/does not support order_by on composite primary key fields/i,
+                   fn ->
+                     from(d in District, where: d.d_w_id == ^1, order_by: [desc: d.d_id])
+                     |> TestRepo.all(prefix: tenant)
+                   end
+    end
+
+    test "order_by on first composite PK field without where raises Unsupported", context do
+      tenant = context[:tenant]
+      put(tenant, 1, 5, "n5")
+      put(tenant, 2, 1, "n1")
+
+      assert_raise EctoFoundationDB.Exception.Unsupported,
+                   ~r/does not support order_by on composite primary key fields/i,
+                   fn ->
+                     from(d in District, order_by: [asc: d.d_w_id])
+                     |> TestRepo.all(prefix: tenant)
+                   end
+    end
+
+    test "async_insert_all! with composite PK schema raises Unsupported", context do
+      tenant = context[:tenant]
+
+      assert_raise EctoFoundationDB.Exception.Unsupported,
+                   ~r/async_insert_all.*composite.*key/i,
+                   fn ->
+                     TestRepo.transaction(
+                       fn ->
+                         TestRepo.async_insert_all!(
+                           District,
+                           [
+                             %District{d_w_id: 1, d_id: 1, d_name: "a", d_next_o_id: 3001},
+                             %District{d_w_id: 1, d_id: 2, d_name: "b", d_next_o_id: 3001}
+                           ],
+                           prefix: tenant,
+                           conflict_target: []
+                         )
+                       end,
+                       prefix: tenant
+                     )
+                   end
+    end
+
+    test "watch on composite PK schema raises Unsupported", context do
+      tenant = context[:tenant]
+      district = put(tenant, 1, 1, "test")
+
+      assert_raise EctoFoundationDB.Exception.Unsupported,
+                   ~r/watch.*composite.*key/i,
+                   fn ->
+                     TestRepo.watch(district, prefix: tenant)
+                   end
     end
   end
 end

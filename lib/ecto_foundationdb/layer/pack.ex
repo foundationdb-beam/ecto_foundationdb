@@ -8,6 +8,15 @@ defmodule EctoFoundationDB.Layer.Pack do
   # Default indexes and other metadata are stored in
   #     {@adapter_prefix, source, @index_namespace, index_name, length(index_values), [...index_values...], id}
 
+  # `length(index_values)` is written into the key so that an index key is self-describing:
+  # exactly that many elements follow it before the trailing primary key. It must always be
+  # the length of the index values actually spliced in, never a count derived from the
+  # schema, or the two sides disagree and the range never matches. Holding to that lets a
+  # reader recover the primary key arity from the key alone, as
+  # `tuple_size - fixed_elements - length(index_values)`, which is what a future composite
+  # primary key will need when its components are spliced into the tail the same way
+  # `primary_codec/3` splices them into the data key.
+
   # Schema migrations are stored as primary writes and default indexes with
   #     {@migration_prefix, source, ...}
 
@@ -69,6 +78,8 @@ defmodule EctoFoundationDB.Layer.Pack do
     {"\\xFD", "my-source", "d", "my-id"}
   """
   def primary_codec(tenant, source, %CompositePK{values: ids}) do
+    assert_no_incomplete_versionstamp!(ids)
+
     # Spliced as separate elements, not nested, so that a prefix of the key
     # fields is answerable by one GetRange.
     namespaced_tuple(source, @data_namespace, Enum.map(ids, &encode_pk_for_key/1))
@@ -78,6 +89,26 @@ defmodule EctoFoundationDB.Layer.Pack do
   def primary_codec(tenant, source, id) do
     namespaced_tuple(source, @data_namespace, [encode_pk_for_key(id)])
     |> then(&Tenant.primary_codec(tenant, &1, Versionstamp.incomplete?(id)))
+  end
+
+  # The composite clause hands `vs = false` to `Tenant.primary_codec/3`, so the tuple is
+  # packed with `:erlfdb_tuple.pack/1`, which encodes an incomplete versionstamp literally
+  # as its all-0xFF placeholder rather than letting FDB substitute the real one. Every such
+  # record would land on the same key and the stamp would be lost, so we refuse to write it
+  # at all.
+  defp assert_no_incomplete_versionstamp!(ids) do
+    if Enum.any?(ids, &Versionstamp.incomplete?/1) do
+      raise Unsupported, """
+      FoundationDB Adapter does not support a Versionstamp within a composite primary key.
+
+      Key values: #{inspect(ids)}
+
+      This is a temporary limitation. When it is lifted, a composite key will be allowed \
+      at most one Versionstamp, and it must be the last key field: `pack_vs` permits only \
+      one incomplete versionstamp per key, and the layer reads it back from the final \
+      element of the key tuple.
+      """
+    end
   end
 
   @doc """

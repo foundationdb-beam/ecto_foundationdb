@@ -27,7 +27,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
   def insert_one(
         acc,
         tx,
-        {{pk_field, pk}, data_object},
+        {{pk_fields, pk}, data_object},
         read_before_write
       ) do
     %__MODULE__{
@@ -49,14 +49,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
     read_before_write = if kv_codec.vs?, do: false, else: read_before_write
 
     # The data object keeps each key field's own value; only the order changes.
-    data_object =
-      case pk do
-        %CompositePK{} ->
-          Fields.to_front(data_object, Fields.get_pk_fields!(schema))
-
-        _ ->
-          [{pk_field, pk} | Keyword.delete(data_object, pk_field)]
-      end
+    data_object = Fields.to_front(data_object, pk_fields)
 
     kv = %DecodedKV{codec: kv_codec, data_object: data_object, multikey?: false, range: nil}
 
@@ -103,7 +96,8 @@ defmodule EctoFoundationDB.Layer.TxInsert do
       options: options
     } = acc
 
-    %DecodedKV{data_object: data_object = [{pk_field, pk} | _]} = new_kv
+    %DecodedKV{data_object: data_object} = new_kv
+    pk_fields = Fields.get_pk_fields!(schema)
 
     case options[:on_conflict] do
       :nothing ->
@@ -114,7 +108,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           tenant,
           tx,
           schema,
-          pk_field,
+          pk_fields,
           {existing_kv, [set: data_object]},
           metadata,
           write_primary,
@@ -128,7 +122,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           tenant,
           tx,
           schema,
-          pk_field,
+          pk_fields,
           {existing_kv, [set: Keyword.drop(data_object, fields)]},
           metadata,
           write_primary,
@@ -142,7 +136,7 @@ defmodule EctoFoundationDB.Layer.TxInsert do
           tenant,
           tx,
           schema,
-          pk_field,
+          pk_fields,
           {existing_kv, [set: Keyword.take(data_object, fields)]},
           metadata,
           write_primary,
@@ -152,7 +146,13 @@ defmodule EctoFoundationDB.Layer.TxInsert do
         :ok
 
       val when is_nil(val) or val == :raise ->
-        raise Unsupported, "Key exists: #{inspect(schema)} #{inspect(pk)}"
+        pk_value =
+          case Fields.get_pk_value!(schema, data_object) do
+            %CompositePK{values: vals} -> vals
+            val -> val
+          end
+
+        raise Unsupported, "Key exists: #{inspect(schema)} #{inspect(pk_value)}"
 
       unsupported_on_conflict ->
         raise Unsupported, """

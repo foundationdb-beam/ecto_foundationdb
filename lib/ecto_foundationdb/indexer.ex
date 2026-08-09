@@ -11,6 +11,12 @@ defmodule EctoFoundationDB.Indexer do
   alias EctoFoundationDB.QueryPlan
   alias EctoFoundationDB.Tenant
 
+  @typedoc """
+  The schema module an index is defined on -- the module itself, not a struct built from
+  it. Implementations call `c:Ecto.Schema.__schema__/1` on it to reach field names and types.
+  """
+  @type schema() :: module()
+
   @callback create_range(Tenant.t(), Index.t()) :: {:erlfdb.key(), :erlfdb.key()}
   @callback drop_ranges(Tenant.t(), Index.t()) ::
               list(:erlfdb.key()) | list({:erlfdb.key(), :erlfdb.key()})
@@ -18,18 +24,18 @@ defmodule EctoFoundationDB.Indexer do
               Tenant.t(),
               :erlfdb.transaction(),
               Index.t(),
-              Ecto.Schema.t(),
+              schema(),
               tuple(),
               integer()
             ) ::
               {integer(), {:erlfdb.key(), :erlfdb.key()}}
-  @callback set(Tenant.t(), :erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
-  @callback clear(Tenant.t(), :erlfdb.transaction(), Index.t(), Ecto.Schema.t(), tuple()) :: :ok
+  @callback set(Tenant.t(), :erlfdb.transaction(), Index.t(), schema(), tuple()) :: :ok
+  @callback clear(Tenant.t(), :erlfdb.transaction(), Index.t(), schema(), tuple()) :: :ok
   @callback update(
               Tenant.t(),
               :erlfdb.transaction(),
               Index.t(),
-              Ecto.Schema.t(),
+              schema(),
               tuple(),
               Keyword.t()
             ) :: :ok

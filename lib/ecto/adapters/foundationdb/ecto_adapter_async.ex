@@ -14,7 +14,15 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAsync do
     if not tx?,
       do: raise(Unsupported, "`Repo.async_insert_all!` must be called within a transaction")
 
-    pk_field = Fields.get_pk_field!(schema)
+    if Fields.composite_pk?(schema) do
+      raise Unsupported, """
+      `Repo.async_insert_all!` is not supported for schemas with composite primary keys.
+
+      Schema: #{inspect(schema)}
+      """
+    end
+
+    [pk_field] = Fields.get_pk_fields!(schema)
 
     tx = Tx.get()
 

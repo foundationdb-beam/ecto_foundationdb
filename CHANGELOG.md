@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.7.7 (TBD)
+
+### Enhancements
+
+* Added partial support for composite primary keys. When a schema with `primary_key: true` on
+  more than one field is present, basic crud operations work as expected. Indexes, watches,
+  order_by, and a Versionstamp key field all throw an Unsupported exception for now. Thanks to
+  @fire for the contribution.
+
+### Bug fixes
+
+* An index whose fields include a primary key field now raises `Unsupported` instead of writing
+  index keys that no query could ever match. Such an index recorded a different `idx_len` on the
+  write path than the read path looked for, so its range never matched.
+
 ## v0.7.6 (2026-06-15)
 
 ### Bug fixes

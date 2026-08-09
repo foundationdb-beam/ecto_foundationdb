@@ -1,7 +1,9 @@
 defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
   @moduledoc false
+  alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer.SchemaMetadata
+  alias EctoFoundationDB.Layer.Fields.CompositePK
   alias EctoFoundationDB.Layer.Tx
 
   alias Ecto.Adapters.FoundationDB
@@ -98,6 +100,16 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterAssigns do
   end
 
   defp async_get(repo, label, futures, schema, id, watch_options, options, new_watch_fn) do
+    if is_struct(id, CompositePK) do
+      raise Unsupported, """
+      `Repo.watch` and `Repo.assign_ready` are not supported for schemas with composite primary keys.
+
+      Schema: #{inspect(schema)}
+
+      This is a temporary limitation. Future enhancements could add support for watching composite key records.
+      """
+    end
+
     label = label || watch_options[:label]
 
     tenant = options[:prefix]

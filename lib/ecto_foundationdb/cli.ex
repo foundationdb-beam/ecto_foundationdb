@@ -361,7 +361,7 @@ defmodule EctoFoundationDB.CLI do
       0 < MapSet.size(MapSet.intersection(MapSet.new(obj_keys), MapSet.new(deletes)))
 
     if needs_update? do
-      [{pk_field, _pk} | _] = data_object
+      pk_fields = EctoFoundationDB.Layer.Fields.get_pk_fields!(schema)
       source = Schema.get_source(schema)
       context = Schema.get_context!(source, schema)
       write_primary = Schema.get_option(context, :write_primary)
@@ -370,7 +370,7 @@ defmodule EctoFoundationDB.CLI do
         tenant,
         tx,
         schema,
-        pk_field,
+        pk_fields,
         {dkv, [clear: deletes]},
         metadata,
         write_primary,
