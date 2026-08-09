@@ -4,6 +4,7 @@ defmodule EctoFoundationDB.Layer.Query do
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.Fields
+  alias EctoFoundationDB.Layer.Fields.CompositePK
   alias EctoFoundationDB.Layer.Metadata
   alias EctoFoundationDB.Layer.Ordering
   alias EctoFoundationDB.Layer.Pack
@@ -78,7 +79,81 @@ defmodule EctoFoundationDB.Layer.Query do
     end)
   end
 
-  defp make_range(
+  # Checked first. Returns :error for a single-field key, so those plans take
+  # exactly the path they did before.
+  defp make_range(metadata, plan = %QueryPlan{constraints: constraints}, options) do
+    case composite_pk_prefix_values(plan.schema, constraints) do
+      {:ok, values} ->
+        %{schema: schema, ordering: ordering, limit: limit} = plan
+
+        {query_ordering, post_query_ordering_fn} =
+          get_query_ordering(schema, nil, [], limit, ordering, options)
+
+        plan = make_composite_datakey_range(plan, values)
+        plan = backward?(plan, query_ordering, options)
+        {plan, post_query_ordering_fn}
+
+      :not_composite ->
+        make_range_single_pk_or_index(metadata, plan, options)
+
+      {:bad_prefix, fields, pk_fields} ->
+        raise Unsupported, """
+        FoundationDB Adapter can answer a composite primary key query only when the \
+        constrained fields are a leading prefix of the key.
+
+          constrained on: #{inspect(fields)}
+          primary key: #{inspect(pk_fields)}
+
+        Primary data is stored in key order, so only a leading prefix is one \
+        contiguous range. Constrain the leading field(s) as well, or add an index \
+        covering #{inspect(fields)}.
+        """
+    end
+  end
+
+  # The constrained fields must be a leading prefix of the declared key order,
+  # which is one contiguous range. Returns the values in key order.
+  defp composite_pk_prefix_values(nil, _constraints), do: :not_composite
+
+  defp composite_pk_prefix_values(schema, constraints) do
+    pk_fields = Fields.get_pk_fields!(schema)
+    equals = for %QueryPlan.Equal{field: f, param: p} <- constraints, do: {f, p}
+    fields = Keyword.keys(equals)
+
+    cond do
+      length(pk_fields) < 2 ->
+        :not_composite
+
+      # Constraints touching no key field are left to the index path.
+      equals == [] or length(equals) != length(constraints) or
+          not Enum.all?(fields, &(&1 in pk_fields)) ->
+        :not_composite
+
+      Enum.sort(fields) == Enum.sort(Enum.take(pk_fields, length(equals))) ->
+        {:ok, Enum.map(Enum.take(pk_fields, length(equals)), &Keyword.fetch!(equals, &1))}
+
+      true ->
+        {:bad_prefix, fields, pk_fields}
+    end
+  end
+
+  defp make_composite_datakey_range(plan, values) do
+    %QueryPlan{tenant: tenant, source: source, schema: schema, layer_data: layer_data} = plan
+
+    range =
+      if length(values) == length(Fields.get_pk_fields!(schema)) do
+        # Fully constrained: one record.
+        tenant
+        |> Pack.primary_codec(source, %CompositePK{values: values})
+        |> PrimaryKVCodec.range()
+      else
+        Pack.primary_prefix_range(tenant, source, values)
+      end
+
+    %{plan | layer_data: %{layer_data | range: range}}
+  end
+
+  defp make_range_single_pk_or_index(
          _metadata,
          plan = %QueryPlan{constraints: [%{pk?: true}]},
          options
@@ -94,7 +169,7 @@ defmodule EctoFoundationDB.Layer.Query do
     {plan, post_query_ordering_fn}
   end
 
-  defp make_range(
+  defp make_range_single_pk_or_index(
          metadata,
          plan = %QueryPlan{constraints: constraints, layer_data: layer_data = %__MODULE__{}},
          options
@@ -172,7 +247,7 @@ defmodule EctoFoundationDB.Layer.Query do
          metadata,
          options
        ) do
-    pk_field = Fields.get_pk_field!(plan.schema)
+    pk_field = Fields.get_pk_fields!(plan.schema)
     write_primary = Schema.get_option(plan.context, :write_primary)
 
     tx
@@ -451,8 +526,8 @@ defmodule EctoFoundationDB.Layer.Query do
           """
 
         {schema, ordering} ->
-          pk_field = Fields.get_pk_field!(schema)
-          idx_backward?([pk_field], ordering)
+          # Primary data is stored in key order: every key field, not just the first.
+          idx_backward?(Fields.get_pk_fields!(schema), ordering)
       end
 
     layer_data = %{layer_data | backward?: backward?}

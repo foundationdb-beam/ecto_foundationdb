@@ -6,6 +6,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
   alias EctoFoundationDB.Exception.Unsupported
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Layer.Fields
+  alias EctoFoundationDB.Layer.Fields.CompositePK
   alias EctoFoundationDB.Layer.Metadata
   alias EctoFoundationDB.Layer.Tx
 
@@ -31,10 +32,10 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
 
     entries =
       Enum.map(entries, fn data_object ->
-        pk_field = Fields.get_pk_field!(schema)
-        pk = data_object[pk_field]
+        pk_field = hd(Fields.get_pk_fields!(schema))
+        pk = Fields.get_pk_value!(schema, data_object)
 
-        if is_nil(pk) do
+        if nil_pk?(pk) do
           raise Unsupported, """
           FoundationDB Adapter does not support inserting records with nil primary keys.
           """
@@ -87,8 +88,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     %{source: source, schema: schema, prefix: tenant, context: context} =
       CorrectTenancy.assert_by_schema!(adapter_meta[:opts], schema_meta)
 
-    pk_field = Fields.get_pk_field!(schema)
-    pk = filters[pk_field]
+    pk_field = Fields.get_pk_fields!(schema)
+    pk = Fields.get_pk_value!(schema, filters)
 
     res =
       Metadata.transactional(tenant, adapter_meta, source, fn tx, metadata ->
@@ -124,8 +125,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     %{source: source, schema: schema, prefix: tenant, context: context} =
       CorrectTenancy.assert_by_schema!(adapter_meta[:opts], schema_meta)
 
-    pk_field = Fields.get_pk_field!(schema)
-    pk = filters[pk_field]
+    pk = Fields.get_pk_value!(schema, filters)
 
     res =
       Metadata.transactional(tenant, adapter_meta, source, fn tx, metadata ->
@@ -162,8 +162,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
     %{schema: schema, source: source, context: context, prefix: tenant} =
       CorrectTenancy.assert_by_schema!(adapter_meta[:opts], schema_meta)
 
-    pk_field = Fields.get_pk_field!(schema)
-    pk = Map.get(struct, pk_field)
+    pk_field = Fields.get_pk_fields!(schema)
+    pk = Fields.get_pk_value!(schema, struct)
 
     Tx.transactional(tenant, fn tx ->
       erlfdb_future = Tx.watch(tenant, tx, {schema, source, context}, {pk_field, pk}, options)
@@ -175,4 +175,8 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterSchema do
       end)
     end)
   end
+
+  # A partial composite key identifies no single record.
+  defp nil_pk?(%CompositePK{values: ids}), do: Enum.any?(ids, &is_nil/1)
+  defp nil_pk?(pk), do: is_nil(pk)
 end

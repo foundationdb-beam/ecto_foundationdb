@@ -12,6 +12,7 @@ defmodule EctoFoundationDB.Layer.Pack do
   #     {@migration_prefix, source, ...}
 
   alias EctoFoundationDB.Exception.Unsupported
+  alias EctoFoundationDB.Layer.Fields.CompositePK
   alias EctoFoundationDB.Tenant
   alias EctoFoundationDB.Versionstamp
 
@@ -67,9 +68,24 @@ defmodule EctoFoundationDB.Layer.Pack do
     iex> EctoFoundationDB.Tenant.unpack(tenant, packed)
     {"\\xFD", "my-source", "d", "my-id"}
   """
+  def primary_codec(tenant, source, %CompositePK{values: ids}) do
+    # Spliced as separate elements, not nested, so that a prefix of the key
+    # fields is answerable by one GetRange.
+    namespaced_tuple(source, @data_namespace, Enum.map(ids, &encode_pk_for_key/1))
+    |> then(&Tenant.primary_codec(tenant, &1, false))
+  end
+
   def primary_codec(tenant, source, id) do
     namespaced_tuple(source, @data_namespace, [encode_pk_for_key(id)])
     |> then(&Tenant.primary_codec(tenant, &1, Versionstamp.incomplete?(id)))
+  end
+
+  @doc """
+  The key range covering every record whose leading composite primary key
+  values match `ids`. `ids` may be a strict prefix of the key fields.
+  """
+  def primary_prefix_range(tenant, source, ids) when is_list(ids) do
+    namespaced_range(tenant, source, @data_namespace, Enum.map(ids, &encode_pk_for_key/1))
   end
 
   def primary_write_key_to_codec(tenant, key) when is_binary(key) do

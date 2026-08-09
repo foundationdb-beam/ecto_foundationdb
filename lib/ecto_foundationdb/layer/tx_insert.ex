@@ -4,6 +4,8 @@ defmodule EctoFoundationDB.Layer.TxInsert do
   alias EctoFoundationDB.Future
   alias EctoFoundationDB.Indexer
   alias EctoFoundationDB.Layer.DecodedKV
+  alias EctoFoundationDB.Layer.Fields
+  alias EctoFoundationDB.Layer.Fields.CompositePK
   alias EctoFoundationDB.Layer.Pack
   alias EctoFoundationDB.Layer.PrimaryKVCodec
   alias EctoFoundationDB.Layer.Tx
@@ -45,7 +47,17 @@ defmodule EctoFoundationDB.Layer.TxInsert do
       end
 
     read_before_write = if kv_codec.vs?, do: false, else: read_before_write
-    data_object = [{pk_field, pk} | Keyword.delete(data_object, pk_field)]
+
+    # The data object keeps each key field's own value; only the order changes.
+    data_object =
+      case pk do
+        %CompositePK{} ->
+          Fields.to_front(data_object, Fields.get_pk_fields!(schema))
+
+        _ ->
+          [{pk_field, pk} | Keyword.delete(data_object, pk_field)]
+      end
+
     kv = %DecodedKV{codec: kv_codec, data_object: data_object, multikey?: false, range: nil}
 
     if read_before_write do
