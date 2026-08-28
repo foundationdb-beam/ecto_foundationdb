@@ -63,6 +63,58 @@ defmodule Ecto.Integration.SchemalessTest do
 
       assert length(results) == 2
     end
+
+    test "order_by PK desc with limit uses backward key scan", context do
+      tenant = context[:tenant]
+
+      TestRepo.insert(%User{id: "0001", name: "Alice"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0002", name: "Bob"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0003", name: "Charlie"}, prefix: tenant)
+
+      results =
+        from(u in "users", order_by: [desc: u.id], select: map(u, [:id, :name]), limit: 2)
+        |> TestRepo.all(prefix: tenant)
+
+      assert [%{id: "0003", name: "Charlie"}, %{id: "0002", name: "Bob"}] = results
+    end
+
+    test "order_by PK asc with limit uses forward key scan", context do
+      tenant = context[:tenant]
+
+      TestRepo.insert(%User{id: "0001", name: "Alice"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0002", name: "Bob"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0003", name: "Charlie"}, prefix: tenant)
+
+      results =
+        from(u in "users", order_by: [asc: u.id], select: map(u, [:id, :name]), limit: 2)
+        |> TestRepo.all(prefix: tenant)
+
+      assert [%{id: "0001", name: "Alice"}, %{id: "0002", name: "Bob"}] = results
+    end
+
+    test "order_by PK desc without limit", context do
+      tenant = context[:tenant]
+
+      TestRepo.insert(%User{id: "0001", name: "Alice"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0002", name: "Bob"}, prefix: tenant)
+
+      results =
+        from(u in "users", order_by: [desc: u.id], select: map(u, [:id]))
+        |> TestRepo.all(prefix: tenant)
+
+      assert [%{id: "0002"}, %{id: "0001"}] = results
+    end
+
+    test "order_by non-indexed non-PK field with limit raises Unsupported", context do
+      tenant = context[:tenant]
+
+      TestRepo.insert(%User{id: "0001", name: "Alice", notes: "a"}, prefix: tenant)
+
+      assert_raise EctoFoundationDB.Exception.Unsupported, ~r/primary key only/, fn ->
+        from(u in "users", order_by: [asc: u.notes], select: map(u, [:notes]), limit: 1)
+        |> TestRepo.all(prefix: tenant)
+      end
+    end
   end
 
   describe "schemaless PK range queries (users)" do

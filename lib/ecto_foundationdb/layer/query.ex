@@ -515,20 +515,9 @@ defmodule EctoFoundationDB.Layer.Query do
   defp backward?(plan, ordering, _options) do
     %{layer_data: layer_data = %__MODULE__{}} = plan
 
-    backward? =
-      case {plan.schema, ordering} do
-        {nil, []} ->
-          false
-
-        {nil, [_ | _]} ->
-          raise Unsupported, """
-          Cannot apply key_limit on query ordering when schema is unknown
-          """
-
-        {schema, ordering} ->
-          # Primary data is stored in key order: every key field, not just the first.
-          idx_backward?(Fields.get_pk_fields!(schema), ordering)
-      end
+    # Primary data is stored in key order: every key field, not just the first.
+    # A schemaless source has the single key field [:id].
+    backward? = idx_backward?(Fields.get_pk_fields!(plan.schema), ordering)
 
     layer_data = %{layer_data | backward?: backward?}
     %{plan | layer_data: layer_data}

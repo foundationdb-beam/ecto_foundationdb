@@ -265,13 +265,11 @@ defmodule EctoFoundationDB.QueryPlan do
     []
   end
 
-  defp pk?(nil, :id), do: true
-  defp pk?(nil, _param), do: nil
-
   defp pk?(schema, param) do
     # Any declared primary key field counts. For a composite key this marks
     # each constrained key field, and the layer then decides whether the
     # constrained set forms a prefix it can answer with one GetRange.
+    # A schemaless source has the single key field [:id].
     param in Fields.get_pk_fields!(schema)
   end
 

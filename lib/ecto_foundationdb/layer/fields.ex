@@ -69,7 +69,12 @@ defmodule EctoFoundationDB.Layer.Fields do
   @doc """
   Gets the primary key field names, in declared order. That order decides the
   order of the elements in the FDB key tuple, and so the sort order.
+
+  A schemaless source (`schema` is `nil`) always has the single primary key
+  `[:id]`.
   """
+  def get_pk_fields!(nil), do: [:id]
+
   def get_pk_fields!(schema) do
     case schema.__schema__(:primary_key) do
       [] ->
