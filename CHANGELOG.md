@@ -4,6 +4,8 @@
 
 ### Enhancements
 
+* Added `Repo.all_from_source/2` (and `Repo.async_all_from_source/2`), which executes an
+  index-constrained query and returns full data objects.
 * Added partial support for composite primary keys. When a schema with `primary_key: true` on
   more than one field is present, basic crud operations work as expected. Indexes, watches,
   order_by, and a Versionstamp key field all throw an Unsupported exception for now. Thanks to

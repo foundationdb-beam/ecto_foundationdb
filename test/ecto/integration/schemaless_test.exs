@@ -237,6 +237,88 @@ defmodule Ecto.Integration.SchemalessTest do
     end
   end
 
+  describe "schemaless all_from_source (users)" do
+    test "equality on indexed field returns full objects with no select clause", context do
+      tenant = context[:tenant]
+
+      TestRepo.transactional(tenant, fn ->
+        TestRepo.insert(%User{name: "Alice"})
+        TestRepo.insert(%User{name: "Bob"})
+        TestRepo.insert(%User{name: "Bob"})
+      end)
+
+      results =
+        from(u in "users", where: u.name == ^"Bob")
+        |> TestRepo.all_from_source(prefix: tenant)
+
+      assert length(results) == 2
+      assert Enum.all?(results, &is_map/1)
+      assert Enum.all?(results, fn r -> r.name == "Bob" end)
+      assert Enum.all?(results, fn r -> Map.has_key?(r, :id) end)
+    end
+
+    test "equality returns empty list when no match", context do
+      tenant = context[:tenant]
+
+      TestRepo.transactional(tenant, fn ->
+        TestRepo.insert(%User{name: "Alice"})
+      end)
+
+      assert [] =
+               from(u in "users", where: u.name == ^"Zara")
+               |> TestRepo.all_from_source(prefix: tenant)
+    end
+
+    test "between range on indexed string field returns full objects", context do
+      tenant = context[:tenant]
+
+      TestRepo.transactional(tenant, fn ->
+        for name <- ~w/Alice Bob Charlie Dave/ do
+          TestRepo.insert(%User{name: name})
+        end
+      end)
+
+      results =
+        from(u in "users", where: u.name >= ^"Bob" and u.name <= ^"Charlie")
+        |> TestRepo.all_from_source(prefix: tenant)
+
+      names = Enum.map(results, & &1.name) |> Enum.sort()
+      assert names == ["Bob", "Charlie"]
+      assert Enum.all?(results, fn r -> Map.has_key?(r, :id) end)
+    end
+
+    test "with string source and no where clause returns all records", context do
+      tenant = context[:tenant]
+
+      TestRepo.insert(%User{id: "0001", name: "Alice"}, prefix: tenant)
+      TestRepo.insert(%User{id: "0002", name: "Bob"}, prefix: tenant)
+
+      results = TestRepo.all_from_source("users", prefix: tenant)
+
+      assert length(results) == 2
+      names = Enum.map(results, & &1.name) |> Enum.sort()
+      assert names == ["Alice", "Bob"]
+    end
+
+    test "async_all_from_source pipelines within a transaction", context do
+      tenant = context[:tenant]
+
+      TestRepo.transactional(tenant, fn ->
+        TestRepo.insert(%User{name: "Alice"})
+        TestRepo.insert(%User{name: "Bob"})
+      end)
+
+      future =
+        TestRepo.transactional(tenant, fn ->
+          TestRepo.async_all_from_source(from(u in "users", where: u.name == ^"Bob"))
+        end)
+
+      results = TestRepo.await(future)
+
+      assert [%{name: "Bob"}] = results
+    end
+  end
+
   describe "schemaless queries on non-partitioned versionstamp schema (queue)" do
     test "full scan returns all items", context do
       tenant = context[:tenant]

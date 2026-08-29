@@ -1208,6 +1208,30 @@ defmodule Ecto.Adapters.FoundationDB do
         await(future)
       end
 
+      def async_all_from_source(queryable, opts \\ []) do
+        async_query(queryable, fn ->
+          repo = get_dynamic_repo()
+
+          EctoAdapterQueryable.execute_all_from_source(
+            __MODULE__,
+            repo,
+            queryable,
+            Ecto.Repo.Supervisor.tuplet(
+              repo,
+              Keyword.merge(
+                __MODULE__.default_options(:all),
+                opts
+              )
+            )
+          )
+        end)
+      end
+
+      def all_from_source(queryable, opts \\ []) do
+        future = async_all_from_source(queryable, opts)
+        await(future)
+      end
+
       def async_get(queryable, id, opts \\ []),
         do:
           async_query(queryable, fn ->

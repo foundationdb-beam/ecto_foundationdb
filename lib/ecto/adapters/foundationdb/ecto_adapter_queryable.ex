@@ -149,6 +149,43 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     |> handle_returning(options ++ [returning: {:future, return_handler}])
   end
 
+  def execute_all_from_source(_module, _repo, queryable, {adapter_meta, options}) do
+    %{opts: repo_config, cache: cache, adapter: adapter, repo: repo} = adapter_meta
+
+    query = Ecto.Queryable.to_query(queryable)
+
+    {schema, source} = queryable_to_schema_source_tuplet(query)
+
+    %{context: context, prefix: tenant} =
+      CorrectTenancy.assert_by_schema!(repo_config, %{
+        prefix: queryable_to_tenant(query, options),
+        source: source,
+        schema: schema
+      })
+
+    {planned_query, dump_params} = plan_query_without_select(repo, cache, adapter, query, options)
+
+    %Ecto.Query{wheres: wheres, order_bys: order_bys, limit: limit} = planned_query
+
+    limit = parse_query_limit(limit)
+
+    plan =
+      QueryPlan.get(tenant, source, schema, context, wheres, [], dump_params, order_bys, limit)
+
+    create_query_all_future(tenant, adapter_meta, plan, :all_from_source, nil, options)
+    |> handle_returning(options ++ [returning: {:future, :all_from_source}])
+  end
+
+  defp plan_query_without_select(repo, cache, adapter, query, options) do
+    {query, options} = repo.prepare_query(:all, query, options)
+    query = Ecto.Query.Planner.attach_prefix(query, options)
+
+    {_query_meta, {:nocache, {:all, planned_query}}, _cast_params, dump_params} =
+      Ecto.Query.Planner.query(query, :all, cache, adapter, 0)
+
+    {planned_query, dump_params}
+  end
+
   defp handle_returning(future, options) do
     case options[:returning] do
       {:future, :all_from_source} ->
