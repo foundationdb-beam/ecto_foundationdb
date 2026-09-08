@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.7.8 (TBD)
+
+### Dependencies
+
+* `ecto ~> 3.14`
+* `decimal ~> 3.0`
+
 ## v0.7.7 (2026-08-29)
 
 ### Enhancements

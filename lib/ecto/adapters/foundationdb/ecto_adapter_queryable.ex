@@ -150,7 +150,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
   end
 
   def execute_all_from_source(_module, _repo, queryable, {adapter_meta, options}) do
-    %{opts: repo_config, cache: cache, adapter: adapter, repo: repo} = adapter_meta
+    %{opts: repo_config, adapter: adapter, repo: repo} = adapter_meta
 
     query = Ecto.Queryable.to_query(queryable)
 
@@ -163,7 +163,7 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
         schema: schema
       })
 
-    {planned_query, dump_params} = plan_query_without_select(repo, cache, adapter, query, options)
+    {planned_query, dump_params} = plan_query_without_select(repo, adapter, query, options)
 
     %Ecto.Query{wheres: wheres, order_bys: order_bys, limit: limit} = planned_query
 
@@ -176,15 +176,24 @@ defmodule Ecto.Adapters.FoundationDB.EctoAdapterQueryable do
     |> handle_returning(options ++ [returning: {:future, :all_from_source}])
   end
 
-  defp plan_query_without_select(repo, cache, adapter, query, options) do
+  defp plan_query_without_select(repo, adapter, query, options) do
     {query, options} = repo.prepare_query(:all, query, options)
-    query = Ecto.Query.Planner.attach_prefix(query, options)
+    query = attach_prefix(query, options)
 
-    {_query_meta, {:nocache, {:all, planned_query}}, _cast_params, dump_params} =
-      Ecto.Query.Planner.query(query, :all, cache, adapter, 0)
+    {planned_query, _cast_params, dump_params} =
+      Ecto.Adapter.Queryable.plan_query(:all, adapter, query)
 
     {planned_query, dump_params}
   end
+
+  defp attach_prefix(query = %Ecto.Query{prefix: nil}, options) do
+    case Keyword.fetch(options, :prefix) do
+      {:ok, prefix} -> %{query | prefix: prefix}
+      :error -> query
+    end
+  end
+
+  defp attach_prefix(query, _options), do: query
 
   defp handle_returning(future, options) do
     case options[:returning] do

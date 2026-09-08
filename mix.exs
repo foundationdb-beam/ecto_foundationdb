@@ -75,7 +75,7 @@ defmodule EctoFoundationdb.MixProject do
   defp deps do
     [
       {:erlfdb, "~> 1.2"},
-      {:ecto, "~> 3.13"},
+      {:ecto, "~> 3.14"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.6", only: [:dev, :test, :docs]},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
